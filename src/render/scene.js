@@ -9,7 +9,7 @@ import {
   WebGPURenderer,
 } from 'three/webgpu';
 
-export const VIEW_HEIGHT = 32; // metres visible vertically at zoom 1
+export const VIEW_HEIGHT = 22; // metres visible vertically at zoom 1
 
 export async function createRenderer(container) {
   const renderer = new WebGPURenderer({ antialias: true });

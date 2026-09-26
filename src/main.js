@@ -11,16 +11,18 @@ import {
   Physics,
   Render,
   RigidBody,
+  SteeringWheel,
   TerrainStreaming,
   Time,
   Transform,
   Vehicle,
   View,
   WheelOf,
+  WheelRig,
 } from './ecs/traits.js';
-import { createCarMesh, createWheelMesh } from './render/car-mesh.js';
+import { createCarMesh, createWheelRig } from './render/car-mesh.js';
 import { createRenderer } from './render/scene.js';
-import { followCamera } from './systems/camera.js';
+import { attachZoom, followCamera } from './systems/camera.js';
 import { updateHud } from './systems/hud.js';
 import { attachKeyboard, readInput } from './systems/input.js';
 import { stepPhysics, syncBodies } from './systems/physics.js';
@@ -34,7 +36,9 @@ async function main() {
   const [render] = await Promise.all([createRenderer(container), RAPIER.init(), glyph.init()]);
 
   const world = createWorld();
-  const heightAt = createHeightField();
+  // ?terrain=hills brings back the rolling hills from iteration 1.
+  const mode = new URLSearchParams(location.search).get('terrain') ?? 'flat';
+  const heightAt = createHeightField({ mode });
   const physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   physicsWorld.timestep = 1 / 120;
 
@@ -46,7 +50,7 @@ async function main() {
   // The car starts just above the ground at the origin.
   const start = { x: 0, y: heightAt(0, 0) + 1.2, z: 0 };
   const { body, controller } = createCarBody(RAPIER, physicsWorld, start);
-  const carMesh = createCarMesh();
+  const { object: carMesh, steeringWheel } = createCarMesh();
   render.scene.add(carMesh);
   const car = world.spawn(
     IsPlayer,
@@ -55,11 +59,12 @@ async function main() {
     RigidBody({ body }),
     Vehicle({ controller, body, steer: 0, speed: 0 }),
     View({ object: carMesh }),
+    SteeringWheel({ object: steeringWheel }),
   );
   WHEELS.forEach((_, index) => {
-    const wheel = createWheelMesh();
-    carMesh.add(wheel);
-    world.spawn(WheelOf(car, { index }), View({ object: wheel }));
+    const rig = createWheelRig(index);
+    carMesh.add(rig.object);
+    world.spawn(WheelOf(car, { index }), WheelRig({ rig }));
   });
 
   streamTerrain(world, { force: true });
@@ -79,13 +84,14 @@ async function main() {
 
   const hintText = hud.createText({
     font: inter,
-    text: 'W A S D  drive    Space  handbrake',
+    text: 'W A S D or arrows  drive    Space  handbrake    Scroll  zoom',
     style: { fontSize: 14, lineHeight: 1.2, color: '#8a826f' },
   });
   hintText.position.set(28, -56, 0);
   render.hudScene.add(hintText);
 
   attachKeyboard();
+  attachZoom();
 
   let last = performance.now();
   const frame = (now) => {
@@ -113,7 +119,7 @@ async function main() {
   render.renderer.setAnimationLoop(frame);
 
   // Handy for debugging from the console.
-  window.__game = { world, car, RAPIER, traits: { Vehicle } };
+  window.__game = { world, car, RAPIER, traits: { Vehicle, WheelRig, SteeringWheel } };
 }
 
 main().catch((error) => {

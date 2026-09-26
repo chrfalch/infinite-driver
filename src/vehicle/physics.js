@@ -85,8 +85,12 @@ export function applyDriverInput(state, input, dt, car = CAR) {
     else drive = -input.brake * car.reverseForce;
   }
 
-  controller.setWheelEngineForce(2, drive * 0.5);
-  controller.setWheelEngineForce(3, drive * 0.5);
+  const front = drive * car.frontDriveShare * 0.5;
+  const rear = drive * (1 - car.frontDriveShare) * 0.5;
+  controller.setWheelEngineForce(0, front);
+  controller.setWheelEngineForce(1, front);
+  controller.setWheelEngineForce(2, rear);
+  controller.setWheelEngineForce(3, rear);
 
   // Rapier applies brake as an impulse per step, so convert from force.
   const frontBrake = brake * 0.35 * dt;

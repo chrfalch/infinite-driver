@@ -2,6 +2,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { CAR } from '../src/vehicle/config.js';
 import { applyDriverInput, createCarBody } from '../src/vehicle/physics.js';
+import { generateRocks } from '../src/terrain/rocks.js';
 
 const DT = 1 / 120;
 beforeAll(async () => {
@@ -35,8 +36,8 @@ describe('car physics', () => {
     const sag = [0, 1, 2, 3].map((i) => CAR.suspensionRestLength - state.controller.wheelSuspensionLength(i));
     console.log('sag (m)', sag.map((s) => s.toFixed(3)).join(' '), 'y', state.body.translation().y.toFixed(3));
     for (const s of sag) {
-      expect(s).toBeGreaterThan(0.02);
-      expect(s).toBeLessThan(0.18);
+      expect(s).toBeGreaterThan(0.06);
+      expect(s).toBeLessThan(0.24);
     }
     expect(speed(state.body ? state : state)).toBeLessThan(0.05);
   });
@@ -52,8 +53,8 @@ describe('car physics', () => {
     });
     console.log('0-100 km/h (s)', t100?.toFixed(2), 'speed after 20 s (km/h)', (speed(state) * 3.6).toFixed(1));
     expect(t100).not.toBeNull();
-    expect(t100).toBeGreaterThan(6);
-    expect(t100).toBeLessThan(13);
+    expect(t100).toBeGreaterThan(7);
+    expect(t100).toBeLessThan(15);
   });
 
   it('brakes from 100 km/h at close to 1 g', () => {
@@ -93,5 +94,40 @@ describe('car physics', () => {
     expect(up).toBeGreaterThan(0.9);
     expect(peakLat).toBeGreaterThan(0.5);
     expect(peakLat).toBeLessThan(1.5);
+  });
+
+  it('climbs over a rock with visible suspension travel and stays upright', () => {
+    const { world, state, run } = setup();
+    // A rounded rock, 0.3 m tall, in the path of the left wheels.
+    const pts = [];
+    for (let i = 0; i < 40; i++) {
+      const a = (i / 40) * Math.PI * 2;
+      for (const [r, y] of [[0.55, 0], [0.4, 0.2], [0.15, 0.3]]) pts.push(12 + Math.cos(a) * r, y, -0.9 + Math.sin(a) * r);
+    }
+    world.createCollider(RAPIER.ColliderDesc.convexHull(new Float32Array(pts)));
+    run(2, idle);
+    const rest = state.controller.wheelSuspensionLength(0);
+    let minLen = rest;
+    let minUp = 1;
+    run(6, { ...idle, throttle: 0.25 }, () => {
+      minLen = Math.min(minLen, state.controller.wheelSuspensionLength(0));
+      const r = state.body.rotation();
+      minUp = Math.min(minUp, 1 - 2 * (r.x * r.x + r.z * r.z));
+    });
+    console.log('FL rest', rest.toFixed(3), 'min', minLen.toFixed(3), 'x', state.body.translation().x.toFixed(1), 'min up', minUp.toFixed(3));
+    expect(rest - minLen).toBeGreaterThan(0.12);
+    expect(minUp).toBeGreaterThan(0.9);
+    expect(state.body.translation().x).toBeGreaterThan(15);
+  });
+});
+
+describe('rocks', () => {
+  it('are deterministic and keep the spawn area clear', () => {
+    const flat = () => 0;
+    const a = generateRocks(flat, 0, 0);
+    const b = generateRocks(flat, 0, 0);
+    expect(a.length).toBeGreaterThan(10);
+    expect(Array.from(a[0].vertices)).toEqual(Array.from(b[0].vertices));
+    for (const r of [...a, ...generateRocks(flat, -1, -1)]) expect(Math.hypot(r.x, r.z)).toBeGreaterThan(10);
   });
 });

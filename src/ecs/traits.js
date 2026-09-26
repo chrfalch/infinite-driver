@@ -20,6 +20,9 @@ export const Vehicle = trait(() => ({ controller: null, body: null, steer: 0, sp
 export const IsPlayer = trait();
 export const CameraTarget = trait();
 export const TerrainChunk = trait(() => ({ cx: 0, cz: 0, collider: null, heights: null }));
+export const WheelRig = trait(() => ({ rig: null }));
+export const SteeringWheel = trait(() => ({ object: null }));
+export const RockField = trait(() => ({ rocks: [], colliders: [] }));
 export const HudLabel = trait(() => ({ text: null, format: null }));
 
 // A wheel belongs to a vehicle and knows its index in the Rapier controller.

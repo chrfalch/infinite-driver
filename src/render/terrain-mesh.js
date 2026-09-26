@@ -1,25 +1,26 @@
+import { createNoise2D } from 'simplex-noise';
 import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardMaterial } from 'three/webgpu';
+import { mulberry32 } from '../terrain/height.js';
 import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
 
 export const terrainMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
 
-const LOW = new Color('#c9b98f'); // dry sand in the hollows
-const MID = new Color('#8fa36a'); // soft grass
-const HIGH = new Color('#b8c49a'); // pale ridge grass
+const DIRT = new Color('#c2ab82');
+const DRY = new Color('#b4ad84');
+const GRASS = new Color('#98a36f');
 const ROCK = new Color('#8a8074');
 const tmp = new Color();
+const patchNoise = createNoise2D(mulberry32(4242));
+const fineNoise = createNoise2D(mulberry32(777));
 
 function colorFor(h, slope, x, z, out) {
-  const t = Math.min(1, Math.max(0, (h + 10) / 26));
-  if (t < 0.35) out.copy(LOW).lerp(MID, t / 0.35);
-  else out.copy(MID).lerp(HIGH, (t - 0.35) / 0.65);
+  // Soft patches of dirt, dry grass, and greener grass so motion reads on flat ground.
+  const p = patchNoise(x * 0.035, z * 0.035) * 0.7 + patchNoise(x * 0.11, z * 0.11) * 0.3;
+  if (p < 0) out.copy(DIRT).lerp(DRY, Math.min(1, (p + 0.6) / 0.6));
+  else out.copy(DRY).lerp(GRASS, Math.min(1, p / 0.5));
+  out.offsetHSL(0, 0, fineNoise(x * 0.6, z * 0.6) * 0.025 + h * 0.004);
   // Steep faces show rock.
-  const rock = Math.min(1, Math.max(0, (slope - 0.35) / 0.3));
-  out.lerp(ROCK, rock);
-  // Tiny deterministic speckle so large flats are not a flat colour.
-  const n = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
-  const speckle = (n - Math.floor(n) - 0.5) * 0.012;
-  out.offsetHSL(0, 0, speckle);
+  out.lerp(ROCK, Math.min(1, Math.max(0, (slope - 0.35) / 0.3)));
   return out;
 }
 
@@ -58,7 +59,6 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
       const b = a + 1;
       const c = a + n;
       const d = c + 1;
-      // Split along the same diagonal as Rapier's heightfield triangles.
       indices.set([a, c, b, b, c, d], k);
       k += 6;
     }

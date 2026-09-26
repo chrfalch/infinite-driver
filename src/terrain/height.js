@@ -1,7 +1,7 @@
 import { createNoise2D } from 'simplex-noise';
 
 // Small seeded PRNG so the world is the same on every load.
-function mulberry32(seed) {
+export function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -12,7 +12,9 @@ function mulberry32(seed) {
   };
 }
 
-export function createHeightField(seed = 1337) {
+export function createHeightField({ seed = 1337, mode = 'flat' } = {}) {
+  if (mode === 'flat') return () => 0;
+
   const rand = mulberry32(seed);
   const continents = createNoise2D(rand);
   const hills = createNoise2D(rand);

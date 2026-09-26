@@ -9,7 +9,7 @@ beforeAll(async () => {
 
 describe('terrain collider', () => {
   it('matches the height function at grid points', () => {
-    const heightAt = createHeightField(7);
+    const heightAt = createHeightField({ seed: 7, mode: "hills" });
     const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
     const res = 16;
     const cx = 2;
@@ -35,6 +35,6 @@ describe('terrain collider', () => {
   });
 
   it('is deterministic for a seed', () => {
-    expect(createHeightField(3)(10, 20)).toBe(createHeightField(3)(10, 20));
+    expect(createHeightField({ seed: 3, mode: "hills" })(10, 20)).toBe(createHeightField({ seed: 3, mode: "hills" })(10, 20));
   });
 });

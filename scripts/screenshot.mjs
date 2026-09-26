@@ -9,9 +9,17 @@ page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) console
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.goto(url, { waitUntil: 'load' });
 await page.waitForTimeout(6000);
+// Steps look like "KeyW:1000". "KeyW+KeyA:800" holds keys together; a trailing "!" takes the shot while held.
+let held = [];
 for (const step of drive.split(',').filter(Boolean)) {
-  const [key, ms] = step.split(':');
-  await page.keyboard.down(key); await page.waitForTimeout(Number(ms)); await page.keyboard.up(key);
+  const snap = step.endsWith('!');
+  const [keys, ms] = step.replace('!', '').split(':');
+  held = keys.split('+');
+  for (const k of held) await page.keyboard.down(k);
+  await page.waitForTimeout(Number(ms));
+  if (snap) break;
+  for (const k of held) await page.keyboard.up(k);
+  held = [];
 }
 const info = await page.evaluate(() => {
   const g = window.__game; if (!g) return 'no game';
