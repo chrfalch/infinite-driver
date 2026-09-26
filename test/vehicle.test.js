@@ -74,6 +74,20 @@ describe('car physics', () => {
     expect(decel).toBeLessThan(1.2);
   });
 
+  it('brakes hard in gear (the raycast car must not ignore brakes on driven wheels)', () => {
+    const { state, run } = setup();
+    run(2, idle);
+    for (let i = 0; i < 25 * 120 && state.body.linvel().x < 22; i++) run(1 / 120, { ...idle, throttle: 1 });
+    const v0 = state.body.linvel().x;
+    let t = 0;
+    run(6, { ...idle, brake: 1 }, () => {
+      if (state.body.linvel().x > 1) t += 1 / 120;
+    });
+    const decel = (v0 - 1) / t / 9.81;
+    console.log('braking in gear from', (v0 * 3.6).toFixed(0), 'km/h:', decel.toFixed(2), 'g');
+    expect(decel).toBeGreaterThan(0.75);
+  });
+
   it('slows to a stop off the accelerator in gear, more gently than braking', () => {
     const { state, run } = setup();
     run(2, idle);

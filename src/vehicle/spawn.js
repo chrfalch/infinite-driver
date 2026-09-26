@@ -144,3 +144,23 @@ export function respawnCar(world, heightAt) {
     rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
   });
 }
+
+// Rebuilds and respawns destroy physics bodies and GPU buffers, so they must not run while a
+// physics step is awaiting the GPU. UI code queues them here; the frame loop applies them at the
+// start of the next frame, before physics.
+let pendingAction = null;
+
+export function requestRebuild(world) {
+  if (pendingAction?.type !== 'respawn') pendingAction = { type: 'rebuild', world };
+}
+
+export function requestRespawn(world, heightAt) {
+  pendingAction = { type: 'respawn', world, heightAt };
+}
+
+export function applyPendingCarAction() {
+  const action = pendingAction;
+  pendingAction = null;
+  if (action?.type === 'rebuild') rebuildCar(action.world);
+  if (action?.type === 'respawn') respawnCar(action.world, action.heightAt);
+}

@@ -17,7 +17,7 @@ import {
 import { TIRE_REBUILD_KEYS, updateSoftTire } from '../tire/soft-tire.js';
 import { applyWheelSettings } from '../vehicle/physics.js';
 import { DRIVETRAIN, resetDrivetrain, saveDrivetrain } from '../vehicle/config.js';
-import { rebuildCar, respawnCar } from '../vehicle/spawn.js';
+import { requestRebuild, requestRespawn } from '../vehicle/spawn.js';
 
 // [path, label, min, max, step, apply] — apply is 'live' (read every step), 'wheels' (pushed to
 // the Rapier controller), or 'rebuild' (shape or mass: the car is rebuilt in place).
@@ -125,7 +125,7 @@ export function createTuningPanel(world, { heightAt }) {
 
   const scheduleRebuild = () => {
     clearTimeout(rebuildTimer);
-    rebuildTimer = setTimeout(() => rebuildCar(world), 150);
+    rebuildTimer = setTimeout(() => requestRebuild(world), 150);
   };
 
   const applyWheels = () => {
@@ -150,9 +150,9 @@ export function createTuningPanel(world, { heightAt }) {
       saveControls();
       gui.controllersRecursive().forEach((c) => c.updateDisplay());
       applyWheels();
-      rebuildCar(world);
+      requestRebuild(world);
     },
-    respawn: () => respawnCar(world, heightAt),
+    respawn: () => requestRespawn(world, heightAt),
     lab: () => (location.href = '/tire-lab.html'),
   };
 
@@ -175,7 +175,7 @@ export function createTuningPanel(world, { heightAt }) {
     .name('Soft tyres')
     .onChange(() => {
       saveCar();
-      rebuildCar(world);
+      requestRebuild(world);
     });
   const suspension = { independent: !CAR.solidAxles };
   controls
@@ -184,21 +184,21 @@ export function createTuningPanel(world, { heightAt }) {
     .onChange(() => {
       CAR.solidAxles = !suspension.independent;
       saveCar();
-      rebuildCar(world);
+      requestRebuild(world);
     });
   controls
     .add(CAR, 'gpuTires')
     .name('GPU tyres (TypeGPU)')
     .onChange(() => {
       saveCar();
-      rebuildCar(world);
+      requestRebuild(world);
     });
   controls
     .add(CONTROLS, 'performance')
     .name('Performance preset')
     .onChange(() => {
       saveControls();
-      rebuildCar(world);
+      requestRebuild(world);
     });
 
   for (const [title, params] of GROUPS) {
@@ -254,6 +254,7 @@ export function createTuningPanel(world, { heightAt }) {
 
   // Drivetrain: read live every step.
   const dt = gui.addFolder('Drivetrain');
+  dt.add(DRIVETRAIN, 'coastStop', 0, 1, 0.05).name('Quick stop off throttle (0 = realistic)').onChange(saveDrivetrain);
   dt.add(DRIVETRAIN, 'automatic').name('Automatic gearbox (Q/E = manual)').onChange(saveDrivetrain);
   dt.add(DRIVETRAIN, 'low').name('Low range (L)').onChange(saveDrivetrain);
   dt.add(DRIVETRAIN, 'centerLock').name('Lock centre diff').onChange(saveDrivetrain);
@@ -273,11 +274,9 @@ export function createTuningPanel(world, { heightAt }) {
     ['frontShare', 'Front torque share', 0, 1, 0.05],
     ['upshiftRpm', 'Upshift rpm', 2000, 5200, 50],
     ['downshiftRpm', 'Downshift rpm', 900, 3000, 50],
-    ['coastDownshiftRpm', 'Coasting downshift rpm', 900, 3500, 50],
     ['idleRpm', 'Idle rpm', 600, 1200, 10],
     ['limiterRpm', 'Rev limiter rpm', 3500, 7000, 50],
     ['frictionPerRpm', 'Engine friction per rpm', 0, 0.05, 0.001],
-    ['exhaustBrake', 'Exhaust brake (N·m)', 0, 250, 5],
     ['engineInertia', 'Engine inertia (kg·m²)', 0.05, 1, 0.01],
     ['clutchTorque', 'Clutch capacity (N·m)', 200, 2000, 10],
     ['shiftTime', 'Shift time (s)', 0.05, 1, 0.05],

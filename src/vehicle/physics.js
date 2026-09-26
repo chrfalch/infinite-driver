@@ -112,11 +112,12 @@ export function applyDriverInput(state, input, dt, car = CAR) {
     }
   }
 
-  // Engine, clutch, gearbox, and differentials turn pedal input into torque per wheel.
+  // Engine, clutch, gearbox, and differentials turn pedal input into torque per wheel. The
+  // drivetrain works with the measured rolling radius, not the unloaded tyre radius.
   const radius = controller.tire?.outerRadius ?? car.wheelRadius;
-  const spins = [0, 1, 2, 3].map((i) => (controller.wheelSpin ? controller.wheelSpin(i) : speed / radius));
-  const torques = drivetrain.update(dt, { throttle, reverseRequest }, spins, speed, radius);
-  for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, torques[i] / radius);
+  const rolling = controller.rollingRadius ? controller.rollingRadius() : radius;
+  const spins = [0, 1, 2, 3].map((i) => (controller.wheelSpin ? controller.wheelSpin(i) : speed / rolling));
+  const torques = drivetrain.update(dt, { throttle, reverseRequest }, spins, speed, rolling);
 
   // With nothing pressed at walking pace, the clutch is out and there is no engine braking left, so
   // roll gently to a stop and hold there (like a light touch on the brake).
@@ -126,23 +127,36 @@ export function applyDriverInput(state, input, dt, car = CAR) {
   // Rapier applies brake as an impulse per step, so convert from force.
   const frontBrake = (brake * 0.35 + hold * 0.25) * dt;
   const rearBrake = (brake * 0.15 + hold * 0.25 + (input.handbrake ? car.handbrakeForce * 0.5 : 0)) * dt;
-  controller.setWheelBrake(0, frontBrake);
-  controller.setWheelBrake(1, frontBrake);
-  controller.setWheelBrake(2, rearBrake);
-  controller.setWheelBrake(3, rearBrake);
+  const brakes = [frontBrake, frontBrake, rearBrake, rearBrake];
+  for (let i = 0; i < 4; i++) {
+    // Rapier's raycast car ignores the brake on a wheel that has engine force, so a braking wheel
+    // gets no drive there. (The jointed car brakes through its axle motors and keeps both.)
+    const drive = !controller.wheels && brakes[i] > 0 ? 0 : torques[i] / radius;
+    controller.setWheelEngineForce(i, drive);
+    controller.setWheelBrake(i, brakes[i]);
+  }
   // The handbrake locks the rears, so they slide more easily.
   const rearSlip = input.handbrake ? car.frictionSlip * 0.55 : car.frictionSlip;
   controller.setWheelFrictionSlip(2, rearSlip);
   controller.setWheelFrictionSlip(3, rearSlip);
 
-  // Air drag and rolling resistance.
+  // Air drag along the velocity, and rolling resistance along the forward ground speed only.
+  // Forces are reset every step so nothing stale is left over. The soft tyres lose energy in the
+  // rubber and the soil themselves, so they add no extra rolling resistance.
+  body.resetForces(true);
   const v = body.linvel();
   const vmag = Math.hypot(v.x, v.y, v.z);
   if (vmag > 0.01) {
-    const grounded = [0, 1, 2, 3].some((i) => controller.wheelIsInContact(i));
-    const resist = car.dragCoefficient * vmag * vmag + (grounded ? car.rollingResistance * car.mass * 9.81 : 0);
-    const k = -Math.min(resist, (car.mass * vmag) / dt) / vmag;
-    body.resetForces(true);
-    body.addForce({ x: v.x * k, y: v.y * k, z: v.z * k }, true);
+    const drag = Math.min(car.dragCoefficient * vmag * vmag, (car.mass * vmag) / dt) / vmag;
+    body.addForce({ x: -v.x * drag, y: -v.y * drag, z: -v.z * drag }, true);
+  }
+  const grounded = [0, 1, 2, 3].some((i) => controller.wheelIsInContact(i));
+  if (!controller.wheels && grounded && absSpeed > 0.05) {
+    const q = body.rotation();
+    const fx = 1 - 2 * (q.y * q.y + q.z * q.z);
+    const fz = 2 * (q.x * q.z - q.w * q.y);
+    const fl = Math.hypot(fx, fz) || 1;
+    const roll = Math.min(car.rollingResistance * car.mass * 9.81, (car.mass * absSpeed) / dt) * Math.sign(speed);
+    body.addForce({ x: (-fx / fl) * roll, y: 0, z: (-fz / fl) * roll }, true);
   }
 }

@@ -85,4 +85,28 @@ describe('drivetrain', () => {
     expect(open[2]).toBeCloseTo(open[3], 5);
     expect(locked[3]).toBeGreaterThan(locked[2]);
   });
+
+  it('coasts realistically with the quick stop off', () => {
+    const drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN, coastStop: 0 });
+    simulate(12, () => ({ throttle: 1, reverseRequest: false }), { dt: drive });
+    const { log } = simulate(6, () => ({ throttle: 0, reverseRequest: false }), { dt: drive, v0: 25 });
+    const decel = (25 - log.at(-1).v) / 6 / 9.81;
+    console.log('realistic coast from 90 km/h:', decel.toFixed(3), 'g');
+    expect(decel).toBeGreaterThan(0.03);
+    expect(decel).toBeLessThan(0.12);
+  });
+
+  it('never engages reverse while rolling forward, or a gear that would over-rev', () => {
+    const d = new Drivetrain({ ...DEFAULT_DRIVETRAIN, automatic: false });
+    // Rolling forward at 13 m/s in 3rd.
+    d.gear = 3;
+    d.update(DT, { throttle: 0, reverseRequest: false }, [28, 28, 28, 28], 13, R);
+    d.shiftTo(-1);
+    for (let i = 0; i < 120; i++) d.update(DT, { throttle: 0, reverseRequest: false }, [28, 28, 28, 28], 13, R);
+    expect(d.gear).toBe(0);
+    // Asking for 1st at 25 m/s would pass 5400 rpm: it takes a higher gear.
+    d.shiftTo(1);
+    for (let i = 0; i < 120; i++) d.update(DT, { throttle: 0, reverseRequest: false }, [54, 54, 54, 54], 25, R);
+    expect(d.gear).toBeGreaterThan(1);
+  });
 });

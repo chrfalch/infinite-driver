@@ -298,6 +298,11 @@ export class JointedVehicle {
   wheelSuspensionLength(i) {
     return this.wheels[i].suspensionLength;
   }
+  // Effective rolling radius of a loaded soft tyre (measured about 0.92–0.94 of the unloaded
+  // radius); the drivetrain and slip logic use it instead of the unloaded radius.
+  rollingRadius() {
+    return this.tire.outerRadius * 0.925;
+  }
   // Wheel spin rate relative to its knuckle, rad/s, positive when rolling forward.
   wheelSpin(i) {
     return this.wheels[i].spinRate ?? 0;

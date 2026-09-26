@@ -1,4 +1,5 @@
 import { d, tgpu } from 'typegpu';
+import { convexHull } from '../terrain/convex-hull.js';
 
 // A soft-tyre solver that runs on the GPU (WebGPU compute through TypeGPU).
 //
@@ -497,13 +498,14 @@ function rotate(q, v) {
   return [x + qw * tx + (qy * tz - qz * ty), y + qw * ty + (qz * tx - qx * tz), z + qw * tz + (qx * ty - qy * tx)];
 }
 
-// Convex rock → bounding sphere and outward face planes for the GPU.
+// Rock → bounding sphere and the outward face planes of its convex hull for the GPU: the same
+// solid Rapier builds with ColliderDesc.convexHull, so tyres and chassis meet the same rock.
 export function rockToGpu(rock) {
   const v = rock.vertices;
+  const n = v.length / 3;
   let cx = 0;
   let cy = 0;
   let cz = 0;
-  const n = v.length / 3;
   for (let i = 0; i < n; i++) {
     cx += v[i * 3];
     cy += v[i * 3 + 1];
@@ -515,24 +517,22 @@ export function rockToGpu(rock) {
   let radius = 0;
   for (let i = 0; i < n; i++) radius = Math.max(radius, Math.hypot(v[i * 3] - cx, v[i * 3 + 1] - cy, v[i * 3 + 2] - cz));
   const planes = new Float32Array(ROCK_FACES * 4);
-  rock.faces.slice(0, ROCK_FACES).forEach(([a, b, c], f) => {
-    const ax = v[a * 3], ay = v[a * 3 + 1], az = v[a * 3 + 2];
-    const ux = v[b * 3] - ax, uy = v[b * 3 + 1] - ay, uz = v[b * 3 + 2] - az;
-    const wx = v[c * 3] - ax, wy = v[c * 3 + 1] - ay, wz = v[c * 3 + 2] - az;
-    let nx = uy * wz - uz * wy;
-    let ny = uz * wx - ux * wz;
-    let nz = ux * wy - uy * wx;
-    const len = Math.hypot(nx, ny, nz) || 1;
-    nx /= len;
-    ny /= len;
-    nz /= len;
-    // Make the normal point away from the rock's centre.
-    if (nx * (ax - cx) + ny * (ay - cy) + nz * (az - cz) < 0) {
-      nx = -nx;
-      ny = -ny;
-      nz = -nz;
-    }
-    planes.set([nx, ny, nz, nx * ax + ny * ay + nz * az], f * 4);
-  });
+  // Unused slots: a plane far away that every point is deep inside, so it never wins the max.
+  for (let f = 0; f < ROCK_FACES; f++) planes.set([0, 1, 0, 1e6], f * 4);
+  convexHull(v)
+    .slice(0, ROCK_FACES)
+    .forEach(([a, b, c], f) => {
+      const ax = v[a * 3], ay = v[a * 3 + 1], az = v[a * 3 + 2];
+      const ux = v[b * 3] - ax, uy = v[b * 3 + 1] - ay, uz = v[b * 3 + 2] - az;
+      const wx = v[c * 3] - ax, wy = v[c * 3 + 1] - ay, wz = v[c * 3 + 2] - az;
+      let nx = uy * wz - uz * wy;
+      let ny = uz * wx - ux * wz;
+      let nz = ux * wy - uy * wx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nx /= len;
+      ny /= len;
+      nz /= len;
+      planes.set([nx, ny, nz, nx * ax + ny * ay + nz * az], f * 4);
+    });
   return { sphere: [cx, cy, cz, radius], planes };
 }

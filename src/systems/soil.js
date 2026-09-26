@@ -31,7 +31,7 @@ export function updateSoil(world) {
   const { controller, body } = car.get(Vehicle);
   if (!controller.wheelSpin) return; // rigid raycast wheels do not report spin
   const contacts = world.get(Tracks).contacts;
-  const radius = controller.tire?.outerRadius ?? CAR.wheelRadius;
+  const radius = controller.rollingRadius ? controller.rollingRadius() : CAR.wheelRadius;
   const q = body.rotation();
   // Forward (+x) and axle (+z) directions of the chassis, flattened.
   let fx = 1 - 2 * (q.y * q.y + q.z * q.z);

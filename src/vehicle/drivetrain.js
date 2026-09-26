@@ -23,8 +23,10 @@ export const DEFAULT_DRIVETRAIN = Object.freeze({
   limiterRpm: 5400,
   engineInertia: 0.28, // kg·m², flywheel and crank
   frictionTorque: 30, // N·m at rest; with the rpm term this is the engine braking
-  frictionPerRpm: 0.024, // N·m per rpm
-  exhaustBrake: 150, // extra N·m of engine braking off throttle (diesel exhaust brake)
+  frictionPerRpm: 0.014, // N·m per rpm (a real diesel's internal friction)
+  // Off-throttle slowing, 0 = realistic engine braking (a long coast, about 0.06–0.1 g),
+  // 1 = quick stop (a strong exhaust brake and low gears held, about 5 s from 50 km/h).
+  coastStop: 1,
   gears: [4.4, 2.6, 1.65, 1.18, 0.88],
   reverse: 4.0,
   finalDrive: 5.1,
@@ -34,7 +36,6 @@ export const DEFAULT_DRIVETRAIN = Object.freeze({
   shiftTime: 0.35, // s with the clutch open during a shift
   upshiftRpm: 3500,
   downshiftRpm: 1500,
-  coastDownshiftRpm: 2700, // off throttle the automatic holds lower gears for engine braking
   minShiftInterval: 0.9, // s
   launchRpm: 2200, // the automatic clutch is fully in by this engine speed when pulling away
   frontShare: 0.4, // centre differential torque split to the front axle
@@ -62,6 +63,16 @@ export function engineTorque(params, rpm) {
 
 export function frictionTorque(params, rpm) {
   return params.frictionTorque + params.frictionPerRpm * Math.max(0, rpm);
+}
+
+// How the quick-stop setting shapes off-throttle behaviour.
+export function coastSettings(params) {
+  const q = Math.min(1, Math.max(0, params.coastStop ?? 1));
+  return {
+    exhaustBrake: 180 * q, // extra engine braking torque, N·m
+    extraFriction: 0.01 * q, // N·m per rpm on top of the engine's own friction
+    coastDownshiftRpm: 1300 + 1400 * q, // off throttle the automatic holds lower gears
+  };
 }
 
 export class Drivetrain {
@@ -99,6 +110,19 @@ export class Drivetrain {
     this.sinceShift = 0;
   }
 
+  // A gear that would drive against the direction of motion, or over-rev the engine at the current
+  // road speed, is not engaged: the box stays in neutral, or takes the lowest gear that fits.
+  allowedGear(gear) {
+    const p = this.params;
+    const v = this.lastSpeed ?? 0;
+    if (gear < 0 && v > 1) return 0;
+    if (gear > 0 && v < -1) return 0;
+    let g = gear;
+    while (g > 0 && g < p.gears.length && radToRpm(Math.abs((this.lastRoadW ?? 0) * this.ratio(g))) > p.limiterRpm) g++;
+    if (g < 0 && radToRpm(Math.abs((this.lastRoadW ?? 0) * this.ratio(g))) > p.limiterRpm) return 0;
+    return g;
+  }
+
   shiftUp() {
     this.shiftTo(this.gear < 0 ? 0 : this.gear + 1);
   }
@@ -126,6 +150,10 @@ export class Drivetrain {
     // Driveshaft speed behind the centre differential (open diff: torque-weighted average).
     const shaftW = p.centerLock ? (front + rear) / 2 : front * p.frontShare + rear * (1 - p.frontShare);
 
+    const coast = coastSettings(p);
+    this.lastSpeed = speed;
+    this.lastRoadW = speed / radius;
+
     // Automatic gear choice from road speed, like a gearbox reading its output shaft; it does not
     // react to momentary wheelspin.
     if (p.automatic && this.shiftTimer <= 0) {
@@ -140,9 +168,9 @@ export class Drivetrain {
         // Upshift on road speed, or on engine speed when the wheels are spinning up with the clutch in.
         const revving = this.clutch > 0.95 && this.rpm > p.upshiftRpm + 300;
         if ((now > p.upshiftRpm || revving) && this.gear < p.gears.length && throttle > 0) this.shiftUp();
-        else if (this.gear > 1 && now < (throttle > 0 ? p.downshiftRpm : p.coastDownshiftRpm)) {
+        else if (this.gear > 1 && now < (throttle > 0 ? p.downshiftRpm : coast.coastDownshiftRpm)) {
           // Only if the lower gear would not over-rev.
-          if (gearboxRpm(this.gear - 1) < Math.max(p.upshiftRpm, p.coastDownshiftRpm + 400)) this.shiftDown();
+          if (gearboxRpm(this.gear - 1) < Math.max(p.upshiftRpm, coast.coastDownshiftRpm + 400)) this.shiftDown();
         }
       }
     }
@@ -151,7 +179,7 @@ export class Drivetrain {
     if (this.shiftTimer > 0) {
       this.shiftTimer -= dt;
       if (this.shiftTimer <= 0 && this.pendingGear !== null) {
-        this.gear = this.pendingGear;
+        this.gear = this.allowedGear(this.pendingGear);
         this.pendingGear = null;
       }
     }
@@ -190,7 +218,10 @@ export class Drivetrain {
       drive = Math.max(0, Math.min(engineTorque(p, rpmNow), needed));
       matching = true;
     }
-    const brake = throttle > 0 || matching ? 0 : p.exhaustBrake * Math.min(1, Math.max(0, (rpmNow - p.idleRpm) / 600));
+    const offThrottle = throttle === 0 && !matching;
+    const brake = offThrottle
+      ? coast.exhaustBrake * Math.min(1, Math.max(0, (rpmNow - p.idleRpm) / 600)) + coast.extraFriction * rpmNow
+      : 0;
     const engineNet = drive - frictionTorque(p, rpmNow) - brake;
 
     // Clutch torque from engine to gearbox: stiff when the speeds match, capped by capacity.

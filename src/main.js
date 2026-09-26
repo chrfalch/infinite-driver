@@ -33,7 +33,7 @@ import { TireTracks } from './render/tracks.js';
 import { GROUND } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
-import { respawnCar, spawnCar, startHeight } from './vehicle/spawn.js';
+import { applyPendingCarAction, requestRespawn, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
 import { createTouchControls } from './ui/touch-controls.js';
 
@@ -66,7 +66,7 @@ async function main() {
   // The car starts just above the ground at the origin.
   spawnCar(world, { position: { x: 0, y: heightAt(0, 0) + startHeight(), z: 0 } });
   const panel = createTuningPanel(world, { heightAt });
-  const touch = createTouchControls({ onRespawn: () => respawnCar(world, heightAt) });
+  const touch = createTouchControls({ onRespawn: () => requestRespawn(world, heightAt) });
   // Small screens start with the panel folded so the road stays visible.
   if (window.innerWidth < 700 || touch.isVisible()) panel.close();
 
@@ -150,6 +150,8 @@ async function main() {
       time.elapsed += time.delta;
       last = now;
 
+      // Queued rebuilds and respawns run here, never while physics awaits the GPU.
+      applyPendingCarAction();
       readInput(world);
       await stepPhysics(world);
       syncBodies(world);
