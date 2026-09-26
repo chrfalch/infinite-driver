@@ -21,6 +21,7 @@ import {
   WheelRig,
 } from './ecs/traits.js';
 import { createRenderer } from './render/scene.js';
+import { createGauges } from './ui/gauges.js';
 import { attachZoom, followCamera } from './systems/camera.js';
 import { updateHud } from './systems/hud.js';
 import { attachKeyboard, readInput } from './systems/input.js';
@@ -80,40 +81,15 @@ async function main() {
   const hud = glyph.handle('hud', ThreeConfig);
   const inter = glyph.fontFace('/fonts/inter-latin.font.glb');
   await inter.load();
-  const speedText = hud.createText({
-    font: inter,
-    text: '0 km/h',
-    style: { fontSize: 22, lineHeight: 1.2, color: '#4a4538' },
-  });
-  speedText.position.set(28, -24, 0);
-  render.hudScene.add(speedText);
-  world.spawn(HudLabel({ text: speedText, format: (v) => `${Math.round(Math.abs(v.speed) * 3.6)} km/h` }));
-
-  const engineText = hud.createText({
-    font: inter,
-    text: 'idle',
-    style: { fontSize: 14, lineHeight: 1.2, color: '#6b6453' },
-  });
-  engineText.position.set(28, -54, 0);
-  render.hudScene.add(engineText);
-  world.spawn(
-    HudLabel({
-      text: engineText,
-      format: (v) => {
-        const d = v.drivetrain;
-        if (!d) return '';
-        const mode = d.params.automatic ? 'auto' : 'manual';
-        return `gear ${d.label} · ${Math.round(d.rpm / 50) * 50} rpm · ${mode}`;
-      },
-    }),
-  );
+  // Speedometer, tachometer, and gear indicator.
+  const gauges = createGauges({ hud, font: inter, scene: render.hudScene });
 
   const perfText = hud.createText({
     font: inter,
     text: '',
     style: { fontSize: 12, lineHeight: 1.2, color: '#9a927e' },
   });
-  perfText.position.set(28, -100, 0);
+  perfText.position.set(28, -48, 0);
   render.hudScene.add(perfText);
   world.spawn(
     HudLabel({
@@ -131,7 +107,7 @@ async function main() {
     text: '',
     style: { fontSize: 14, lineHeight: 1.2, color: '#8a826f' },
   });
-  hintText.position.set(28, -78, 0);
+  hintText.position.set(28, -24, 0);
   render.hudScene.add(hintText);
   const KEY_HINT =
     'W / Up  accelerate (hold)    S / Down  brake, reverse    A D  steer    Q E  shift    L  low range    Space  handbrake    R  respawn';
@@ -168,6 +144,12 @@ async function main() {
       updateSoil(world);
       followCamera(world);
       updateHud(world);
+      const player = world.queryFirst(IsPlayer, Vehicle);
+      if (player) {
+        const canvas = render.renderer.domElement;
+        gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible());
+        gauges.update(player.get(Vehicle), time.delta);
+      }
 
       glyph.shape();
       const { renderer, scene, camera, hudScene, hudCamera } = render;
