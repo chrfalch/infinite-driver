@@ -91,7 +91,7 @@ export function effectiveTire(tire, performance) {
 }
 export function effectiveGpuTire(gpu, performance, ground = GROUND) {
   // Loose soil grips less than firm ground.
-  const withSoil = { ...gpu, soilStiffness: soilStiffness(ground.softness), friction: gpu.friction * (1 - 0.4 * ground.softness) };
+  const withSoil = { ...gpu, soilStiffness: soilStiffness(ground.softness), friction: gpu.friction * (1 - 0.4 * ground.softness), gravel: ground.gravel };
   if (!performance) return withSoil;
   return { ...withSoil, substeps: Math.min(gpu.substeps, 3), iterations: Math.min(gpu.iterations, 6), segmentsAround: 32, segmentsAcross: 8 };
 }
@@ -99,6 +99,7 @@ export function effectiveGpuTire(gpu, performance, ground = GROUND) {
 // Ground settings shared by the tyres and the track renderer.
 export const DEFAULT_GROUND = Object.freeze({
   softness: 0.15, // 0 = hard, 1 = very soft soil
+  gravel: 0.6, // 0 = smooth, 1 = coarse loose gravel the tread rolls over
   tracks: true,
   trackLength: 1500, // segments kept per wheel
 });

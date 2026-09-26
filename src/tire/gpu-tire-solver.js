@@ -1,5 +1,6 @@
 import { d, tgpu } from 'typegpu';
 import { convexHull } from '../terrain/convex-hull.js';
+import { GRAVEL_HASH_WGSL, GRAVEL_HEIGHT_WGSL } from '../terrain/gravel.js';
 
 // A soft-tyre solver that runs on the GPU (WebGPU compute through TypeGPU).
 //
@@ -39,6 +40,7 @@ const Params = d.struct({
   groundDamping: d.f32, // N·s/m per particle
   soilRebound: d.f32, // fraction of soil push kept while the tread lifts off
   maxSink: d.f32,
+  gravel: d.f32, // 0..1: amount of loose gravel stones on the ground (see terrain/gravel.js)
   groundOriginX: d.f32,
   groundOriginZ: d.f32,
   groundCell: d.f32,
@@ -156,7 +158,10 @@ export class GpuTireSolver {
         -(w.x * q.x + w.y * q.y + w.z * q.z));
       return h.position.xyz + h.linvel.xyz * s + qrot(normalize(q + dq), restOf(t, k));
     }`.$uses({ hubs: this.hubs, qrot, restOf });
+    const gravelHash = tgpu.fn([d.i32, d.i32], d.u32)/* wgsl */ `${GRAVEL_HASH_WGSL}`;
+    const gravelHeight = tgpu.fn([d.f32, d.f32], d.f32)/* wgsl */ `${GRAVEL_HEIGHT_WGSL}`.$uses({ gravelHash });
     const groundHeight = tgpu.fn([d.f32, d.f32], d.f32)/* wgsl */ `(x, z) {
+      let stones = select(0.0, gravelHeight(x, z) * params.gravel, params.gravel > 0.0);
       let last = f32(${GROUND_N - 1}) - 0.001;
       let gx = clamp((x - params.groundOriginX) / params.groundCell, 0.0, last);
       let gz = clamp((z - params.groundOriginZ) / params.groundCell, 0.0, last);
@@ -169,9 +174,9 @@ export class GpuTireSolver {
       let h10 = ground[iz * n + ix + 1u];
       let h01 = ground[(iz + 1u) * n + ix];
       let h11 = ground[(iz + 1u) * n + ix + 1u];
-      if (fx + fz <= 1.0) { return h00 + (h10 - h00) * fx + (h01 - h00) * fz; }
-      return h11 + (h01 - h11) * (1.0 - fx) + (h10 - h11) * (1.0 - fz);
-    }`.$uses({ params: this.params, ground: this.ground });
+      if (fx + fz <= 1.0) { return h00 + (h10 - h00) * fx + (h01 - h00) * fz + stones; }
+      return h11 + (h01 - h11) * (1.0 - fx) + (h10 - h11) * (1.0 - fz) + stones;
+    }`.$uses({ params: this.params, ground: this.ground, gravelHeight });
 
     // Distance constraints for particle k of tyre t (one Jacobi pass).
     const constrain = tgpu.fn([d.u32, d.u32, d.u32], d.vec3f)/* wgsl */ `(t, k, src) {
@@ -491,6 +496,7 @@ export class GpuTireSolver {
       // Critically damped contact (2·√(k·m)); the kernel integrates it implicitly.
       groundDamping: 2 * Math.sqrt(((3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)) * (s.rubberMass / this.perTire)),
       maxSink: s.maxSink ?? 0.25,
+      gravel: s.gravel ?? 0,
       groundOriginX: this.groundOrigin.x,
       groundOriginZ: this.groundOrigin.z,
       groundCell: this.groundCell,

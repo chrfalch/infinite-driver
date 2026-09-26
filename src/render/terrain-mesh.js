@@ -1,9 +1,19 @@
 import { createNoise2D } from 'simplex-noise';
-import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardMaterial } from 'three/webgpu';
+import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardNodeMaterial } from 'three/webgpu';
+import { attribute, mix, uniform, vec3, vec4 } from 'three/tsl';
+import { gravelShade } from '../terrain/gravel.js';
+import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
 import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
 
-export const terrainMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
+// Ground colour from the vertex colours, with the gravel stones drawn on top (the same stones the
+// GPU tyres roll over; see terrain/gravel.js).
+const gravelAmount = uniform(GROUND.gravel);
+export function setGravelAmount(value) {
+  gravelAmount.value = value;
+}
+export const terrainMaterial = new MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
+terrainMaterial.colorNode = vec4(attribute('color', 'vec3').mul(mix(vec3(1), gravelShade(), gravelAmount.clamp(0, 1).sqrt())), 1);
 
 const DIRT = new Color('#c2ab82');
 const DRY = new Color('#b4ad84');

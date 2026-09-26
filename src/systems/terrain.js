@@ -15,6 +15,9 @@ import { createChunkMesh } from '../render/terrain-mesh.js';
 import { CHUNK_RES, CHUNK_SIZE, chunkKey, sampleChunk } from '../terrain/chunk.js';
 import { generateRocks } from '../terrain/rocks.js';
 
+// ?rocks=<count per chunk> (default 70); ?rocks=0 gives an empty test ground.
+const ROCK_COUNT = Number(new URLSearchParams(globalThis.location?.search ?? '').get('rocks') ?? 70);
+
 // Work per frame is spread out to avoid hitches when the car crosses a chunk border: at most one
 // job per frame (a new chunk's ground mesh, a rock mesh, a ground trimesh collider, or one chunk's
 // rock hulls). Colliders are created once per chunk and then only enabled or disabled as the chunk
@@ -190,7 +193,7 @@ export function streamTerrain(world, { force = false } = {}) {
 function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, near }) {
   const heights = sampleChunk(heightAt, cx, cz);
   const chunk = { cx, cz, heights, collider: null, collidersEnabled: true };
-  const field = { rocks: generateRocks(heightAt, cx, cz), colliders: [], collidersBuilt: false, meshBuilt: false };
+  const field = { rocks: generateRocks(heightAt, cx, cz, { count: ROCK_COUNT }), colliders: [], collidersBuilt: false, meshBuilt: false };
   if (near && ground) addGroundCollider(physics, chunk);
   if (near && rocks) addRockColliders(physics, field);
   const object = new Group();

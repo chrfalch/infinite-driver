@@ -18,6 +18,7 @@ import { TIRE_REBUILD_KEYS, updateSoftTire } from '../tire/soft-tire.js';
 import { applyWheelSettings } from '../vehicle/physics.js';
 import { DRIVETRAIN, resetDrivetrain, saveDrivetrain } from '../vehicle/config.js';
 import { requestRebuild, requestRespawn } from '../vehicle/spawn.js';
+import { setGravelAmount } from '../render/terrain-mesh.js';
 
 // [path, label, min, max, step, apply] — apply is 'live' (read every step), 'wheels' (pushed to
 // the Rapier controller), or 'rebuild' (shape or mass: the car is rebuilt in place).
@@ -150,6 +151,7 @@ export function createTuningPanel(world, { heightAt }) {
       resetTire();
       resetGpuTire();
       resetGround();
+      setGravelAmount(GROUND.gravel);
       resetDrivetrain();
       Object.assign(CONTROLS, DEFAULT_CONTROLS);
       saveControls();
@@ -299,6 +301,15 @@ export function createTuningPanel(world, { heightAt }) {
       saveGround();
       const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.gpu?.solver;
       if (solver) solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step);
+    });
+  ground
+    .add(GROUND, 'gravel', 0, 1, 0.05)
+    .name('Gravel (GPU tyres)')
+    .onChange(() => {
+      saveGround();
+      const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.gpu?.solver;
+      if (solver) solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step);
+      setGravelAmount(GROUND.gravel);
     });
   ground.add(GROUND, 'tracks').name('Tyre tracks').onChange(saveGround);
   ground
