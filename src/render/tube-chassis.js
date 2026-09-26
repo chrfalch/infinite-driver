@@ -194,7 +194,7 @@ function shockTower(b, f, from, { railZ = 0.43, kickY = -0.08 } = {}) {
 
 const T = 0.031; // 62 mm OD: the chunky tube of the sand buggy
 const T2 = 0.025;
-const plateMat = new MeshStandardMaterial({ color: '#8f9498', roughness: 0.5, metalness: 0.55 });
+const plateMat = new MeshStandardMaterial({ color: '#5f6367', roughness: 0.6, metalness: 0.45 });
 const lampMat = new MeshStandardMaterial({ color: '#fff4d6', emissive: '#fff1c2', emissiveIntensity: 0.6, roughness: 0.2 });
 const lampBody = new MeshStandardMaterial({ color: '#1d1e20', roughness: 0.4, metalness: 0.6 });
 // Tail light lens: a dim red glow while driving, bright when braking (set per frame by the game).

@@ -239,5 +239,8 @@ function buildRocksMesh(entity, field) {
   const rocksMesh = createRocksMesh(field.rocks);
   if (rocksMesh) entity.get(View).object.add(rocksMesh);
   const plants = createVegetationMesh(plantsOf(field));
-  if (plants) entity.get(View).object.add(plants);
+  if (plants) {
+    entity.get(View).object.add(plants);
+    field.bushes = plants.userData.bushes ?? null;
+  }
 }

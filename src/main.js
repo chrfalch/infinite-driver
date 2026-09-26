@@ -30,6 +30,7 @@ import { streamTerrain } from './systems/terrain.js';
 import { syncAxles, syncBrakeLights, syncSoftTires, syncViews, syncWheels } from './systems/views.js';
 import { updateTracks } from './systems/tracks.js';
 import { updateSoil } from './systems/soil.js';
+import { updateBushes } from './systems/vegetation.js';
 import { SoilParticles } from './render/soil-particles.js';
 import { TireTracks } from './render/tracks.js';
 import { GROUND } from './tire/config.js';
@@ -169,6 +170,7 @@ async function main() {
     syncBrakeLights(world);
     updateTracks(world);
     updateSoil(world);
+    updateBushes(world);
     followCamera(world);
     updateHud(world);
     const player = world.queryFirst(IsPlayer, Vehicle);

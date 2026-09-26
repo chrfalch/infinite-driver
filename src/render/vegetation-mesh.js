@@ -2,15 +2,19 @@
 import {
   Color,
   CylinderGeometry,
+  DynamicDrawUsage,
   Group,
   IcosahedronGeometry,
+  InstancedBufferAttribute,
   InstancedMesh,
   Matrix4,
   MeshStandardMaterial,
+  MeshStandardNodeMaterial,
   Quaternion,
   Vector3,
 } from 'three/webgpu';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { attribute, clamp, positionLocal, vec3 } from 'three/tsl';
 
 // A lumpy bush: three squashed icosahedra.
 function bushGeometry() {
@@ -38,6 +42,17 @@ const CROWN = crownGeometry();
 const TRUNK = new CylinderGeometry(0.035, 0.06, 0.62, 6).translate(0, 0.31, 0);
 const leaves = new MeshStandardMaterial({ roughness: 0.9, flatShading: true });
 const bark = new MeshStandardMaterial({ color: '#6b4a32', roughness: 0.95, flatShading: true });
+// Bushes bend and squash where the car drives over them. Per instance, `bend` holds the push
+// direction in the bush's own frame (x, z) and the amount (0..1); the vertex shader leans the bush
+// over and flattens it, more toward the top. systems/vegetation.js drives the values.
+const bushLeaves = new MeshStandardNodeMaterial({ roughness: 0.9, flatShading: true });
+bushLeaves.positionNode = (() => {
+  const bend = attribute('bend', 'vec3');
+  const p = positionLocal;
+  const h = clamp(p.y.div(0.9), 0, 1);
+  const amount = bend.z.mul(h);
+  return vec3(p.x.add(bend.x.mul(amount).mul(0.55)), p.y.mul(bend.z.mul(-0.72).add(1)), p.z.add(bend.y.mul(amount).mul(0.55)));
+})();
 
 const GREENS = ['#6f8f3a', '#86a147', '#5f7d33', '#98a95a', '#7a8a45'].map((c) => new Color(c));
 const DRY = new Color('#a39a5a');
@@ -66,7 +81,11 @@ export function createVegetationMesh(plants) {
     mesh.setColorAt(i, col);
   };
   if (bushes.length) {
-    const mesh = instanced(BUSH, leaves, bushes.length);
+    const mesh = instanced(BUSH.clone(), bushLeaves, bushes.length);
+    const bend = new InstancedBufferAttribute(new Float32Array(bushes.length * 3), 3);
+    bend.setUsage(DynamicDrawUsage);
+    mesh.geometry.setAttribute('bend', bend);
+    group.userData.bushes = { mesh, plants: bushes, bend, amount: new Float32Array(bushes.length), active: new Set() };
     bushes.forEach((p, i) => {
       q.setFromAxisAngle(up, p.turn);
       m.compose(pos.set(p.x, p.y - 0.08, p.z), q, scl.set(p.size, p.size * (0.8 + p.shade * 0.4), p.size));
