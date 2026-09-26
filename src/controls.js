@@ -1,3 +1,5 @@
+import { loadSettings, saveSettings } from './settings-store.js';
+
 // Driver preferences, persisted separately from the car setup.
 const STORAGE_KEY = 'drift.controls.v1';
 
@@ -9,13 +11,7 @@ export const DEFAULT_CONTROLS = Object.freeze({
   performance: false,
 });
 
-function load() {
-  try {
-    return JSON.parse(globalThis.localStorage?.getItem(STORAGE_KEY) ?? '{}');
-  } catch {
-    return {};
-  }
-}
+const load = () => loadSettings(STORAGE_KEY);
 
 export const CONTROLS = { ...DEFAULT_CONTROLS };
 for (const [key, value] of Object.entries(load())) {
@@ -23,9 +19,5 @@ for (const [key, value] of Object.entries(load())) {
 }
 
 export function saveControls() {
-  try {
-    globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(CONTROLS));
-  } catch {
-    // Storage can be unavailable; the setting still works for this session.
-  }
+  saveSettings(STORAGE_KEY, DEFAULT_CONTROLS, CONTROLS);
 }

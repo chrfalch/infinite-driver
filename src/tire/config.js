@@ -1,3 +1,5 @@
+import { loadSettings, saveSettings } from '../settings-store.js';
+
 // Soft-body tyre settings (Rapier soft body). Frequencies are the natural frequency, in Hz,
 // of each constraint type; higher means stiffer. Extra substeps keep stiff settings stable.
 //
@@ -24,16 +26,11 @@ export const DEFAULT_TIRE = Object.freeze({
   friction: 1.1,
 });
 
-const STORAGE_KEY = 'drift.tire.v1';
+// v2: saves only changed values (v1 held full copies with stale defaults).
+const STORAGE_KEY = 'drift.tire.v2';
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
-function load() {
-  try {
-    return JSON.parse(globalThis.localStorage?.getItem(STORAGE_KEY) ?? '{}');
-  } catch {
-    return {};
-  }
-}
+const load = () => loadSettings(STORAGE_KEY);
 
 export const TIRE = clone(DEFAULT_TIRE);
 for (const [key, value] of Object.entries(load())) {
@@ -41,11 +38,7 @@ for (const [key, value] of Object.entries(load())) {
 }
 
 export function saveTire() {
-  try {
-    globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(TIRE));
-  } catch {
-    // Storage can be unavailable; settings still work for this session.
-  }
+  saveSettings(STORAGE_KEY, DEFAULT_TIRE, TIRE);
 }
 
 export function resetTire() {
@@ -55,7 +48,7 @@ export function resetTire() {
 
 // GPU tyre solver settings (see gpu-tire-solver.js). Geometry comes from TIRE.
 export const DEFAULT_GPU_TIRE = Object.freeze({
-  pressureKpa: 120, // gauge air pressure
+  pressureKpa: 60, // gauge air pressure (about 9 psi, a trail pressure that lets the tyre wrap rocks)
   segmentsAround: 40,
   segmentsAcross: 10,
   beadRings: 1,
@@ -63,8 +56,8 @@ export const DEFAULT_GPU_TIRE = Object.freeze({
   iterations: 8,
   cordStiffness: 1.0, // per Jacobi pass, 0..1
   shearStiffness: 1.0,
-  bendStiffness: 0.6,
-  shapeStiffness: 0.3, // pull toward the moulded shape per pass (across the tread)
+  bendStiffness: 0.3,
+  shapeStiffness: 0.1, // pull toward the moulded shape per pass (across the tread)
   beadPull: 0.5, // fraction of the gap to the rim seat closed per pass
   damping: 2, // 1/s, relative to the wheel's rigid motion
   friction: 1.1,
@@ -77,24 +70,14 @@ export const DEFAULT_GPU_TIRE = Object.freeze({
   rubberMass: 12,
 });
 
-const GPU_STORAGE_KEY = 'drift.gputire.v1';
-function loadGpu() {
-  try {
-    return JSON.parse(globalThis.localStorage?.getItem(GPU_STORAGE_KEY) ?? '{}');
-  } catch {
-    return {};
-  }
-}
+const GPU_STORAGE_KEY = 'drift.gputire.v2';
+const loadGpu = () => loadSettings(GPU_STORAGE_KEY);
 export const GPU_TIRE = { ...DEFAULT_GPU_TIRE };
 for (const [key, value] of Object.entries(loadGpu())) {
   if (typeof value === typeof DEFAULT_GPU_TIRE[key]) GPU_TIRE[key] = value;
 }
 export function saveGpuTire() {
-  try {
-    globalThis.localStorage?.setItem(GPU_STORAGE_KEY, JSON.stringify(GPU_TIRE));
-  } catch {
-    // Storage can be unavailable; settings still work for this session.
-  }
+  saveSettings(GPU_STORAGE_KEY, DEFAULT_GPU_TIRE, GPU_TIRE);
 }
 export function resetGpuTire() {
   Object.assign(GPU_TIRE, DEFAULT_GPU_TIRE);
@@ -119,24 +102,14 @@ export const DEFAULT_GROUND = Object.freeze({
   tracks: true,
   trackLength: 1500, // segments kept per wheel
 });
-const GROUND_KEY = 'drift.ground.v1';
-function loadGround() {
-  try {
-    return JSON.parse(globalThis.localStorage?.getItem(GROUND_KEY) ?? '{}');
-  } catch {
-    return {};
-  }
-}
+const GROUND_KEY = 'drift.ground.v2';
+const loadGround = () => loadSettings(GROUND_KEY);
 export const GROUND = { ...DEFAULT_GROUND };
 for (const [key, value] of Object.entries(loadGround())) {
   if (typeof value === typeof DEFAULT_GROUND[key]) GROUND[key] = value;
 }
 export function saveGround() {
-  try {
-    globalThis.localStorage?.setItem(GROUND_KEY, JSON.stringify(GROUND));
-  } catch {
-    // Storage can be unavailable; settings still work for this session.
-  }
+  saveSettings(GROUND_KEY, DEFAULT_GROUND, GROUND);
 }
 export function resetGround() {
   Object.assign(GROUND, DEFAULT_GROUND);

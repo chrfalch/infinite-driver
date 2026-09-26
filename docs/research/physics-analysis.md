@@ -130,7 +130,9 @@ Commits `4418db3` to `7a8bb4f`, plus the performance commit `6b8c27a`. All 40 te
 - **Pitch −2.5°:** the front axle carries 57 % of the load with the same springs as the rear. Springs and dampers are now rated per axle for their static load.
 - **Jitter:** the tread contact is now critically damped and integrated implicitly, so it does not bounce between substeps. The car also spawns just above its ride height.
 
+**Softer GPU tyres (after the rest fixes):** the tyre sat almost like a rigid wheel (3 mm static deflection) and barely wrapped rocks. Defaults are now 60 kPa, bending 0.3, shape memory 0.1 (were 120 kPa, 0.6, 0.3). Rig at 450 kg: static deflection about 2 cm, Crr 0.028 at 10 m/s (was 0.014; realistic for a low-pressure off-road tyre), cornering stiffness 0.072 W/deg (was 0.052), drive slip at 800 N·m 4.6 % (was 12.9 %). Top speed after 8 s: 72 km/h (was 75). Saved settings now hold only changed values (storage keys v2), so new defaults reach players who once moved a slider.
+
 **Still open:**
-- **GPU cornering stiffness:** 0.04 W/deg, against 0.1–0.2 for a real tyre. The contact patch does not yet hold the side deflection across substeps.
+- **GPU cornering stiffness:** 0.07 W/deg, against 0.1–0.2 for a real tyre. The contact patch does not yet hold the side deflection across substeps.
 - **Pipelined GPU readback:** it is implemented but off. With one step of force latency, the wheel-spin coupling goes unstable.
 - **Rapier soft tyres:** too much grip (up to 1.6 g) after the retune.

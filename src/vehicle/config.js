@@ -1,4 +1,5 @@
 import { DEFAULT_DRIVETRAIN } from './drivetrain.js';
+import { loadSettings, saveSettings } from '../settings-store.js';
 
 // A short-wheelbase 4x4, roughly 1.8 t. Chassis-local axes: +x forward, +y up, +z right.
 export const DEFAULT_CAR = Object.freeze({
@@ -42,17 +43,11 @@ export const DEFAULT_CAR = Object.freeze({
   rollingResistance: 0.018,
 });
 
-const STORAGE_KEY = 'drift.car.v1';
+// v2: saves only changed values (v1 held full copies with stale defaults).
+const STORAGE_KEY = 'drift.car.v2';
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
-function loadSaved() {
-  try {
-    const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
+const loadSaved = () => loadSettings(STORAGE_KEY);
 
 // Only known keys are taken from saved settings, so stale values cannot break the car.
 function merge(target, source) {
@@ -76,11 +71,7 @@ if (tiresParam === 'soft' || tiresParam === 'gpu') {
 }
 
 export function saveCar() {
-  try {
-    globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(CAR));
-  } catch {
-    // Storage can be unavailable (private mode); tuning still works for this session.
-  }
+  saveSettings(STORAGE_KEY, DEFAULT_CAR, CAR);
 }
 
 export function resetCar() {
@@ -94,20 +85,10 @@ export function importCar(settings) {
 }
 
 // Drivetrain settings (see drivetrain.js), persisted like the car settings.
-const DRIVETRAIN_KEY = 'drift.drivetrain.v1';
-export const DRIVETRAIN = merge(clone(DEFAULT_DRIVETRAIN), (() => {
-  try {
-    return JSON.parse(globalThis.localStorage?.getItem(DRIVETRAIN_KEY) ?? '{}');
-  } catch {
-    return {};
-  }
-})());
+const DRIVETRAIN_KEY = 'drift.drivetrain.v2';
+export const DRIVETRAIN = merge(clone(DEFAULT_DRIVETRAIN), loadSettings(DRIVETRAIN_KEY));
 export function saveDrivetrain() {
-  try {
-    globalThis.localStorage?.setItem(DRIVETRAIN_KEY, JSON.stringify(DRIVETRAIN));
-  } catch {
-    // Storage can be unavailable; settings still work for this session.
-  }
+  saveSettings(DRIVETRAIN_KEY, DEFAULT_DRIVETRAIN, DRIVETRAIN);
 }
 export function resetDrivetrain() {
   merge(DRIVETRAIN, clone(DEFAULT_DRIVETRAIN));

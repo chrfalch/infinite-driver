@@ -145,9 +145,15 @@ export function respawnCar(world, heightAt) {
   const fx = 1 - 2 * (q.y * q.y + q.z * q.z);
   const fz = 2 * (q.x * q.z - q.w * q.y);
   const yaw = Math.hypot(fx, fz) > 1e-3 ? Math.atan2(-fz, fx) : 0;
-  despawnCar(world, car);
+  return respawnCarAt(world, heightAt, p.x, p.z, yaw);
+}
+
+// Puts the car on its wheels at (x, z), facing `yaw` (radians about +y; 0 faces +x).
+export function respawnCarAt(world, heightAt, x, z, yaw = 0) {
+  const car = world.queryFirst(IsPlayer, Vehicle);
+  if (car) despawnCar(world, car);
   return spawnCar(world, {
-    position: { x: p.x, y: heightAt(p.x, p.z) + startHeight(), z: p.z },
+    position: { x, y: heightAt(x, z) + startHeight(), z },
     rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
   });
 }
@@ -165,9 +171,15 @@ export function requestRespawn(world, heightAt) {
   pendingAction = { type: 'respawn', world, heightAt };
 }
 
+// Test and debug hook: respawn at a given place and heading (see window.__game in main.js).
+export function requestRespawnAt(world, heightAt, x, z, yaw) {
+  pendingAction = { type: 'respawnAt', world, heightAt, x, z, yaw };
+}
+
 export function applyPendingCarAction() {
   const action = pendingAction;
   pendingAction = null;
   if (action?.type === 'rebuild') rebuildCar(action.world);
   if (action?.type === 'respawn') respawnCar(action.world, action.heightAt);
+  if (action?.type === 'respawnAt') respawnCarAt(action.world, action.heightAt, action.x, action.z, action.yaw);
 }

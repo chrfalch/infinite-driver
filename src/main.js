@@ -9,6 +9,7 @@ import {
   IsPlayer,
   Physics,
   Render,
+  RockField,
   SteeringWheel,
   TerrainStreaming,
   Tracks,
@@ -33,7 +34,7 @@ import { TireTracks } from './render/tracks.js';
 import { GROUND } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
-import { applyPendingCarAction, requestRespawn, spawnCar, startHeight } from './vehicle/spawn.js';
+import { applyPendingCarAction, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
 import { createTouchControls } from './ui/touch-controls.js';
 
@@ -188,7 +189,8 @@ async function main() {
     get car() {
       return world.queryFirst(IsPlayer, Vehicle);
     },
-    traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig },
+    respawnAt: (x, z, yaw) => requestRespawnAt(world, heightAt, x, z, yaw),
+    traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig, RockField },
   };
 }
 
