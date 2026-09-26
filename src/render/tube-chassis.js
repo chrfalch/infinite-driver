@@ -211,8 +211,8 @@ const sandBuggy = {
     // Nose box corners (right side): rear-bottom, rear-top, front-bottom, front-top.
     const NRB = [1.05, -0.3, 0.52];
     const NRT = [1.05, 0.12, 0.54];
-    const NFB = [1.8, -0.3, 0.42];
-    const NFT = [1.8, 0.12, 0.42];
+    const NFB = [2.05, -0.3, 0.4];
+    const NFT = [2.05, 0.12, 0.4];
     // Main hoop feet and top, windshield header, rear hoop.
     const MHF = [-0.6, F, 0.66];
     const MHT = [-0.6, 0.9, 0.5];
@@ -233,7 +233,7 @@ const sandBuggy = {
     b.cross(NFB, T2);
     b.cross([1.22, 0.12, 0.51], T2); // front shock cross member
     // Hoop bumper wrapped round the front of the nose box.
-    b.tube([[1.8, -0.12, 0.42], [2.0, -0.12, 0.34], [2.0, -0.12, -0.34], [1.8, -0.12, -0.42]], T2, 0.14);
+    b.tube([[2.05, -0.12, 0.4], [2.25, -0.12, 0.32], [2.25, -0.12, -0.32], [2.05, -0.12, -0.4]], T2, 0.14);
     // A-pillars: from the top of the nose box up to the header, back along the roof, over the
     // main hoop, and down in one long bend to the rear hoop.
     const RRF = [-1.15, 0.86, 0.48]; // rear end of the roof
@@ -270,12 +270,12 @@ const sandBuggy = {
     for (const s of [1, -1]) {
       const body = b.mesh(new CylinderGeometry(0.075, 0.06, 0.08, 20), lampBody);
       body.rotation.z = Math.PI / 2;
-      body.position.set(1.86, 0.22, s * 0.34);
+      body.position.set(2.11, 0.22, s * 0.32);
       const lens = b.mesh(new CylinderGeometry(0.066, 0.066, 0.01, 20), lampMat);
       lens.rotation.z = Math.PI / 2;
-      lens.position.set(1.905, 0.22, s * 0.34);
+      lens.position.set(2.155, 0.22, s * 0.32);
       const stem = b.mesh(new CylinderGeometry(0.012, 0.012, 0.08, 8), lampBody);
-      stem.position.set(1.82, 0.16, s * 0.36);
+      stem.position.set(2.07, 0.16, s * 0.34);
     }
   },
 };
