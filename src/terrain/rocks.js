@@ -94,7 +94,12 @@ export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) 
     const z = (cz + rand()) * CHUNK_SIZE;
     const size = pickSize(rand());
     if (Math.hypot(x, z) < SPAWN_CLEAR_RADIUS + size) continue;
-    rocks.push(makeRock(heightAt, x, z, size, rand, noise));
+    // Canyon: keep the roads clear and leave the cliffs bare; the rocks are red sandstone.
+    if (heightAt.roadDistance && heightAt.roadDistance(x, z) < 5 + size) continue;
+    if (heightAt.canyon && Math.abs(heightAt(x + 1, z) - heightAt(x - 1, z)) + Math.abs(heightAt(x, z + 1) - heightAt(x, z - 1)) > 1.6) continue;
+    const rock = makeRock(heightAt, x, z, size, rand, noise);
+    if (heightAt.canyon) rock.red = true;
+    rocks.push(rock);
   }
   return rocks;
 }

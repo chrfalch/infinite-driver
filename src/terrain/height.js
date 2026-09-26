@@ -1,4 +1,5 @@
 import { createNoise2D } from 'simplex-noise';
+import { createCanyonField } from './canyon.js';
 
 // Small seeded PRNG so the world is the same on every load.
 export function mulberry32(seed) {
@@ -14,6 +15,7 @@ export function mulberry32(seed) {
 
 export function createHeightField({ seed = 1337, mode = 'flat' } = {}) {
   if (mode === 'flat') return () => 0;
+  if (mode === 'canyon') return createCanyonField(seed);
 
   const rand = mulberry32(seed);
   const continents = createNoise2D(rand);

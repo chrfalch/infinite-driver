@@ -14,6 +14,8 @@ import { createRocksMesh } from '../render/rock-mesh.js';
 import { createChunkMesh } from '../render/terrain-mesh.js';
 import { CHUNK_RES, CHUNK_SIZE, chunkKey, sampleChunk } from '../terrain/chunk.js';
 import { generateRocks } from '../terrain/rocks.js';
+import { generatePlants } from '../terrain/vegetation.js';
+import { createVegetationMesh } from '../render/vegetation-mesh.js';
 
 // ?rocks=<count per chunk> (default 70); ?rocks=0 gives an empty test ground.
 const ROCK_COUNT = Number(new URLSearchParams(globalThis.location?.search ?? '').get('rocks') ?? 70);
@@ -71,12 +73,27 @@ function addGroundCollider(physics, chunk) {
   chunk.collidersEnabled = true;
 }
 
+// Bushes and trees are generated on first need (with the rock mesh or the rock colliders), so a new
+// chunk's work is spread over separate frames.
+function plantsOf(field) {
+  field.plants ??= generatePlants(field.heightAt, field.cx, field.cz);
+  return field.plants;
+}
+
 function addRockColliders(physics, field) {
   const { rapier, world } = physics;
   field.colliders = [];
   for (const rock of field.rocks) {
     const desc = rapier.ColliderDesc.convexHull(rock.vertices);
     if (desc) field.colliders.push(world.createCollider(desc.setFriction(0.9)));
+  }
+  // Tree trunks are solid (a thin cylinder); bushes are only drawn, the car drives through them.
+  for (const p of plantsOf(field)) {
+    if (p.kind !== 'tree') continue;
+    const r = 0.05 * p.height;
+    const half = 0.3 * p.height;
+    const desc = rapier.ColliderDesc.cylinder(half, r).setTranslation(p.x, p.y + half, p.z).setFriction(0.7);
+    field.colliders.push(world.createCollider(desc));
   }
   field.collidersBuilt = true;
 }
@@ -97,7 +114,11 @@ function removeColliders(physics, chunk, field) {
 }
 
 function disposeView(object) {
-  object.traverse((child) => child.geometry?.dispose());
+  object.traverse((child) => {
+    // Plant geometries are shared by every chunk; only their instance buffers belong to it.
+    if (child.isInstancedMesh) child.dispose();
+    else child.geometry?.dispose();
+  });
 }
 
 // Keeps a square of chunks loaded around the camera target, and colliders only near it.
@@ -193,7 +214,16 @@ export function streamTerrain(world, { force = false } = {}) {
 function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, near }) {
   const heights = sampleChunk(heightAt, cx, cz);
   const chunk = { cx, cz, heights, collider: null, collidersEnabled: true };
-  const field = { rocks: generateRocks(heightAt, cx, cz, { count: ROCK_COUNT }), colliders: [], collidersBuilt: false, meshBuilt: false };
+  const field = {
+    rocks: generateRocks(heightAt, cx, cz, { count: ROCK_COUNT }),
+    colliders: [],
+    collidersBuilt: false,
+    meshBuilt: false,
+    plants: null,
+    heightAt,
+    cx,
+    cz,
+  };
   if (near && ground) addGroundCollider(physics, chunk);
   if (near && rocks) addRockColliders(physics, field);
   const object = new Group();
@@ -208,4 +238,6 @@ function buildRocksMesh(entity, field) {
   field.meshBuilt = true;
   const rocksMesh = createRocksMesh(field.rocks);
   if (rocksMesh) entity.get(View).object.add(rocksMesh);
+  const plants = createVegetationMesh(plantsOf(field));
+  if (plants) entity.get(View).object.add(plants);
 }

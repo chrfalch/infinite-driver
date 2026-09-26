@@ -44,8 +44,8 @@ async function main() {
   const [render] = await Promise.all([createRenderer(container), RAPIER.init(), glyph.init()]);
 
   const world = createWorld();
-  // ?terrain=hills brings back the rolling hills from iteration 1.
-  const mode = new URLSearchParams(location.search).get('terrain') ?? 'flat';
+  // Red-rock canyon with gravel roads by default; ?terrain=flat (tests) or ?terrain=hills.
+  const mode = new URLSearchParams(location.search).get('terrain') ?? 'canyon';
   const heightAt = createHeightField({ mode });
   const physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   physicsWorld.timestep = 1 / 120;
@@ -68,8 +68,12 @@ async function main() {
     }),
   );
 
-  // The car starts just above the ground at the origin.
-  spawnCar(world, { position: { x: 0, y: heightAt(0, 0) + startHeight(), z: 0 } });
+  // The car starts just above the ground at the origin (on a road in the canyon, facing along it).
+  const yaw = heightAt.roadHeading ? heightAt.roadHeading(0, 0) : 0;
+  spawnCar(world, {
+    position: { x: 0, y: heightAt(0, 0) + startHeight(), z: 0 },
+    rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
+  });
   const panel = createTuningPanel(world, { heightAt });
   const touch = createTouchControls({ onRespawn: () => requestRespawn(world, heightAt) });
   // Small screens start with the panel folded so the road stays visible.
@@ -152,7 +156,7 @@ async function main() {
       }
 
       glyph.shape();
-      const { renderer, scene, camera, hudScene, hudCamera } = render;
+      const { renderer, scene, activeCamera: camera, hudScene, hudCamera } = render;
       renderer.clear();
       renderer.render(scene, camera);
       renderer.clearDepth();
@@ -172,6 +176,7 @@ async function main() {
       return world.queryFirst(IsPlayer, Vehicle);
     },
     respawnAt: (x, z, yaw) => requestRespawnAt(world, heightAt, x, z, yaw),
+    heightAt,
     traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig, RockField },
   };
 }
