@@ -5,6 +5,8 @@ const SPACING = 0.12; // metres between track segments
 const MAX_GAP = 1.2; // a longer jump (airborne, respawn) starts a new track
 const LIFT = 0.006; // above the ground, against z-fighting
 const QUADS = 5; // floor, then inner and outer slope of the berm on each side
+const GEO = 14;
+const SETTLING = 40; // newest segments whose berms still follow the ground
 const CREST = 0.07; // berm crest distance outside the track edge
 const FOOT = 0.17; // berm foot distance outside the track edge
 
@@ -14,6 +16,9 @@ const material = new MeshStandardMaterial({
   metalness: 0,
   // Winding depends on the direction of travel, so draw both faces.
   side: DoubleSide,
+  // Overlapping segments (in turns) would z-fight; without depth writes they simply draw in
+  // buffer order, newest on top, and still hide behind the car and rocks.
+  depthWrite: false,
   polygonOffset: true,
   polygonOffsetFactor: -2,
   polygonOffsetUnits: -2,
@@ -30,8 +35,11 @@ export class TireTracks {
     const total = wheels * segments;
     this.positions = new Float32Array(total * QUADS * 4 * 3);
     this.colors = new Float32Array(total * QUADS * 4 * 3);
-    // Per segment: last left/right, current left/right (x, z), outward axle (x, z), ground y at both ends.
-    this.geo = new Float32Array(total * 12);
+    // Per segment: last left/right, current left/right (x, z), axle direction at both ends (x, z),
+    // ground y at both ends.
+    this.geo = new Float32Array(total * GEO);
+    // Berm heights at the four crest points; they settle while the segment is new, then freeze.
+    this.berms = new Float32Array(total * 4);
     this.base = new Float32Array(total * 3);
     this.strength = new Float32Array(total);
     this.used = new Uint8Array(total);
@@ -44,6 +52,8 @@ export class TireTracks {
     this.mesh = new Mesh(geometry, material);
     this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
+    // Drawn after the terrain (it does not write depth, so the ground must already be there).
+    this.mesh.renderOrder = 2;
     this.mesh.name = 'tyre tracks';
     scene.add(this.mesh);
     this.state = Array.from({ length: wheels }, () => ({ last: null, head: 0, count: 0, stripe: 0 }));
@@ -57,13 +67,25 @@ export class TireTracks {
     const s = this.state[wheel];
     const half = width / 2;
     const y = heightAt(point.x, point.z);
-    const cur = { x: point.x, z: point.z, y, lx: point.x - right.x * half, lz: point.z - right.z * half, rx: point.x + right.x * half, rz: point.z + right.z * half };
+    const cur = {
+      x: point.x,
+      z: point.z,
+      y,
+      ax: right.x,
+      az: right.z,
+      lx: point.x - right.x * half,
+      lz: point.z - right.z * half,
+      rx: point.x + right.x * half,
+      rz: point.z + right.z * half,
+    };
     if (s.last) {
       const d = Math.hypot(point.x - s.last.x, point.z - s.last.z);
       if (d < SPACING) return;
       if (d < MAX_GAP) {
         const q = wheel * this.segments + s.head;
-        this.geo.set([s.last.lx, s.last.lz, s.last.rx, s.last.rz, cur.lx, cur.lz, cur.rx, cur.rz, right.x, right.z, s.last.y, y], q * 12);
+        // Both ends keep their own axle direction, so neighbouring segments share their corners.
+        this.geo.set([s.last.lx, s.last.lz, s.last.rx, s.last.rz, cur.lx, cur.lz, cur.rx, cur.rz, s.last.ax, s.last.az, cur.ax, cur.az, s.last.y, y], q * GEO);
+        this.berms.fill(0, q * 4, q * 4 + 4);
         terrainColorAt(heightAt, point.x, point.z, this.tmp);
         this.base.set([this.tmp.r, this.tmp.g, this.tmp.b], q * 3);
         // Alternating shade reads as the tread pattern pressed into the soil.
@@ -105,8 +127,8 @@ export class TireTracks {
         const q = w * this.segments + slot;
         const age = i / this.segments;
         const fade = age < 0.75 ? 1 : Math.max(0, 1 - (age - 0.75) / 0.25);
-        const g = this.geo.subarray(q * 12, q * 12 + 12);
-        const [l0x, l0z, r0x, r0z, l1x, l1z, r1x, r1z, ax, az, y0, y1] = g;
+        const g = this.geo.subarray(q * GEO, q * GEO + GEO);
+        const [l0x, l0z, r0x, r0z, l1x, l1z, r1x, r1z, a0x, a0z, a1x, a1z, y0, y1] = g;
         const k = 1 - 0.42 * this.strength[q] * fade;
         const br = this.base[q * 3];
         const bg = this.base[q * 3 + 1];
@@ -115,17 +137,23 @@ export class TireTracks {
         this.writeQuad(q, 0, [l0x, y0 + LIFT, l0z], [r0x, y0 + LIFT, r0z], [l1x, y1 + LIFT, l1z], [r1x, y1 + LIFT, r1z], floor);
         // Berms: loose soil, a touch lighter than the ground; they fade with the track.
         const loose = [br * 1.06, bg * 1.05, bb * 1.04];
-        for (const [side, k0, k1] of [[-1, 1, 2], [1, 3, 4]]) {
+        const b = this.berms.subarray(q * 4, q * 4 + 4);
+        for (const [n, side, k0, k1] of [
+          [0, -1, 1, 2],
+          [1, 1, 3, 4],
+        ]) {
           const e0 = side < 0 ? [l0x, l0z] : [r0x, r0z];
           const e1 = side < 0 ? [l1x, l1z] : [r1x, r1z];
-          const ox = ax * side;
-          const oz = az * side;
-          const c0 = [e0[0] + ox * CREST, e0[1] + oz * CREST];
-          const c1 = [e1[0] + ox * CREST, e1[1] + oz * CREST];
-          const h0 = y0 + LIFT + this.berm(c0[0], c0[1]) * fade;
-          const h1 = y1 + LIFT + this.berm(c1[0], c1[1]) * fade;
-          const f0 = [e0[0] + ox * FOOT, y0 + LIFT, e0[1] + oz * FOOT];
-          const f1 = [e1[0] + ox * FOOT, y1 + LIFT, e1[1] + oz * FOOT];
+          const c0 = [e0[0] + a0x * side * CREST, e0[1] + a0z * side * CREST];
+          const c1 = [e1[0] + a1x * side * CREST, e1[1] + a1z * side * CREST];
+          if (i < SETTLING) {
+            b[n * 2] = this.berm(c0[0], c0[1]);
+            b[n * 2 + 1] = this.berm(c1[0], c1[1]);
+          }
+          const h0 = y0 + LIFT + b[n * 2] * fade;
+          const h1 = y1 + LIFT + b[n * 2 + 1] * fade;
+          const f0 = [e0[0] + a0x * side * FOOT, y0 + LIFT, e0[1] + a0z * side * FOOT];
+          const f1 = [e1[0] + a1x * side * FOOT, y1 + LIFT, e1[1] + a1z * side * FOOT];
           this.writeQuad(q, k0, [e0[0], y0 + LIFT, e0[1]], [c0[0], h0, c0[1]], [e1[0], y1 + LIFT, e1[1]], [c1[0], h1, c1[1]], floor);
           this.writeQuad(q, k1, [c0[0], h0, c0[1]], f0, [c1[0], h1, c1[1]], f1, loose);
         }
@@ -140,6 +168,7 @@ export class TireTracks {
     this.positions.fill(0);
     this.colors.fill(0);
     this.used.fill(0);
+    this.berms.fill(0);
     this.mesh.geometry.getAttribute('position').needsUpdate = true;
     this.mesh.geometry.getAttribute('color').needsUpdate = true;
   }
