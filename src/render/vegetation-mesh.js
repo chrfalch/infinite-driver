@@ -2,19 +2,17 @@
 import {
   Color,
   CylinderGeometry,
-  DynamicDrawUsage,
   Group,
   IcosahedronGeometry,
-  InstancedBufferAttribute,
   InstancedMesh,
   Matrix4,
   MeshStandardMaterial,
-  MeshStandardNodeMaterial,
+  BufferAttribute,
+  Mesh,
   Quaternion,
   Vector3,
 } from 'three/webgpu';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { attribute, clamp, positionLocal, vec3 } from 'three/tsl';
 
 // A lumpy bush: three squashed icosahedra.
 function bushGeometry() {
@@ -22,7 +20,7 @@ function bushGeometry() {
     [0, 0.45, 0, 0.62],
     [0.38, 0.32, 0.12, 0.45],
     [-0.3, 0.3, -0.22, 0.48],
-  ].map(([x, y, z, r]) => new IcosahedronGeometry(r, 0).scale(1, 0.8, 1).translate(x, y, z));
+  ].map(([x, y, z, r]) => new IcosahedronGeometry(r, 1).scale(1, 0.8, 1).translate(x, y, z));
   return mergeGeometries(parts.map((g) => g.toNonIndexed()));
 }
 
@@ -42,17 +40,68 @@ const CROWN = crownGeometry();
 const TRUNK = new CylinderGeometry(0.035, 0.06, 0.62, 6).translate(0, 0.31, 0);
 const leaves = new MeshStandardMaterial({ roughness: 0.9, flatShading: true });
 const bark = new MeshStandardMaterial({ color: '#6b4a32', roughness: 0.95, flatShading: true });
-// Bushes bend and squash where the car drives over them. Per instance, `bend` holds the push
-// direction in the bush's own frame (x, z) and the amount (0..1); the vertex shader leans the bush
-// over and flattens it, more toward the top. systems/vegetation.js drives the values.
-const bushLeaves = new MeshStandardNodeMaterial({ roughness: 0.9, flatShading: true });
-bushLeaves.positionNode = (() => {
-  const bend = attribute('bend', 'vec3');
-  const p = positionLocal;
-  const h = clamp(p.y.div(0.9), 0, 1);
-  const amount = bend.z.mul(h);
-  return vec3(p.x.add(bend.x.mul(amount).mul(0.6)), p.y.mul(bend.z.mul(-0.85).add(1)), p.z.add(bend.y.mul(amount).mul(0.6)));
-})();
+// A bush the car has touched gets its own mesh (a copy of the bush geometry, deformed on the CPU):
+// only the parts under a wheel go flat onto the ground and the parts under the belly are pressed
+// down; the rest keeps its shape. See systems/vegetation.js.
+export function createCrushedBush(mesh, index) {
+  const geometry = BUSH.clone();
+  const material = mesh.material;
+  const bush = new Mesh(geometry, material);
+  bush.castShadow = true;
+  bush.receiveShadow = true;
+  mesh.getMatrixAt(index, bush.matrix);
+  bush.matrixAutoUpdate = false;
+  const colour = new Color();
+  mesh.getColorAt(index, colour);
+  const colours = new Float32Array(geometry.attributes.position.count * 3);
+  for (let i = 0; i < colours.length; i += 3) colours.set([colour.r, colour.g, colour.b], i);
+  geometry.setAttribute('color', new BufferAttribute(colours, 3));
+  bush.material = crushedLeaves;
+  bush.userData.rest = Float32Array.from(geometry.attributes.position.array);
+  // Hide the instance.
+  mesh.setMatrixAt(index, new Matrix4().makeScale(0, 0, 0));
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.parent.add(bush);
+  return bush;
+}
+const crushedLeaves = new MeshStandardMaterial({ roughness: 0.9, flatShading: true, vertexColors: true });
+
+// Deforms a crushed bush: `strips` are wheel paths in the bush's local frame ({ x, z, dx, dz,
+// amount, width }), `belly` the local height tops are pressed down to, `floor(x, z)` the local
+// ground height.
+export function deformBush(bush, strips, belly, floor) {
+  const rest = bush.userData.rest;
+  const pos = bush.geometry.attributes.position;
+  const out = pos.array;
+  for (let i = 0; i < rest.length; i += 3) {
+    let x = rest[i];
+    let y = rest[i + 1];
+    let z = rest[i + 2];
+    const f = floor(x, z);
+    let flat = 0;
+    let sx = 0;
+    let sz = 0;
+    for (const s of strips) {
+      const side = (x - s.x) * s.dz - (z - s.z) * s.dx;
+      const d = Math.abs(side);
+      const t = Math.min(1, Math.max(0, (d - s.width * 0.7) / s.width));
+      const w = (1 - t * t * (3 - 2 * t)) * s.amount;
+      if (w > flat) flat = w;
+      const push = Math.sign(side) * w * 0.14;
+      sx += s.dz * push;
+      sz -= s.dx * push;
+    }
+    const flatY = f + (y - f) * 0.08 + 0.02;
+    y = y + (Math.min(y, flatY) - y) * flat;
+    y = Math.min(y, Math.max(belly, f + 0.03));
+    out[i] = x + sx;
+    out[i + 1] = y;
+    out[i + 2] = z + sz;
+  }
+  pos.needsUpdate = true;
+  bush.geometry.computeVertexNormals();
+  bush.geometry.computeBoundingSphere();
+}
 
 const GREENS = ['#6f8f3a', '#86a147', '#5f7d33', '#98a95a', '#7a8a45'].map((c) => new Color(c));
 const DRY = new Color('#a39a5a');
@@ -81,11 +130,8 @@ export function createVegetationMesh(plants) {
     mesh.setColorAt(i, col);
   };
   if (bushes.length) {
-    const mesh = instanced(BUSH.clone(), bushLeaves, bushes.length);
-    const bend = new InstancedBufferAttribute(new Float32Array(bushes.length * 3), 3);
-    bend.setUsage(DynamicDrawUsage);
-    mesh.geometry.setAttribute('bend', bend);
-    group.userData.bushes = { mesh, plants: bushes, bend, amount: new Float32Array(bushes.length), active: new Set() };
+    const mesh = instanced(BUSH, leaves, bushes.length);
+    group.userData.bushes = { mesh, plants: bushes, crushed: new Map() };
     bushes.forEach((p, i) => {
       q.setFromAxisAngle(up, p.turn);
       m.compose(pos.set(p.x, p.y - 0.08, p.z), q, scl.set(p.size, p.size * (0.8 + p.shade * 0.4), p.size));
