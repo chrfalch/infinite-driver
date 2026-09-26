@@ -2,40 +2,60 @@
 // Stored in square tiles that are created on first touch, so memory follows where you drive.
 
 export const DEFORM_CELL = 0.125; // metres
-const TILE = 128; // cells per tile side (16 m)
+const SHIFT = 7;
+const TILE = 1 << SHIFT; // cells per tile side (16 m)
+const MASK = TILE - 1;
+const BIAS = 32768;
+
+// Numeric tile key; valid for |tile index| < 32768 (about 520 km from the origin).
+const tileKey = (tx, tz) => (tx + BIAS) * 65536 + (tz + BIAS);
 
 export class GroundDeformation {
   constructor(cell = DEFORM_CELL) {
     this.cell = cell;
     this.tiles = new Map();
     this.version = 0;
+    // Last tile looked up (may be undefined when that tile does not exist yet).
+    this.lastTx = NaN;
+    this.lastTz = NaN;
+    this.lastTile = undefined;
+    // Cells changed since `dirtyStart` (see changedSince).
+    this.dirtyStart = 0;
+    this.dirtyAll = false;
+    this.dirtyX0 = Infinity;
+    this.dirtyZ0 = Infinity;
+    this.dirtyX1 = -Infinity;
+    this.dirtyZ1 = -Infinity;
   }
 
   tile(tx, tz, create) {
-    const key = `${tx},${tz}`;
+    if (tx === this.lastTx && tz === this.lastTz && (this.lastTile || !create)) return this.lastTile;
+    const key = tileKey(tx, tz);
     let t = this.tiles.get(key);
     if (!t && create) {
       t = new Float32Array(TILE * TILE);
       this.tiles.set(key, t);
     }
+    this.lastTx = tx;
+    this.lastTz = tz;
+    this.lastTile = t;
     return t;
   }
 
   // Offset at integer cell (ix, iz).
   cellValue(ix, iz) {
-    const tx = Math.floor(ix / TILE);
-    const tz = Math.floor(iz / TILE);
-    const t = this.tile(tx, tz, false);
-    if (!t) return 0;
-    return t[(iz - tz * TILE) * TILE + (ix - tx * TILE)];
+    const t = this.tile(ix >> SHIFT, iz >> SHIFT, false);
+    return t ? t[((iz & MASK) << SHIFT) | (ix & MASK)] : 0;
   }
 
   addCell(ix, iz, delta) {
-    const tx = Math.floor(ix / TILE);
-    const tz = Math.floor(iz / TILE);
-    const t = this.tile(tx, tz, true);
-    t[(iz - tz * TILE) * TILE + (ix - tx * TILE)] += delta;
+    const t = this.tile(ix >> SHIFT, iz >> SHIFT, true);
+    t[((iz & MASK) << SHIFT) | (ix & MASK)] += delta;
     this.version++;
+    if (ix < this.dirtyX0) this.dirtyX0 = ix;
+    if (ix > this.dirtyX1) this.dirtyX1 = ix;
+    if (iz < this.dirtyZ0) this.dirtyZ0 = iz;
+    if (iz > this.dirtyZ1) this.dirtyZ1 = iz;
   }
 
   // Bilinear offset at a world position.
@@ -46,10 +66,24 @@ export class GroundDeformation {
     const iz = Math.floor(gz);
     const fx = gx - ix;
     const fz = gz - iz;
-    const a = this.cellValue(ix, iz);
-    const b = this.cellValue(ix + 1, iz);
-    const c = this.cellValue(ix, iz + 1);
-    const d = this.cellValue(ix + 1, iz + 1);
+    const lx = ix & MASK;
+    const lz = iz & MASK;
+    let a, b, c, d;
+    if (lx !== MASK && lz !== MASK) {
+      // All four cells in one tile.
+      const t = this.tile(ix >> SHIFT, iz >> SHIFT, false);
+      if (!t) return 0;
+      const o = (lz << SHIFT) | lx;
+      a = t[o];
+      b = t[o + 1];
+      c = t[o + TILE];
+      d = t[o + TILE + 1];
+    } else {
+      a = this.cellValue(ix, iz);
+      b = this.cellValue(ix + 1, iz);
+      c = this.cellValue(ix, iz + 1);
+      d = this.cellValue(ix + 1, iz + 1);
+    }
     return (a * (1 - fx) + b * fx) * (1 - fz) + (c * (1 - fx) + d * fx) * fz;
   }
 
@@ -67,9 +101,47 @@ export class GroundDeformation {
     this.addCell(ix + 1, iz + 1, delta * fx * fz);
   }
 
+  // Adds the offsets of the cell rectangle [ix0, ix0 + nx) x [iz0, iz0 + nz) into `out`, where
+  // cell (ix0 + c, iz0 + r) goes to out[offset + r * stride + c]. Reads each tile once per row.
+  accumulate(ix0, iz0, nx, nz, out, stride = nx, offset = 0) {
+    const ix1 = ix0 + nx;
+    for (let r = 0; r < nz; r++) {
+      const iz = iz0 + r;
+      const tz = iz >> SHIFT;
+      const row = (iz & MASK) << SHIFT;
+      const o = offset + r * stride - ix0;
+      for (let ix = ix0; ix < ix1; ) {
+        const tx = ix >> SHIFT;
+        const end = Math.min(ix1, (tx + 1) << SHIFT);
+        const t = this.tile(tx, tz, false);
+        if (t) for (let i = ix; i < end; i++) out[o + i] += t[row | (i & MASK)];
+        ix = end;
+      }
+    }
+  }
+
+  // Cell rectangle { x0, z0, x1, z1 } (inclusive) that covers every change made after `version`,
+  // or null when that is no longer known (treat everything as changed). Returns an empty
+  // rectangle (x0 > x1) when nothing changed. Designed for one main consumer: each call restarts
+  // the tracked rectangle, so a second consumer with an older version gets null.
+  changedSince(version) {
+    let result;
+    if (version === this.version) result = { x0: 1, z0: 1, x1: 0, z1: 0 };
+    else if (this.dirtyAll || version < this.dirtyStart || version > this.version) result = null;
+    else result = { x0: this.dirtyX0, z0: this.dirtyZ0, x1: this.dirtyX1, z1: this.dirtyZ1 };
+    this.dirtyStart = this.version;
+    this.dirtyAll = false;
+    this.dirtyX0 = this.dirtyZ0 = Infinity;
+    this.dirtyX1 = this.dirtyZ1 = -Infinity;
+    return result;
+  }
+
   clear() {
     this.tiles.clear();
+    this.lastTx = this.lastTz = NaN;
+    this.lastTile = undefined;
     this.version++;
+    this.dirtyAll = true;
   }
 }
 
@@ -89,7 +161,12 @@ export function compactSoil(deformation, contacts, { softness, dt, right, bermOf
     const iz = Math.round(c.z / cell);
     const key = ix * 73856093 + iz;
     const prev = cells.get(key);
-    if (!prev || c.depth > prev.depth) cells.set(key, { ix, iz, x: c.x, z: c.z, depth: c.depth });
+    if (!prev) cells.set(key, { ix, iz, x: c.x, z: c.z, depth: c.depth });
+    else if (c.depth > prev.depth) {
+      prev.x = c.x;
+      prev.z = c.z;
+      prev.depth = c.depth;
+    }
   }
   for (const c of cells.values()) {
     const current = -deformation.cellValue(c.ix, c.iz);

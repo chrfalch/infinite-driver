@@ -1,6 +1,7 @@
 import { BoxGeometry, BufferAttribute, BufferGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, SphereGeometry, Vector3 } from 'three/webgpu';
 import { CAR } from '../vehicle/config.js';
 import { frameGeometry, suspensionMounts } from '../vehicle/frame-geometry.js';
+import { mergeByMaterial } from './merge-geometry.js';
 
 export const cagePaint = new MeshStandardMaterial({ color: '#d9683f', roughness: 0.45, metalness: 0.25 });
 const frameMat = new MeshStandardMaterial({ color: '#2d2f31', roughness: 0.65, metalness: 0.35 });
@@ -63,7 +64,8 @@ function gusset(group, p, a, b, size = 0.14, thickness = 0.012, material = cageP
 }
 
 // Ladder frame, roll cage with gussets, shock hoops, suspension brackets, floor, seats, and lights.
-// Everything is built from frameGeometry/suspensionMounts, so it follows dimension changes.
+// Everything is built from frameGeometry/suspensionMounts, so it follows dimension changes. The
+// parts are merged into one mesh per material.
 export function createFrameMesh(car = CAR) {
   const g = frameGeometry(car);
   const group = new Group();
@@ -185,5 +187,6 @@ export function createFrameMesh(car = CAR) {
   // --- Floor pan between the hoops, seats on it, and a steering column from the dash.
   const floorLength = g.frontHoopX - g.mainHoopX;
   box(group, L(floorLength, 0.01, g.footZ * 2), L((g.frontHoopX + g.mainHoopX) / 2, g.railTop + 0.005, 0), floorMat);
-  return group;
+  // Nothing here moves relative to the chassis: one draw call per material.
+  return mergeByMaterial(group);
 }

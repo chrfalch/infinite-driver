@@ -10,6 +10,8 @@ import {
 } from 'three/webgpu';
 
 export const VIEW_HEIGHT = 22; // metres visible vertically at zoom 1
+// Ground depth per metre of screen height: 1 / sin(35.26 deg) for the isometric view.
+const SHADOW_DEPTH_STRETCH = 1.75;
 
 export async function createRenderer(container) {
   const renderer = new WebGPURenderer({ antialias: true });
@@ -29,13 +31,28 @@ export async function createRenderer(container) {
   const sun = new DirectionalLight('#fff1dc', 3.2);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  const s = 45;
-  Object.assign(sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 1, far: 160 });
+  Object.assign(sun.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, near: 1, far: 130 });
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.03;
   scene.add(sun, sun.target);
 
   const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+
+  // The shadow box follows the car (see followCamera) and is only as big as the visible ground:
+  // the circle around the screen's footprint on the ground, which is stretched in depth because the
+  // isometric view looks down at about 35 degrees. Smaller box: sharper shadows, fewer casters.
+  const fitShadow = sun.shadow.updateMatrices.bind(sun.shadow);
+  sun.shadow.updateMatrices = (light) => {
+    const halfW = (camera.right - camera.left) / 2 / camera.zoom;
+    const halfH = (camera.top - camera.bottom) / 2 / camera.zoom;
+    const r = Math.min(60, Math.max(12, Math.hypot(halfW, halfH * SHADOW_DEPTH_STRETCH) + 3));
+    const box = sun.shadow.camera;
+    if (Math.abs(box.right - r) > 0.25) {
+      Object.assign(box, { left: -r, right: r, top: r, bottom: -r });
+      box.updateProjectionMatrix();
+    }
+    fitShadow(light);
+  };
 
   // Screen-space HUD in CSS pixels, origin at the top-left corner.
   const hudScene = new Scene();

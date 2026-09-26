@@ -57,7 +57,9 @@ function createShaft() {
   const flat = shadowed(new Mesh(new BoxGeometry(0.075, 0.9, 0.02), jointMat));
   spinner.add(flat);
   pivot.add(spinner);
+  // Universal joints are too small for a visible shadow: skip them in the shadow pass.
   const jointA = shadowed(new Mesh(new BoxGeometry(0.08, 0.06, 0.08), jointMat));
+  jointA.castShadow = false;
   const jointB = jointA.clone();
   return { pivot, spinner, jointA, jointB };
 }
@@ -73,7 +75,11 @@ export function createAxleRig() {
   const steering = {
     upperShaft: unitCylinder(0.016, shaftMat, 8),
     lowerShaft: unitCylinder(0.016, shaftMat, 8),
-    joints: [0, 1].map(() => shadowed(new Mesh(new SphereGeometry(0.032, 12, 8), jointMat))),
+    joints: [0, 1].map(() => {
+      const joint = shadowed(new Mesh(new SphereGeometry(0.032, 12, 8), jointMat));
+      joint.castShadow = false; // too small for a visible shadow
+      return joint;
+    }),
     box: shadowed(new Mesh(new BoxGeometry(0.16, 0.12, 0.12), housing)),
     pitman: unitCylinder(0.018, jointMat, 8),
     dragLink: unitCylinder(0.02, shaftMat, 8),

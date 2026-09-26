@@ -1,5 +1,7 @@
 import { BufferAttribute, BufferGeometry, Mesh, MeshStandardMaterial } from 'three/webgpu';
 
+// Flat shading takes face normals from screen-space derivatives in the shader, so the vertex
+// normals are never read: they are computed once for the start pose and not updated per frame.
 const rubber = new MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
 
 // A world-space mesh whose vertices are a soft tyre's particles, with shaded tread blocks so
@@ -19,6 +21,7 @@ export function createSoftTireMesh(soft, mesh) {
     }
   }
   geometry.setAttribute('color', new BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
   const object = new Mesh(geometry, rubber);
   object.castShadow = true;
   object.receiveShadow = true;
@@ -30,7 +33,6 @@ export function updateSoftTireMesh(object, soft) {
   const position = object.geometry.getAttribute('position');
   position.array.set(soft.particlePositions());
   position.needsUpdate = true;
-  object.geometry.computeVertexNormals();
 }
 
 // GPU solver positions are vec4 per particle; tyre `index` occupies one contiguous block.
@@ -45,6 +47,5 @@ export function updateGpuTireMesh(object, solver, index) {
     out[k * 3 + 2] = src[base + k * 4 + 2];
   }
   position.needsUpdate = true;
-  object.geometry.computeVertexNormals();
-  object.geometry.computeBoundingSphere();
+  // No normals (flat shading) and no bounding sphere (the mesh is never frustum culled).
 }

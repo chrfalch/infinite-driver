@@ -20,24 +20,78 @@ export function createGpuTires(device, count, tire = TIRE, gpu = GPU_TIRE) {
   return { solver, mesh, mirrored };
 }
 
-// Samples the ground (terrain plus ruts) on the solver's grid, centred on (x, z). The grid spacing
-// matches the deformation map, so ruts are read cell for cell.
+const RECENTRE = 1; // metres the car may drift from the grid centre before it is re-centred
+
+// Samples the ground (terrain plus ruts) on the solver's grid around (x, z). The grid spacing
+// matches the deformation map, so ruts are read cell for cell. The grid only moves when the car is
+// RECENTRE metres off its centre (terrain heights of the overlap are kept), and rut changes are
+// patched in from the deformation's dirty rectangle, so most frames do little or nothing.
 export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell = 0.125) {
-  const half = ((GROUND_N - 1) * cell) / 2;
-  const ix0 = Math.round((x - half) / cell);
-  const iz0 = Math.round((z - half) / cell);
-  const ox = ix0 * cell;
-  const oz = iz0 * cell;
+  const N = GROUND_N;
+  const half = ((N - 1) * cell) / 2;
+  let g = solver.groundCache;
+  const compatible = g && solver.groundReady && g.cell === cell && g.heightAt === heightAt && g.deformation === deformation;
+  const recentre =
+    !compatible || Math.abs(x - (g.ix0 * cell + half)) >= RECENTRE || Math.abs(z - (g.iz0 * cell + half)) >= RECENTRE;
   const version = deformation?.version ?? 0;
-  if (solver.groundReady && solver.groundOrigin.x === ox && solver.groundOrigin.z === oz && solver.groundVersion === version) return;
-  const heights = solver.groundScratch ?? (solver.groundScratch = new Float32Array(GROUND_N * GROUND_N));
-  for (let iz = 0; iz < GROUND_N; iz++) {
-    for (let ix = 0; ix < GROUND_N; ix++) {
-      const offset = deformation ? deformation.cellValue(ix0 + ix, iz0 + iz) : 0;
-      heights[iz * GROUND_N + ix] = heightAt(ox + ix * cell, oz + iz * cell) + offset;
-    }
+  if (!recentre && g.version === version) return;
+
+  if (!g) {
+    g = solver.groundCache = { base: new Float32Array(N * N), heights: new Float32Array(N * N), spare: new Float32Array(N * N) };
   }
-  solver.setGround(heights, ox, oz, cell);
+  const { heights } = g;
+  if (recentre) {
+    const ix0 = Math.round((x - half) / cell);
+    const iz0 = Math.round((z - half) / cell);
+    const ox = ix0 * cell;
+    const oz = iz0 * cell;
+    // Terrain heights: keep the overlap with the previous grid, sample the rest.
+    const base = g.spare;
+    const reuse = compatible && g.cell === cell;
+    const sx = reuse ? ix0 - g.ix0 : N;
+    const sz = reuse ? iz0 - g.iz0 : N;
+    for (let iz = 0; iz < N; iz++) {
+      const pz = iz + sz;
+      const rowReuse = pz >= 0 && pz < N;
+      for (let ix = 0; ix < N; ix++) {
+        const px = ix + sx;
+        base[iz * N + ix] = rowReuse && px >= 0 && px < N ? g.base[pz * N + px] : heightAt(ox + ix * cell, oz + iz * cell);
+      }
+    }
+    g.spare = g.base;
+    g.base = base;
+    g.ix0 = ix0;
+    g.iz0 = iz0;
+    g.cell = cell;
+    g.heightAt = heightAt;
+    g.deformation = deformation;
+    heights.set(base);
+    if (deformation) {
+      deformation.accumulate(ix0, iz0, N, N, heights);
+      // The whole grid is fresh, so restart the deformation's change tracking.
+      deformation.changedSince(version);
+    }
+  } else {
+    // Same grid, the ruts changed: refresh only the changed cells inside it.
+    const r = deformation.changedSince(g.version);
+    let x0 = 0, z0 = 0, x1 = N - 1, z1 = N - 1;
+    if (r) {
+      x0 = Math.max(0, r.x0 - g.ix0);
+      z0 = Math.max(0, r.z0 - g.iz0);
+      x1 = Math.min(N - 1, r.x1 - g.ix0);
+      z1 = Math.min(N - 1, r.z1 - g.iz0);
+    }
+    g.version = version;
+    if (x0 > x1 || z0 > z1) return;
+    const nx = x1 - x0 + 1;
+    for (let iz = z0; iz <= z1; iz++) {
+      const o = iz * N + x0;
+      heights.set(g.base.subarray(o, o + nx), o);
+    }
+    deformation.accumulate(g.ix0 + x0, g.iz0 + z0, nx, z1 - z0 + 1, heights, N, z0 * N + x0);
+  }
+  g.version = version;
+  solver.setGround(heights, g.ix0 * cell, g.iz0 * cell, cell);
   solver.groundReady = true;
   solver.groundVersion = version;
 }

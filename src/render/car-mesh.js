@@ -13,6 +13,7 @@ import { CAR } from '../vehicle/config.js';
 import { wheelMount } from '../vehicle/physics.js';
 import { createAxleRig } from './axles.js';
 import { createFrameMesh } from './frame-mesh.js';
+import { mergeByMaterial } from './merge-geometry.js';
 import { frameGeometry, suspensionMounts } from '../vehicle/frame-geometry.js';
 
 const frame = new MeshStandardMaterial({ color: '#2d2f31', roughness: 0.7, metalness: 0.3 });
@@ -77,16 +78,19 @@ export function steeringJointAngles(geo = steeringGeometry()) {
 export function createCarMesh() {
   const g = frameGeometry();
   const car = new Group();
-  car.add(createFrameMesh());
+  // Parts fixed to the chassis go into `body`, merged into one mesh per material at the end.
+  const body = new Group();
+  body.name = 'frame and cage';
+  body.add(createFrameMesh());
 
   // Seats on the floor pan between the hoops, driver on the left (-z).
   const seatX = (g.frontHoopX + g.mainHoopX) / 2 - 0.12;
   for (const z of [-0.3, 0.3]) {
-    car.add(box(0.46, 0.1, 0.44, seat, seatX, g.railTop + 0.13, z));
-    car.add(box(0.1, 0.55, 0.44, seat, seatX - 0.25, g.railTop + 0.42, z));
+    body.add(box(0.46, 0.1, 0.44, seat, seatX, g.railTop + 0.13, z));
+    body.add(box(0.1, 0.55, 0.44, seat, seatX - 0.25, g.railTop + 0.42, z));
     // Seat mounts to the floor.
-    car.add(box(0.36, 0.08, 0.05, frame, seatX, g.railTop + 0.05, z - 0.17));
-    car.add(box(0.36, 0.08, 0.05, frame, seatX, g.railTop + 0.05, z + 0.17));
+    body.add(box(0.36, 0.08, 0.05, frame, seatX, g.railTop + 0.05, z - 0.17));
+    body.add(box(0.36, 0.08, 0.05, frame, seatX, g.railTop + 0.05, z + 0.17));
   }
 
   // Steering: the wheel faces the driver, tilted up and back; its column runs forward and down
@@ -97,6 +101,7 @@ export function createCarMesh() {
   const spoke = box(0.3, 0.03, 0.03, frame, 0, 0, 0);
   const spoke2 = box(0.03, 0.3, 0.03, frame, 0, 0, 0);
   steeringWheel.add(ring, spoke, spoke2);
+  mergeByMaterial(steeringWheel);
   const steer = steeringGeometry(g);
   const column = new Group();
   column.position.copy(steer.wheelCenter);
@@ -105,10 +110,11 @@ export function createCarMesh() {
   column.add(steeringWheel);
   car.add(column);
   // Column stub from the wheel to the first universal joint, held by a bracket on the dash bar.
-  car.add(bar(steer.wheelCenter, steer.joint1, 0.022, frame));
+  body.add(bar(steer.wheelCenter, steer.joint1, 0.022, frame));
   const clamp = steer.wheelCenter.clone().lerp(steer.joint1, 0.6);
-  car.add(bar(clamp, new Vector3(clamp.x + 0.08, g.dashY, clamp.z), 0.016, frame));
-  car.add(box(0.05, 0.05, 0.07, frame, clamp.x + 0.08, g.dashY, clamp.z));
+  body.add(bar(clamp, new Vector3(clamp.x + 0.08, g.dashY, clamp.z), 0.016, frame));
+  body.add(box(0.05, 0.05, 0.07, frame, clamp.x + 0.08, g.dashY, clamp.z));
+  car.add(mergeByMaterial(body));
 
   const axles = createAxleRig();
   car.add(axles.group);
@@ -180,7 +186,8 @@ export function createWheelRig(index, { softTire = null } = {}) {
   // The hub carries the wheel; it moves up and down with the suspension.
   const hub = new Group();
   const steer = new Group();
-  const spin = softTire ? createRim(softTire.rimRadius, softTire.width * 0.85, true) : createTyre();
+  // The spinning wheel's parts never move relative to each other: one mesh per material.
+  const spin = mergeByMaterial(softTire ? createRim(softTire.rimRadius, softTire.width * 0.85, true) : createTyre());
   steer.add(spin);
   // Knuckle stays with the steering but not the spin.
   steer.add(box(0.14, 0.26, 0.08, frame, 0, 0, -side * (w / 2 + 0.06)));
