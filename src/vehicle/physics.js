@@ -49,6 +49,15 @@ export function createCarBody(RAPIER, world, position, car = CAR) {
       car.suspensionRestLength,
       car.wheelRadius,
     );
+  }
+  applyWheelSettings(controller, car);
+  return { body, controller };
+}
+
+// Settings the controller stores per wheel. Safe to call any time to apply tuning live.
+export function applyWheelSettings(controller, car = CAR) {
+  for (let i = 0; i < WHEELS.length; i++) {
+    controller.setWheelSuspensionRestLength(i, car.suspensionRestLength);
     controller.setWheelMaxSuspensionTravel(i, car.maxSuspensionTravel);
     controller.setWheelSuspensionStiffness(i, car.suspensionStiffness);
     controller.setWheelSuspensionCompression(i, car.suspensionCompression);
@@ -57,7 +66,6 @@ export function createCarBody(RAPIER, world, position, car = CAR) {
     controller.setWheelFrictionSlip(i, car.frictionSlip);
     controller.setWheelSideFrictionStiffness(i, car.sideFrictionStiffness);
   }
-  return { body, controller };
 }
 
 // Converts driver input into wheel forces for one physics substep.

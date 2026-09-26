@@ -1,5 +1,5 @@
 // A short-wheelbase 4x4, roughly 1.8 t. Chassis-local axes: +x forward, +y up, +z right.
-export const CAR = {
+export const DEFAULT_CAR = Object.freeze({
   mass: 1800,
   // Physics box for the body tub and frame. The wheels stick out past it.
   halfExtents: { x: 1.95, y: 0.34, z: 0.6 },
@@ -32,4 +32,47 @@ export const CAR = {
   steeringWheelRatio: 9, // visual: steering wheel turns this much more than the road wheels
   dragCoefficient: 0.75, // 0.5 * rho * Cd * A, boxy body
   rollingResistance: 0.018,
-};
+});
+
+const STORAGE_KEY = 'drift.car.v1';
+const clone = (value) => JSON.parse(JSON.stringify(value));
+
+function loadSaved() {
+  try {
+    const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+// Only known keys are taken from saved settings, so stale values cannot break the car.
+function merge(target, source) {
+  for (const key of Object.keys(target)) {
+    if (!(key in source)) continue;
+    if (typeof target[key] === 'object') merge(target[key], source[key] ?? {});
+    else if (typeof source[key] === typeof target[key]) target[key] = source[key];
+  }
+  return target;
+}
+
+// The live, tunable settings. Systems read from this object every step.
+export const CAR = merge(clone(DEFAULT_CAR), loadSaved());
+
+export function saveCar() {
+  try {
+    globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(CAR));
+  } catch {
+    // Storage can be unavailable (private mode); tuning still works for this session.
+  }
+}
+
+export function resetCar() {
+  merge(CAR, clone(DEFAULT_CAR));
+  saveCar();
+}
+
+export function importCar(settings) {
+  merge(CAR, settings);
+  saveCar();
+}

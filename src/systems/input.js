@@ -1,4 +1,5 @@
 import { Input } from '../ecs/traits.js';
+import { isTyping } from '../tuning/panel.js';
 
 const keys = new Set();
 // Fresh presses since the last frame (key repeat is ignored).
@@ -9,6 +10,8 @@ const BRAKE = ['KeyS', 'ArrowDown'];
 
 export function attachKeyboard(target = window) {
   const down = (e) => {
+    // Keys typed into the tuning panel must not drive the car.
+    if (isTyping(e)) return;
     if (!e.repeat) taps.add(e.code);
     keys.add(e.code);
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();

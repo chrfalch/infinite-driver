@@ -3,24 +3,18 @@ import { glyph } from '@pmndrs/glyph';
 import { ThreeConfig } from '@pmndrs/glyph/three';
 import { createWorld } from 'koota';
 import {
-  CameraTarget,
   HeightField,
   HudLabel,
   Input,
   IsPlayer,
   Physics,
   Render,
-  RigidBody,
   SteeringWheel,
   TerrainStreaming,
   Time,
-  Transform,
   Vehicle,
-  View,
-  WheelOf,
   WheelRig,
 } from './ecs/traits.js';
-import { createCarMesh, createWheelRig } from './render/car-mesh.js';
 import { createRenderer } from './render/scene.js';
 import { attachZoom, followCamera } from './systems/camera.js';
 import { updateHud } from './systems/hud.js';
@@ -29,7 +23,8 @@ import { stepPhysics, syncBodies } from './systems/physics.js';
 import { streamTerrain } from './systems/terrain.js';
 import { syncViews, syncWheels } from './systems/views.js';
 import { createHeightField } from './terrain/height.js';
-import { createCarBody, WHEELS } from './vehicle/physics.js';
+import { spawnCar } from './vehicle/spawn.js';
+import { createTuningPanel } from './tuning/panel.js';
 
 async function main() {
   const container = document.getElementById('app');
@@ -48,24 +43,8 @@ async function main() {
   world.add(HeightField({ heightAt }));
 
   // The car starts just above the ground at the origin.
-  const start = { x: 0, y: heightAt(0, 0) + 1.2, z: 0 };
-  const { body, controller } = createCarBody(RAPIER, physicsWorld, start);
-  const { object: carMesh, steeringWheel } = createCarMesh();
-  render.scene.add(carMesh);
-  const car = world.spawn(
-    IsPlayer,
-    CameraTarget,
-    Transform({ position: { ...start }, quaternion: { x: 0, y: 0, z: 0, w: 1 } }),
-    RigidBody({ body }),
-    Vehicle({ controller, body, steer: 0, speed: 0 }),
-    View({ object: carMesh }),
-    SteeringWheel({ object: steeringWheel }),
-  );
-  WHEELS.forEach((_, index) => {
-    const rig = createWheelRig(index);
-    carMesh.add(rig.object);
-    world.spawn(WheelOf(car, { index }), WheelRig({ rig }));
-  });
+  spawnCar(world, { position: { x: 0, y: heightAt(0, 0) + 1.2, z: 0 } });
+  createTuningPanel(world, { heightAt });
 
   streamTerrain(world, { force: true });
 
@@ -93,14 +72,14 @@ async function main() {
 
   const hintText = hud.createText({
     font: inter,
-    text: 'W / Up  engine on/off    S / Down  brake    A D / Left Right  steer    Space  handbrake    Scroll  zoom',
+    text: 'W / Up  engine on/off    S / Down  brake    A D / Left Right  steer    Space  handbrake    R  respawn    Scroll  zoom',
     style: { fontSize: 14, lineHeight: 1.2, color: '#8a826f' },
   });
   hintText.position.set(28, -78, 0);
   render.hudScene.add(hintText);
 
   attachKeyboard();
-  attachZoom();
+  attachZoom(render.renderer.domElement);
 
   let last = performance.now();
   const frame = (now) => {
@@ -128,7 +107,14 @@ async function main() {
   render.renderer.setAnimationLoop(frame);
 
   // Handy for debugging from the console.
-  window.__game = { world, car, RAPIER, traits: { Vehicle, WheelRig, SteeringWheel, Input, Time } };
+  window.__game = {
+    world,
+    RAPIER,
+    get car() {
+      return world.queryFirst(IsPlayer, Vehicle);
+    },
+    traits: { Vehicle, WheelRig, SteeringWheel, Input, Time },
+  };
 }
 
 main().catch((error) => {
