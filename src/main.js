@@ -118,9 +118,13 @@ async function main() {
   attachZoom(render.renderer.domElement);
 
   let last = performance.now();
-  // Physics can wait on the GPU, so a frame is async; a frame that arrives while the previous one
-  // is still simulating is skipped rather than overlapped.
+  // Physics can wait on the GPU (tyre readback), so it runs as its own async task and is never
+  // overlapped: a new batch of steps starts only when the previous one is done, with all the time
+  // that passed since. Drawing happens synchronously in every animation frame, whatever physics is
+  // doing: Safari shows a blank (white) canvas for frames where nothing is drawn inside the
+  // animation-frame callback, which flickered whenever a physics batch outlasted a frame.
   let busy = false;
+  let pendingDelta = 0;
   const draw = () => {
     const { renderer, scene, camera, hudScene, hudCamera } = render;
     renderer.clear();
@@ -128,46 +132,48 @@ async function main() {
     renderer.clearDepth();
     renderer.render(hudScene, hudCamera);
   };
-  const frame = async (now) => {
-    // Still draw the last state: Safari shows a blank (white) canvas for any animation frame that
-    // submits nothing, which flickers whenever a physics step waits on the GPU past a frame.
-    if (busy) {
-      draw();
-      return;
-    }
+  const simulate = async (delta) => {
     busy = true;
     try {
-      const time = world.get(Time);
-      time.delta = Math.min((now - last) / 1000, 0.1);
-      time.elapsed += time.delta;
-      last = now;
-
       // Queued rebuilds and respawns run here, never while physics awaits the GPU.
       applyPendingCarAction();
       readInput(world);
-      await stepPhysics(world);
-      syncBodies(world);
-      streamTerrain(world);
-      syncViews(world);
-      syncWheels(world);
-      syncAxles(world);
-      syncSoftTires(world);
-      updateTracks(world);
-      updateSoil(world);
-      followCamera(world);
-      updateHud(world);
-      const player = world.queryFirst(IsPlayer, Vehicle);
-      if (player) {
-        const canvas = render.renderer.domElement;
-        gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible());
-        gauges.update(player.get(Vehicle), time.delta);
-      }
-
-      glyph.shape();
-      draw();
+      await stepPhysics(world, delta);
+    } catch (error) {
+      console.error(error);
     } finally {
       busy = false;
     }
+  };
+  const frame = (now) => {
+    const time = world.get(Time);
+    time.delta = Math.min((now - last) / 1000, 0.1);
+    time.elapsed += time.delta;
+    last = now;
+    pendingDelta = Math.min(pendingDelta + time.delta, 0.1);
+    if (!busy) {
+      simulate(pendingDelta);
+      pendingDelta = 0;
+    }
+
+    syncBodies(world);
+    streamTerrain(world);
+    syncViews(world);
+    syncWheels(world);
+    syncAxles(world);
+    syncSoftTires(world);
+    updateTracks(world);
+    updateSoil(world);
+    followCamera(world);
+    updateHud(world);
+    const player = world.queryFirst(IsPlayer, Vehicle);
+    if (player) {
+      const canvas = render.renderer.domElement;
+      gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible());
+      gauges.update(player.get(Vehicle), time.delta);
+    }
+    glyph.shape();
+    draw();
   };
   render.renderer.setAnimationLoop(frame);
 

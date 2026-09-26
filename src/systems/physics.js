@@ -20,9 +20,10 @@ function updateGpuTyreWorld(world, vehicle) {
 
 // Fixed-step simulation so the car behaves the same at any frame rate. With GPU tyres each
 // step waits for the GPU's hub forces, so this is async.
-export async function stepPhysics(world) {
+export async function stepPhysics(world, frameDelta = null) {
   const physics = world.get(Physics);
-  const { delta } = world.get(Time);
+  // The time to simulate: what passed since the last batch (it may span several frames).
+  const delta = frameDelta ?? world.get(Time).delta;
   const input = world.get(Input);
   physics.accumulator = Math.min(physics.accumulator + delta, 0.1);
 
