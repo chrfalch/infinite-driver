@@ -1,8 +1,19 @@
 import GUI from 'lil-gui';
 import { CONTROLS, DEFAULT_CONTROLS, saveControls } from '../controls.js';
-import { Input, IsPlayer, Physics, Vehicle } from '../ecs/traits.js';
+import { Input, IsPlayer, Physics, Tracks, Vehicle } from '../ecs/traits.js';
 import { CAR, DEFAULT_CAR, resetCar, saveCar } from '../vehicle/config.js';
-import { GPU_TIRE, TIRE, effectiveGpuTire, resetGpuTire, resetTire, saveGpuTire, saveTire } from '../tire/config.js';
+import {
+  GPU_TIRE,
+  GROUND,
+  TIRE,
+  effectiveGpuTire,
+  resetGpuTire,
+  resetGround,
+  resetTire,
+  saveGpuTire,
+  saveGround,
+  saveTire,
+} from '../tire/config.js';
 import { TIRE_REBUILD_KEYS, updateSoftTire } from '../tire/soft-tire.js';
 import { applyWheelSettings } from '../vehicle/physics.js';
 import { rebuildCar, respawnCar } from '../vehicle/spawn.js';
@@ -127,7 +138,7 @@ export function createTuningPanel(world, { heightAt }) {
 
   const actions = {
     copy: async () => {
-      const text = JSON.stringify({ changed: changedSettings(), controls: CONTROLS, car: CAR, tire: TIRE, gpuTire: GPU_TIRE }, null, 2);
+      const text = JSON.stringify({ changed: changedSettings(), controls: CONTROLS, ground: GROUND, car: CAR, tire: TIRE, gpuTire: GPU_TIRE }, null, 2);
       const ok = await copyText(text);
       copyButton.name(ok ? 'Copied ✓' : 'Copy failed, see console');
       if (!ok) console.log(text);
@@ -137,6 +148,7 @@ export function createTuningPanel(world, { heightAt }) {
       resetCar();
       resetTire();
       resetGpuTire();
+      resetGround();
       Object.assign(CONTROLS, DEFAULT_CONTROLS);
       saveControls();
       gui.controllersRecursive().forEach((c) => c.updateDisplay());
@@ -233,6 +245,19 @@ export function createTuningPanel(world, { heightAt }) {
     softFolder.add(TIRE, key, min, max, step).name(label).onChange(onTire(key));
   }
   softFolder.close();
+
+  // Ground: softness sinks the GPU tyres into the soil; tracks are drawn in every tyre mode.
+  const ground = gui.addFolder('Ground');
+  ground
+    .add(GROUND, 'softness', 0, 1, 0.05)
+    .name('Softness (GPU tyres)')
+    .onChange(() => {
+      saveGround();
+      const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.gpu?.solver;
+      if (solver) solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step);
+    });
+  ground.add(GROUND, 'tracks').name('Tyre tracks').onChange(saveGround);
+  ground.add({ clear: () => world.get(Tracks).renderer?.clear() }, 'clear').name('Clear tracks');
 
   // GPU tyre settings: most apply live, mesh and mass rebuild the car.
   addGpuTireFolder(gui, world, scheduleRebuild);

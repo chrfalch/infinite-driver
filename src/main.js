@@ -11,6 +11,7 @@ import {
   Render,
   SteeringWheel,
   TerrainStreaming,
+  Tracks,
   Time,
   Vehicle,
   WheelRig,
@@ -22,6 +23,9 @@ import { attachKeyboard, readInput } from './systems/input.js';
 import { stepPhysics, syncBodies } from './systems/physics.js';
 import { streamTerrain } from './systems/terrain.js';
 import { syncSoftTires, syncViews, syncWheels } from './systems/views.js';
+import { updateTracks } from './systems/tracks.js';
+import { TireTracks } from './render/tracks.js';
+import { GROUND } from './tire/config.js';
 import { createHeightField } from './terrain/height.js';
 import { respawnCar, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
@@ -42,6 +46,7 @@ async function main() {
   world.add(Physics({ rapier: RAPIER, world: physicsWorld, accumulator: 0, step: 1 / 120, stepMs: 0 }));
   world.add(Render(render));
   world.add(HeightField({ heightAt }));
+  world.add(Tracks({ renderer: new TireTracks(render.scene, { segments: GROUND.trackLength }) }));
 
   // The car starts just above the ground at the origin.
   spawnCar(world, { position: { x: 0, y: heightAt(0, 0) + startHeight(), z: 0 } });
@@ -135,6 +140,7 @@ async function main() {
       syncViews(world);
       syncWheels(world);
       syncSoftTires(world);
+      updateTracks(world);
       followCamera(world);
       updateHud(world);
 
@@ -158,7 +164,7 @@ async function main() {
     get car() {
       return world.queryFirst(IsPlayer, Vehicle);
     },
-    traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics },
+    traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks },
   };
 }
 

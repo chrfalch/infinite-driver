@@ -24,6 +24,14 @@ function colorFor(h, slope, x, z, out) {
   return out;
 }
 
+// Ground colour at a world position, matching the terrain mesh (used by the tyre tracks).
+export function terrainColorAt(heightAt, x, z, out = new Color()) {
+  const e = 0.5;
+  const dx = (heightAt(x + e, z) - heightAt(x - e, z)) / (2 * e);
+  const dz = (heightAt(x, z + e) - heightAt(x, z - e)) / (2 * e);
+  return colorFor(heightAt(x, z), Math.hypot(dx, dz), x, z, out);
+}
+
 export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, res = CHUNK_RES) {
   const n = res + 1;
   const step = size / res;

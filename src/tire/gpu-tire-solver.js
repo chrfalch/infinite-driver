@@ -32,6 +32,9 @@ const Params = d.struct({
   friction: d.f32,
   radius: d.f32,
   relaxation: d.f32,
+  soilStiffness: d.f32, // N/m per particle; 0 = hard ground
+  soilRebound: d.f32, // fraction of soil push kept while the tread lifts off
+  maxSink: d.f32,
   groundOriginX: d.f32,
   groundOriginZ: d.f32,
   groundCell: d.f32,
@@ -199,10 +202,13 @@ export class GpuTireSolver {
       if (params.shapeStiffness > 0.0) {
         p += params.shapeStiffness * (hubPoint(t, k, params.dt * f32(substep + 1u)) - p);
       }
-      let g = groundHeight(p.x, p.z) + params.radius;
+      let surface = groundHeight(p.x, p.z) + params.radius;
+      // On soft ground the hard floor is maxSink below the surface; the soil spring does the rest.
+      var g = surface;
+      if (params.soilStiffness > 0.0) { g = surface - params.maxSink; }
       // A particle that was pushed into the ground this substep keeps its grip even if a
       // constraint lifts it slightly in a later pass; otherwise it could slide freely.
-      if (p.y < g || (pen0 > 0.0 && p.y < g + params.radius)) {
+      if (p.y < g || (pen0 > 0.0 && p.y < surface + params.radius)) {
         let pen = max(0.0, g - p.y);
         p.y = max(p.y, g);
         let slide = vec2f(p.x - before.x, p.z - before.z);
@@ -262,11 +268,23 @@ export class GpuTireSolver {
           let du = getP(0u, nb(u + 1, v)) - getP(0u, nb(u - 1, v));
           let dv = getP(0u, nb(u, v + 1)) - getP(0u, nb(u, v - 1));
           force += params.pressure * 0.25 * cross(du, dv) * hubs[t].position.w;
+          // Soft ground: soil pushes back in proportion to depth, fully while it is being
+          // compressed and only partly as the tread lifts off (so it absorbs energy).
+          var soil = 0.0;
+          if (params.soilStiffness > 0.0) {
+            let depth = groundHeight(x.x, x.z) + params.radius - x.y;
+            if (depth > 0.0) {
+              soil = params.soilStiffness * depth;
+              if (vl.y > 0.0) { soil *= params.soilRebound; }
+              force.y += soil;
+            }
+          }
           vl = (vl + dt * force / m) * max(0.0, 1.0 - params.damping * dt);
           let predicted = x + vl * dt;
-          // How far this substep's motion pushes into the ground: the normal "impulse" that sets
-          // the friction budget for every pass of the substep.
-          let pen0 = max(0.0, groundHeight(predicted.x, predicted.z) + params.radius - predicted.y);
+          // How hard this substep presses into the ground, as a distance: the normal "impulse"
+          // that sets the friction budget for every pass of the substep.
+          var pen0 = max(0.0, groundHeight(predicted.x, predicted.z) + params.radius - predicted.y);
+          if (params.soilStiffness > 0.0) { pen0 = soil * dt * dt / m; }
           prev[base + k] = vec4f(x, pen0);
           setP(1u, k, predicted);
         }
@@ -378,6 +396,10 @@ export class GpuTireSolver {
       friction: s.friction,
       radius: s.contactRadius,
       relaxation: s.relaxation,
+      // Soft ground is an explicit soil spring, capped below the stability limit for this substep.
+      soilStiffness: s.soilStiffness > 0 ? Math.min(s.soilStiffness, (3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)) : 0,
+      soilRebound: s.soilRebound ?? 0.35,
+      maxSink: s.maxSink ?? 0.25,
       groundOriginX: this.groundOrigin.x,
       groundOriginZ: this.groundOrigin.z,
       groundCell: this.groundCell,

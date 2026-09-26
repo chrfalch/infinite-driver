@@ -102,7 +102,44 @@ export function effectiveTire(tire, performance) {
   if (!performance) return tire;
   return { ...tire, pgsIterations: 1, substeps: 1, segmentsAround: 20, segmentsAcross: 6 };
 }
-export function effectiveGpuTire(gpu, performance) {
-  if (!performance) return gpu;
-  return { ...gpu, substeps: Math.min(gpu.substeps, 3), iterations: Math.min(gpu.iterations, 6), segmentsAround: 32, segmentsAcross: 8 };
+export function effectiveGpuTire(gpu, performance, ground = GROUND) {
+  const withSoil = { ...gpu, soilStiffness: soilStiffness(ground.softness) };
+  if (!performance) return withSoil;
+  return { ...withSoil, substeps: Math.min(gpu.substeps, 3), iterations: Math.min(gpu.iterations, 6), segmentsAround: 32, segmentsAcross: 8 };
+}
+
+// Ground settings shared by the tyres and the track renderer.
+export const DEFAULT_GROUND = Object.freeze({
+  softness: 0.15, // 0 = hard, 1 = very soft soil
+  tracks: true,
+  trackLength: 1500, // segments kept per wheel
+});
+const GROUND_KEY = 'drift.ground.v1';
+function loadGround() {
+  try {
+    return JSON.parse(globalThis.localStorage?.getItem(GROUND_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+export const GROUND = { ...DEFAULT_GROUND };
+for (const [key, value] of Object.entries(loadGround())) {
+  if (typeof value === typeof DEFAULT_GROUND[key]) GROUND[key] = value;
+}
+export function saveGround() {
+  try {
+    globalThis.localStorage?.setItem(GROUND_KEY, JSON.stringify(GROUND));
+  } catch {
+    // Storage can be unavailable; settings still work for this session.
+  }
+}
+export function resetGround() {
+  Object.assign(GROUND, DEFAULT_GROUND);
+  saveGround();
+}
+
+// Soil spring stiffness per tyre particle for a softness in 0..1 (0 = hard ground, no spring).
+export function soilStiffness(softness) {
+  if (softness <= 0) return 0;
+  return 30000 * (1 - softness) ** 2 + 1500;
 }
