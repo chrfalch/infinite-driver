@@ -1,6 +1,6 @@
 import { TIRE } from '../tire/config.js';
 import { GROUP, createSoftTire, groups } from '../tire/soft-tire.js';
-import { CAR } from './config.js';
+import { CAR, DRIVETRAIN } from './config.js';
 import { WHEELS, wheelMount } from './physics.js';
 
 const DOWN = { x: 0, y: -1, z: 0 };
@@ -212,7 +212,7 @@ export class JointedVehicle {
     roll.setContactsEnabled(false);
     roll.configureMotorModel(RAPIER.MotorModel.ForceBased);
     this.joints.push(slider, roll);
-    return { beam, carrier, slider, roll, mid, springSpan: track * 0.5, length: car.suspensionRestLength, rollAngle: 0 };
+    return { beam, carrier, slider, roll, mid, springSpan: track * 0.8 * Math.sqrt(car.rollStiffness ?? 1), length: car.suspensionRestLength, rollAngle: 0 };
   }
 
   applySpringSettings() {
@@ -342,6 +342,10 @@ export class JointedVehicle {
     const qc = this.body.rotation();
     const pc = this.body.translation();
     const qcInv = conjugate(qc);
+    // Chassis and axle torques are rebuilt every step (Rapier keeps added torques until reset).
+    this.body.resetTorques(true);
+    for (const axle of this.axles) axle.beam.resetTorques(true);
+    this.applyLinkTorques(dt, qc);
     for (const axle of this.axles) {
       const c = axle.carrier.translation();
       const local = rotate(qcInv, { x: c.x - pc.x, y: c.y - pc.y, z: c.z - pc.z });
@@ -390,6 +394,39 @@ export class JointedVehicle {
     }
   }
 
+  // Torques the suspension links and axles put into the chassis:
+  // - anti-dive / anti-squat: link geometry takes part of the pitch from braking and acceleration;
+  // - pinion reaction (solid axles): the propshaft's drive torque twists each axle one way and the
+  //   chassis the other, so the body leans a little under power and one wheel unloads.
+  applyLinkTorques(dt, qc) {
+    const { car } = this;
+    const fwd = rotate(qc, { x: 1, y: 0, z: 0 });
+    const side = rotate(qc, { x: 0, y: 0, z: 1 });
+    const v = this.body.linvel();
+    const vf = v.x * fwd.x + v.y * fwd.y + v.z * fwd.z;
+    const raw = (vf - (this.lastForward ?? vf)) / dt;
+    this.lastForward = vf;
+    this.accel = (this.accel ?? 0) + (raw - (this.accel ?? 0)) * Math.min(1, dt / 0.06);
+    const add = (body, axis, torque) => body.addTorque({ x: axis.x * torque, y: axis.y * torque, z: axis.z * torque }, true);
+    // Braking (accel < 0) dives the nose; the links push it back up (+z is nose-up).
+    const pitch = -(car.antiDive ?? 0) * this.body.mass() * this.accel * 0.45;
+    if (pitch) {
+      add(this.body, side, pitch);
+      for (const axle of this.axles) add(axle.beam, side, -pitch / this.axles.length);
+    }
+    if (this.solid && car.pinionReaction) {
+      const radius = this.tire.outerRadius;
+      this.axles.forEach((axle, a) => {
+        const [i, j] = a === 0 ? [0, 1] : [2, 3];
+        const input = ((this.wheels[i].engineForce + this.wheels[j].engineForce) * radius) / DRIVETRAIN.finalDrive;
+        // Under power the chassis rolls to the right (+x torque), the axle the other way.
+        const t = car.pinionReaction * input;
+        add(this.body, fwd, t);
+        add(axle.beam, fwd, -t);
+      });
+    }
+  }
+
   hubStates() {
     return this.wheels.map((w) => ({
       position: w.hub.translation(),
@@ -425,7 +462,10 @@ export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIR
     RAPIER.RigidBodyDesc.dynamic().setTranslation(position.x, position.y, position.z).setCanSleep(false),
   );
   const { x: hx, y: hy, z: hz } = car.halfExtents;
-  const m = car.mass;
+  // The jointed car's axles, hubs, knuckles, and tyres add mass; the chassis gets the rest so the
+  // whole car weighs car.mass.
+  const unsprung = car.solidAxles ? 292 : 184;
+  const m = Math.max(600, car.mass - unsprung);
   const inertia = {
     x: (m / 12) * (4 * hy * hy + 4 * hz * hz) * 1.6,
     y: (m / 12) * (4 * hx * hx + 4 * hz * hz),

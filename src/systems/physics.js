@@ -28,6 +28,11 @@ export async function stepPhysics(world) {
 
   const vehicles = [];
   world.query(Vehicle).updateEach(([vehicle]) => vehicles.push(vehicle));
+  // Rapier soft-body tyres cost about 10 ms per step. Rather than spiralling into 12 steps per
+  // frame, run at most 4 and let the simulation slow down a little on slow machines.
+  if (vehicles.some((v) => v.controller.softBodies?.length)) {
+    physics.accumulator = Math.min(physics.accumulator, physics.step * 4);
+  }
   for (const v of vehicles) if (v.controller.gpu) updateGpuTyreWorld(world, v);
 
   const t0 = performance.now();

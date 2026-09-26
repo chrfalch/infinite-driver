@@ -68,6 +68,20 @@ export function applyWheelSettings(controller, car = CAR) {
   }
 }
 
+// Front wheel angles (left, right) for a mean steering angle.
+export function ackermann(steer, car = CAR) {
+  if (Math.abs(steer) < 1e-4 || !car.ackermann) return [steer, steer];
+  const L = car.wheelBase;
+  const half = car.track / 2;
+  const R = L / Math.tan(Math.abs(steer)); // turn radius at the axle centre
+  const inner = Math.atan(L / (R - half));
+  const outer = Math.atan(L / (R + half));
+  const k = car.ackermann;
+  const mix = (a) => (a * k + Math.abs(steer) * (1 - k)) * Math.sign(steer);
+  // Turning left (steer > 0), the left wheel is on the inside.
+  return steer > 0 ? [mix(inner), mix(outer)] : [mix(outer), mix(inner)];
+}
+
 // Converts driver input into wheel forces for one physics substep.
 export function applyDriverInput(state, input, dt, car = CAR) {
   const { controller, body } = state;
@@ -79,8 +93,11 @@ export function applyDriverInput(state, input, dt, car = CAR) {
   const target = input.steer * steerLimit;
   const maxDelta = car.steerRate * dt;
   state.steer += Math.max(-maxDelta, Math.min(maxDelta, target - state.steer));
-  controller.setWheelSteering(0, state.steer);
-  controller.setWheelSteering(1, state.steer);
+  // Ackermann: the inner front wheel turns tighter than the outer, so both roll around the same
+  // centre (positive steer turns left; wheel 0 is front-left).
+  const [left, right] = ackermann(state.steer, car);
+  controller.setWheelSteering(0, left);
+  controller.setWheelSteering(1, right);
 
   // Pedals: in a forward gear ▲ drives and ▼ brakes; at a standstill ▼ asks for reverse, and in
   // reverse the roles swap (▼ backs up, ▲ brakes).
@@ -151,6 +168,20 @@ export function applyDriverInput(state, input, dt, car = CAR) {
     body.addForce({ x: -v.x * drag, y: -v.y * drag, z: -v.z * drag }, true);
   }
   const grounded = [0, 1, 2, 3].some((i) => controller.wheelIsInContact(i));
+  // Raycast car: Rapier applies the tyre side forces near the centre of mass, so the body barely
+  // rolls. Add the roll moment the side force would make below the centre of mass.
+  if (!controller.wheels && grounded && car.rigidBodyRoll > 0) {
+    const w = body.angvel();
+    const q0 = body.rotation();
+    const up = { x: 2 * (q0.x * q0.y - q0.w * q0.z), y: 1 - 2 * (q0.x * q0.x + q0.z * q0.z), z: 2 * (q0.y * q0.z + q0.w * q0.x) };
+    const yawRate = w.x * up.x + w.y * up.y + w.z * up.z;
+    const lateralAccel = speed * yawRate; // centripetal, toward the turn centre
+    const rollMoment = car.rigidBodyRoll * car.mass * lateralAccel * 0.45; // about 0.45 m of arm
+    // Body leans away from the turn: a left turn (positive yaw) rolls it to the right (+x torque).
+    const fwd = { x: 1 - 2 * (q0.y * q0.y + q0.z * q0.z), y: 2 * (q0.x * q0.y + q0.w * q0.z), z: 2 * (q0.x * q0.z - q0.w * q0.y) };
+    body.resetTorques(true);
+    body.addTorque({ x: fwd.x * rollMoment, y: fwd.y * rollMoment, z: fwd.z * rollMoment }, true);
+  }
   if (!controller.wheels && grounded && absSpeed > 0.05) {
     const q = body.rotation();
     const fx = 1 - 2 * (q.y * q.y + q.z * q.z);

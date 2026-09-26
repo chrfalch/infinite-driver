@@ -32,7 +32,12 @@ export const DEFAULT_CAR = Object.freeze({
   handbrakeForce: 16000, // N on the rear axle, enough to hold the rears against the engine
   maxSteer: 0.62, // rad at walking pace
   steerRate: 2.0, // rad/s
-  steeringWheelRatio: 9, // visual: steering wheel turns this much more than the road wheels
+  steeringWheelRatio: 9,
+  ackermann: 1, // 0 = both front wheels at the same angle, 1 = full Ackermann geometry
+  antiDive: 0.4, // share of braking/acceleration pitch taken by the suspension links
+  rollStiffness: 1, // solid axles: roll stiffness relative to coil-overs at 80% of the track
+  pinionReaction: 1, // solid axles: drive torque twists the axle and rolls the chassis (0 = off)
+  rigidBodyRoll: 0.6, // raycast car: body roll from cornering (0 = flat, like Rapier's default) // visual: steering wheel turns this much more than the road wheels
   dragCoefficient: 0.75, // 0.5 * rho * Cd * A, boxy body
   rollingResistance: 0.018,
 });
