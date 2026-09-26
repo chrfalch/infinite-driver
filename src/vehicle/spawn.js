@@ -98,6 +98,10 @@ export function despawnCar(world, car) {
       const view = wheel.get(SoftTireView);
       scene.remove(view.object);
       view.object.geometry.dispose();
+      // Each tyre has its own material and lattice/rock textures (see render/mt-tyre.js).
+      view.object.userData.lattice?.dispose();
+      view.object.userData.rocks?.dispose();
+      view.object.material?.dispose();
     }
     wheel.destroy();
   });
