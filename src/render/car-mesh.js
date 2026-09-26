@@ -122,20 +122,43 @@ export function createCarMesh() {
   return { object: car, steeringWheel, axles };
 }
 
-// The wheel rim with lug nuts; a spoke pair makes the spin visible when the tyre is soft.
+// The wheel rim, seen from either side: a beadlock ring at the lip, spokes from a centre cap
+// out to the lip, and lug nuts on the cap between the spokes. Everything is laid out on the
+// wheel's own axis (z) and centred on it, so nothing wobbles as the wheel spins.
+const LUGS = 6;
 function createRim(rimRadius, w, spokes) {
   const group = new Group();
-  const hub = shadowed(new Mesh(new CylinderGeometry(rimRadius, rimRadius, w + 0.02, 20), rim));
-  hub.rotation.x = Math.PI / 2;
-  group.add(hub);
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2;
-    group.add(box(0.05, 0.05, w + 0.05, damperMat, Math.cos(a) * rimRadius * 0.52, Math.sin(a) * rimRadius * 0.52, 0));
-  }
-  if (spokes) {
-    for (let i = 0; i < 3; i++) {
-      const spoke = box(rimRadius * 1.9, 0.045, w + 0.04, damperMat, 0, 0, 0);
-      spoke.rotation.z = (i / 3) * Math.PI;
+  const barrel = shadowed(new Mesh(new CylinderGeometry(rimRadius, rimRadius, w, 24), rim));
+  barrel.rotation.x = Math.PI / 2;
+  group.add(barrel);
+  const capRadius = rimRadius * 0.34;
+  for (const face of [-1, 1]) {
+    const z = (face * w) / 2;
+    // Beadlock ring at the lip.
+    const ring = shadowed(new Mesh(new TorusGeometry(rimRadius * 0.95, 0.02, 6, 32), chrome));
+    ring.position.z = z;
+    group.add(ring);
+    // Centre cap, standing a little proud of the face.
+    const cap = shadowed(new Mesh(new CylinderGeometry(capRadius, capRadius, 0.04, 20), damperMat));
+    cap.rotation.x = Math.PI / 2;
+    cap.position.z = z + face * 0.02;
+    group.add(cap);
+    for (let i = 0; i < LUGS; i++) {
+      const a = (i / LUGS) * Math.PI * 2;
+      // Lug nut on the cap's bolt circle.
+      const lug = shadowed(new Mesh(new CylinderGeometry(0.014, 0.014, 0.03, 6), chrome));
+      lug.rotation.x = Math.PI / 2;
+      lug.position.set(Math.cos(a) * capRadius * 0.62, Math.sin(a) * capRadius * 0.62, z + face * 0.045);
+      group.add(lug);
+      if (!spokes) continue;
+      // Spoke between two lugs, from the cap to the beadlock ring, flat on the face.
+      const b = a + Math.PI / LUGS;
+      const inner = capRadius * 0.9;
+      const outer = rimRadius * 0.93;
+      const spoke = box(outer - inner, 0.04, 0.03, damperMat, 0, 0, z + face * 0.012);
+      spoke.position.x = Math.cos(b) * (inner + outer) / 2;
+      spoke.position.y = Math.sin(b) * (inner + outer) / 2;
+      spoke.rotation.z = b;
       group.add(spoke);
     }
   }

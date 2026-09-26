@@ -43,11 +43,13 @@ export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, 
     gpuTires.pipelined = gpu.pipelined;
   }
   const { body, controller } = soft
-    ? createSoftCarBody(rapier, physicsWorld, position, CAR, tire, { gpuTires })
+    ? createSoftCarBody(rapier, physicsWorld, position, CAR, tire, { gpuTires, rotation, linvel, angvel })
     : createCarBody(rapier, physicsWorld, position);
-  body.setRotation(rotation, true);
-  body.setLinvel(linvel, true);
-  body.setAngvel(angvel, true);
+  if (!soft) {
+    body.setRotation(rotation, true);
+    body.setLinvel(linvel, true);
+    body.setAngvel(angvel, true);
+  }
 
   const { object, steeringWheel, axles } = createCarMesh();
   scene.add(object);
@@ -138,8 +140,11 @@ export function respawnCar(world, heightAt) {
   const { body } = car.get(Vehicle);
   const p = body.translation();
   const q = body.rotation();
-  // Keep only the heading.
-  const yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.z * q.z));
+  // Keep only the heading: the car's forward axis (+x) projected onto the ground. This also
+  // works when the car lies on its side or roof.
+  const fx = 1 - 2 * (q.y * q.y + q.z * q.z);
+  const fz = 2 * (q.x * q.z - q.w * q.y);
+  const yaw = Math.hypot(fx, fz) > 1e-3 ? Math.atan2(-fz, fx) : 0;
   despawnCar(world, car);
   return spawnCar(world, {
     position: { x: p.x, y: heightAt(p.x, p.z) + startHeight(), z: p.z },

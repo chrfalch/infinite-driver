@@ -484,9 +484,12 @@ export class JointedVehicle {
   }
 }
 
+// The car is built already turned to `rotation` and moving with `linvel`/`angvel`: every link is
+// placed from the chassis pose, so turning only the chassis afterwards would tear the joints apart.
 export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIRE, options = {}) {
+  const { rotation = { x: 0, y: 0, z: 0, w: 1 }, linvel = { x: 0, y: 0, z: 0 }, angvel = { x: 0, y: 0, z: 0 } } = options;
   const body = world.createRigidBody(
-    RAPIER.RigidBodyDesc.dynamic().setTranslation(position.x, position.y, position.z).setCanSleep(false),
+    RAPIER.RigidBodyDesc.dynamic().setTranslation(position.x, position.y, position.z).setRotation(rotation).setCanSleep(false),
   );
   const { x: hx, y: hy, z: hz } = car.halfExtents;
   // The jointed car's axles, hubs, knuckles, and tyres add mass; the chassis gets the rest so the
@@ -507,6 +510,20 @@ export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIR
     body,
   );
   const controller = new JointedVehicle(RAPIER, world, body, car, tire, options);
+  // Every part moves with the chassis as one rigid body: v = v0 + ω × r.
+  for (const part of [body, ...controller.bodies]) {
+    const t = part.translation();
+    const r = { x: t.x - position.x, y: t.y - position.y, z: t.z - position.z };
+    part.setLinvel({ x: linvel.x + angvel.y * r.z - angvel.z * r.y, y: linvel.y + angvel.z * r.x - angvel.x * r.z, z: linvel.z + angvel.x * r.y - angvel.y * r.x }, true);
+    part.setAngvel(angvel, true);
+  }
+  // Wheels already roll at the car's speed (forward rolling is a negative spin about the axle).
+  const fwd = rotate(rotation, { x: 1, y: 0, z: 0 });
+  const roll = -(linvel.x * fwd.x + linvel.y * fwd.y + linvel.z * fwd.z) / controller.rollingRadius();
+  if (roll) {
+    const axis = rotate(rotation, AXLE);
+    for (const w of controller.wheels) w.hub.setAngvel({ x: angvel.x + axis.x * roll, y: angvel.y + axis.y * roll, z: angvel.z + axis.z * roll }, true);
+  }
   controller.gpu?.solver.reset(controller.hubStates());
   return { body, controller };
 }

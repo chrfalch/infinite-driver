@@ -443,18 +443,24 @@ export class GpuTireSolver {
   reset(hubs) {
     this.writeHubs(hubs);
     const data = new Float32Array(this.count * 4);
+    // The rubber starts moving with its hub (a respawn or rebuild can happen at speed).
+    const vel = new Float32Array(this.count * 4);
     const q = [0, 0, 0, 1];
+    const zero = { x: 0, y: 0, z: 0 };
     for (let t = 0; t < this.tires; t++) {
       const h = hubs[t];
+      const v = h.linvel ?? zero;
+      const w = h.angvel ?? zero;
       for (let k = 0; k < this.perTire; k++) {
         const r = [this.restLocal[k * 3], this.restLocal[k * 3 + 1], this.restLocal[k * 3 + 2] * h.mirror];
         const p = rotate(h.rotation ?? q, r);
         data.set([h.position.x + p[0], h.position.y + p[1], h.position.z + p[2], 1], (t * this.perTire + k) * 4);
+        vel.set([v.x + w.y * p[2] - w.z * p[1], v.y + w.z * p[0] - w.x * p[2], v.z + w.x * p[1] - w.y * p[0], 0], (t * this.perTire + k) * 4);
       }
     }
     this.device.queue.writeBuffer(this.raw.pos, 0, data);
     this.device.queue.writeBuffer(this.root.unwrap(this.prev), 0, data);
-    this.device.queue.writeBuffer(this.root.unwrap(this.vel), 0, new Float32Array(this.count * 4));
+    this.device.queue.writeBuffer(this.root.unwrap(this.vel), 0, vel);
     this.positions.set(data);
   }
 
