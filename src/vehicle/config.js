@@ -2,6 +2,8 @@
 export const DEFAULT_CAR = Object.freeze({
   // Soft-body tyres on a fully jointed car; false uses Rapier's raycast vehicle with rigid wheels.
   softTires: true,
+  // Run the soft tyres on the GPU (TypeGPU compute) instead of Rapier's soft bodies.
+  gpuTires: true,
   mass: 1800,
   // Physics box for the body tub and frame. The wheels stick out past it.
   halfExtents: { x: 1.95, y: 0.34, z: 0.6 },
@@ -61,9 +63,13 @@ function merge(target, source) {
 // The live, tunable settings. Systems read from this object every step.
 export const CAR = merge(clone(DEFAULT_CAR), loadSaved());
 
-// ?tires=rigid or ?tires=soft overrides the saved choice for this visit.
+// ?tires=gpu, ?tires=soft (Rapier soft bodies) or ?tires=rigid overrides the saved choice.
 const tiresParam = globalThis.location ? new URLSearchParams(globalThis.location.search).get('tires') : null;
-if (tiresParam === 'rigid' || tiresParam === 'soft') CAR.softTires = tiresParam === 'soft';
+if (tiresParam === 'rigid') CAR.softTires = false;
+if (tiresParam === 'soft' || tiresParam === 'gpu') {
+  CAR.softTires = true;
+  CAR.gpuTires = tiresParam === 'gpu';
+}
 
 export function saveCar() {
   try {

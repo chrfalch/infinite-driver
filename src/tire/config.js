@@ -52,3 +52,57 @@ export function resetTire() {
   Object.assign(TIRE, clone(DEFAULT_TIRE));
   saveTire();
 }
+
+// GPU tyre solver settings (see gpu-tire-solver.js). Geometry comes from TIRE.
+export const DEFAULT_GPU_TIRE = Object.freeze({
+  pressureKpa: 120, // gauge air pressure
+  segmentsAround: 40,
+  segmentsAcross: 10,
+  beadRings: 1,
+  substeps: 4,
+  iterations: 8,
+  cordStiffness: 1.0, // per Jacobi pass, 0..1
+  shearStiffness: 0.5,
+  bendStiffness: 0.15,
+  shapeStiffness: 0.05, // pull toward the moulded shape per pass
+  beadPull: 0.5, // fraction of the gap to the rim seat closed per pass
+  damping: 6, // 1/s
+  friction: 1.1,
+  contactRadius: 0.02,
+  relaxation: 1.0,
+  rubberMass: 12,
+});
+
+const GPU_STORAGE_KEY = 'drift.gputire.v1';
+function loadGpu() {
+  try {
+    return JSON.parse(globalThis.localStorage?.getItem(GPU_STORAGE_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+export const GPU_TIRE = { ...DEFAULT_GPU_TIRE };
+for (const [key, value] of Object.entries(loadGpu())) {
+  if (typeof value === typeof DEFAULT_GPU_TIRE[key]) GPU_TIRE[key] = value;
+}
+export function saveGpuTire() {
+  try {
+    globalThis.localStorage?.setItem(GPU_STORAGE_KEY, JSON.stringify(GPU_TIRE));
+  } catch {
+    // Storage can be unavailable; settings still work for this session.
+  }
+}
+export function resetGpuTire() {
+  Object.assign(GPU_TIRE, DEFAULT_GPU_TIRE);
+  saveGpuTire();
+}
+
+// Settings actually used, with the performance preset applied on top when it is on.
+export function effectiveTire(tire, performance) {
+  if (!performance) return tire;
+  return { ...tire, pgsIterations: 1, substeps: 1, segmentsAround: 20, segmentsAcross: 6 };
+}
+export function effectiveGpuTire(gpu, performance) {
+  if (!performance) return gpu;
+  return { ...gpu, substeps: Math.min(gpu.substeps, 3), iterations: Math.min(gpu.iterations, 6), segmentsAround: 32, segmentsAcross: 8 };
+}

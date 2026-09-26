@@ -7,7 +7,8 @@ const rubber = new MeshStandardMaterial({ vertexColors: true, roughness: 0.95, f
 export function createSoftTireMesh(soft, mesh) {
   const { nu, nv } = mesh;
   const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(soft.particlePositions(), 3));
+  const positions = soft ? soft.particlePositions() : new Float32Array(nu * nv * 3);
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
   geometry.setIndex(new BufferAttribute(mesh.indices, 1));
   const colors = new Float32Array(nu * nv * 3);
   for (let i = 0; i < nu; i++) {
@@ -30,4 +31,20 @@ export function updateSoftTireMesh(object, soft) {
   position.array.set(soft.particlePositions());
   position.needsUpdate = true;
   object.geometry.computeVertexNormals();
+}
+
+// GPU solver positions are vec4 per particle; tyre `index` occupies one contiguous block.
+export function updateGpuTireMesh(object, solver, index) {
+  const position = object.geometry.getAttribute('position');
+  const out = position.array;
+  const src = solver.positions;
+  const base = index * solver.perTire * 4;
+  for (let k = 0; k < solver.perTire; k++) {
+    out[k * 3] = src[base + k * 4];
+    out[k * 3 + 1] = src[base + k * 4 + 1];
+    out[k * 3 + 2] = src[base + k * 4 + 2];
+  }
+  position.needsUpdate = true;
+  object.geometry.computeVertexNormals();
+  object.geometry.computeBoundingSphere();
 }

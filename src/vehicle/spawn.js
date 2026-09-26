@@ -14,7 +14,9 @@ import {
 } from '../ecs/traits.js';
 import { createCarMesh, createWheelRig } from '../render/car-mesh.js';
 import { createSoftTireMesh } from '../render/soft-tire-mesh.js';
-import { TIRE } from '../tire/config.js';
+import { CONTROLS } from '../controls.js';
+import { effectiveGpuTire, effectiveTire, GPU_TIRE, TIRE } from '../tire/config.js';
+import { createGpuTires } from '../tire/gpu-tires.js';
 import { CAR } from './config.js';
 import { createCarBody, WHEELS } from './physics.js';
 import { createSoftCarBody, softCarRideHeight } from './soft-vehicle.js';
@@ -28,7 +30,18 @@ export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, 
   const { scene } = world.get(Render);
 
   const soft = CAR.softTires;
-  const { body, controller } = (soft ? createSoftCarBody : createCarBody)(rapier, physicsWorld, position);
+  const device = world.get(Render).renderer?.backend?.device;
+  const useGpu = soft && CAR.gpuTires && !!device;
+  const tire = effectiveTire(TIRE, CONTROLS.performance);
+  let gpuTires = null;
+  if (useGpu) {
+    const gpu = effectiveGpuTire(GPU_TIRE, CONTROLS.performance);
+    gpuTires = createGpuTires(device, WHEELS.length, TIRE, gpu);
+    gpuTires.solver.setParams(gpu, world.get(Physics).step);
+  }
+  const { body, controller } = soft
+    ? createSoftCarBody(rapier, physicsWorld, position, CAR, tire, { gpuTires })
+    : createCarBody(rapier, physicsWorld, position);
   body.setRotation(rotation, true);
   body.setLinvel(linvel, true);
   body.setAngvel(angvel, true);
@@ -48,11 +61,16 @@ export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, 
     const rig = createWheelRig(index, { softTire: soft ? TIRE : null });
     object.add(rig.object);
     const wheel = world.spawn(WheelOf(car, { index }), WheelRig({ rig }));
-    if (soft) {
-      const tire = controller.wheels[index].soft;
-      const tireObject = createSoftTireMesh(tire, controller.wheels[index].mesh);
+    if (gpuTires) {
+      const mesh = controller.wheels[index].mount.z > 0 ? gpuTires.mirrored : gpuTires.mesh;
+      const tireObject = createSoftTireMesh(null, mesh);
       scene.add(tireObject);
-      wheel.add(SoftTireView({ soft: tire, object: tireObject }));
+      wheel.add(SoftTireView({ soft: null, gpu: gpuTires.solver, index, object: tireObject }));
+    } else if (soft) {
+      const softBody = controller.wheels[index].soft;
+      const tireObject = createSoftTireMesh(softBody, controller.wheels[index].mesh);
+      scene.add(tireObject);
+      wheel.add(SoftTireView({ soft: softBody, object: tireObject }));
     }
   });
   return car;

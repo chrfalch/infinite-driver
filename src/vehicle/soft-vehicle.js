@@ -7,6 +7,9 @@ const DOWN = { x: 0, y: -1, z: 0 };
 const UP = { x: 0, y: 1, z: 0 };
 const AXLE = { x: 0, y: 0, z: 1 };
 const ORIGIN = { x: 0, y: 0, z: 0 };
+// Hub inertia (kg·m²); the axle is local z.
+const HUB_INERTIA = { x: 0.5, y: 0.5, z: 0.7 };
+const HUB_INERTIA_GPU = { x: 2.5, y: 2.5, z: Number(globalThis.location ? new URLSearchParams(globalThis.location.search).get('hubI') ?? 3.5 : 3.5) };
 const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
 // Rotational inertia (kg·m²) of the strut and knuckle links. A point-like link is far lighter
 // than the hub and tyre it carries, and the joint solver then cannot pass the steering torque
@@ -40,7 +43,7 @@ function multiply(a, b) {
 // DynamicRayCastVehicleController API that the rest of the game uses, so both cars are
 // driven, drawn, and tuned by the same systems.
 export class JointedVehicle {
-  constructor(RAPIER, world, chassis, car = CAR, tire = TIRE) {
+  constructor(RAPIER, world, chassis, car = CAR, tire = TIRE, { gpuTires = null } = {}) {
     this.RAPIER = RAPIER;
     this.world = world;
     this.body = chassis;
@@ -50,6 +53,8 @@ export class JointedVehicle {
     this.bodies = [];
     this.joints = [];
     this.softBodies = [];
+    // With GPU tyres the hubs get their tyre forces from the GPU solver each step.
+    this.gpu = gpuTires;
 
     const p = chassis.translation();
     const q = chassis.rotation();
@@ -105,7 +110,9 @@ export class JointedVehicle {
       world.createCollider(
         this.RAPIER.ColliderDesc.cylinder(tire.width / 2 - 0.03, tire.rimRadius - 0.02)
           .setRotation({ x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 })
-          .setMass(22)
+          // GPU tyres carry their rubber outside Rapier, so the hub holds a whole wheel's spin
+          // inertia; that also keeps the once-per-step torque exchange with the GPU stable.
+          .setMassProperties(22, ORIGIN, gpuTires ? HUB_INERTIA_GPU : HUB_INERTIA, { x: 0, y: 0, z: 0, w: 1 })
           .setFriction(0.6)
           .setCollisionGroups(groups(GROUP.RIM, GROUP.WORLD)),
         hub,
@@ -116,8 +123,12 @@ export class JointedVehicle {
       this.joints.push(axle);
 
       // Right-side tyres are mirror images of the left, like a real pair.
-      const { soft, mesh } = createSoftTire(this.RAPIER, world, hub, tire, { mirror: mount.z > 0 });
-      this.softBodies.push(soft);
+      let soft = null;
+      let mesh = null;
+      if (!gpuTires) {
+        ({ soft, mesh } = createSoftTire(this.RAPIER, world, hub, tire, { mirror: mount.z > 0 }));
+        this.softBodies.push(soft);
+      }
 
       this.wheels.push({
         mount,
@@ -279,14 +290,37 @@ export class JointedVehicle {
     }
   }
 
+  hubStates() {
+    return this.wheels.map((w) => ({
+      position: w.hub.translation(),
+      rotation: w.hub.rotation(),
+      linvel: w.hub.linvel(),
+      angvel: w.hub.angvel(),
+      mirror: w.mount.z > 0 ? -1 : 1,
+    }));
+  }
+
+  // Runs the GPU tyres for one step and applies their forces to the hubs (added on top of the
+  // drive and brake torques from updateVehicle).
+  async stepTyres({ readPositions = false } = {}) {
+    if (!this.gpu) return;
+    const f = await this.gpu.solver.step(this.hubStates(), { readPositions });
+    this.wheels.forEach((w, t) => {
+      w.hub.resetForces(true);
+      w.hub.addForce({ x: f[t * 8], y: f[t * 8 + 1], z: f[t * 8 + 2] }, true);
+      w.hub.addTorque({ x: f[t * 8 + 4], y: f[t * 8 + 5], z: f[t * 8 + 6] }, true);
+    });
+  }
+
   dispose() {
+    this.gpu?.solver.destroy();
     for (const soft of this.softBodies) this.world.removeSoftBody(soft);
     for (const joint of this.joints) this.world.removeImpulseJoint(joint, false);
     for (const body of this.bodies) this.world.removeRigidBody(body);
   }
 }
 
-export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIRE) {
+export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIRE, options = {}) {
   const body = world.createRigidBody(
     RAPIER.RigidBodyDesc.dynamic().setTranslation(position.x, position.y, position.z).setCanSleep(false),
   );
@@ -305,7 +339,8 @@ export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIR
       .setCollisionGroups(groups(GROUP.CHASSIS, GROUP.WORLD)),
     body,
   );
-  const controller = new JointedVehicle(RAPIER, world, body, car, tire);
+  const controller = new JointedVehicle(RAPIER, world, body, car, tire, options);
+  controller.gpu?.solver.reset(controller.hubStates());
   return { body, controller };
 }
 

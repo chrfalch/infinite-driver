@@ -5,6 +5,8 @@ export const DEFAULT_CONTROLS = Object.freeze({
   // false: hold the accelerator to drive, release for engine braking.
   // true: tap once to latch the engine on, tap again to switch it off.
   latchAccelerator: false,
+  // Cheaper tyre simulation: fewer solver passes and a coarser mesh.
+  performance: false,
 });
 
 function load() {

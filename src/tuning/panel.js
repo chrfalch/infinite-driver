@@ -2,7 +2,7 @@ import GUI from 'lil-gui';
 import { CONTROLS, DEFAULT_CONTROLS, saveControls } from '../controls.js';
 import { Input, IsPlayer, Physics, Vehicle } from '../ecs/traits.js';
 import { CAR, DEFAULT_CAR, resetCar, saveCar } from '../vehicle/config.js';
-import { TIRE, resetTire, saveTire } from '../tire/config.js';
+import { GPU_TIRE, TIRE, effectiveGpuTire, resetGpuTire, resetTire, saveGpuTire, saveTire } from '../tire/config.js';
 import { TIRE_REBUILD_KEYS, updateSoftTire } from '../tire/soft-tire.js';
 import { applyWheelSettings } from '../vehicle/physics.js';
 import { rebuildCar, respawnCar } from '../vehicle/spawn.js';
@@ -127,7 +127,7 @@ export function createTuningPanel(world, { heightAt }) {
 
   const actions = {
     copy: async () => {
-      const text = JSON.stringify({ changed: changedSettings(), controls: CONTROLS, car: CAR, tire: TIRE }, null, 2);
+      const text = JSON.stringify({ changed: changedSettings(), controls: CONTROLS, car: CAR, tire: TIRE, gpuTire: GPU_TIRE }, null, 2);
       const ok = await copyText(text);
       copyButton.name(ok ? 'Copied ✓' : 'Copy failed, see console');
       if (!ok) console.log(text);
@@ -136,6 +136,7 @@ export function createTuningPanel(world, { heightAt }) {
     reset: () => {
       resetCar();
       resetTire();
+      resetGpuTire();
       Object.assign(CONTROLS, DEFAULT_CONTROLS);
       saveControls();
       gui.controllersRecursive().forEach((c) => c.updateDisplay());
@@ -165,6 +166,20 @@ export function createTuningPanel(world, { heightAt }) {
     .name('Soft tyres')
     .onChange(() => {
       saveCar();
+      rebuildCar(world);
+    });
+  controls
+    .add(CAR, 'gpuTires')
+    .name('GPU tyres (TypeGPU)')
+    .onChange(() => {
+      saveCar();
+      rebuildCar(world);
+    });
+  controls
+    .add(CONTROLS, 'performance')
+    .name('Performance preset')
+    .onChange(() => {
+      saveControls();
       rebuildCar(world);
     });
 
@@ -219,6 +234,9 @@ export function createTuningPanel(world, { heightAt }) {
   }
   softFolder.close();
 
+  // GPU tyre settings: most apply live, mesh and mass rebuild the car.
+  addGpuTireFolder(gui, world, scheduleRebuild);
+
   // Give the keyboard back to the car once a value is committed.
   gui.onFinishChange(() => {
     if (isTyping({ target: document.activeElement })) document.activeElement.blur();
@@ -233,4 +251,38 @@ export function createTuningPanel(world, { heightAt }) {
 export function isTyping(e) {
   const tag = e.target?.tagName;
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
+}
+
+const GPU_REBUILD_KEYS = ['segmentsAround', 'segmentsAcross', 'beadRings', 'rubberMass'];
+
+function addGpuTireFolder(gui, world, scheduleRebuild) {
+  const folder = gui.addFolder('GPU tyres');
+  const apply = (key) => () => {
+    saveGpuTire();
+    if (GPU_REBUILD_KEYS.includes(key)) return scheduleRebuild();
+    const car = world.queryFirst(IsPlayer, Vehicle);
+    const solver = car?.get(Vehicle).controller.gpu?.solver;
+    if (solver) solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step);
+  };
+  for (const [key, label, min, max, step] of [
+    ['pressureKpa', 'Air pressure (kPa)', 10, 300, 5],
+    ['substeps', 'Substeps per step', 1, 16, 1],
+    ['iterations', 'Solver passes per substep', 1, 24, 1],
+    ['cordStiffness', 'Cords (per pass)', 0, 1, 0.05],
+    ['shearStiffness', 'Shear (per pass)', 0, 1, 0.05],
+    ['bendStiffness', 'Bending (per pass)', 0, 1, 0.01],
+    ['shapeStiffness', 'Shape memory (per pass)', 0, 0.3, 0.005],
+    ['beadPull', 'Bead grip on rim (per pass)', 0.05, 1, 0.05],
+    ['damping', 'Damping (1/s)', 0, 30, 0.5],
+    ['friction', 'Rubber friction', 0.2, 2, 0.05],
+    ['contactRadius', 'Tread thickness (m)', 0.005, 0.06, 0.005],
+    ['rubberMass', 'Rubber mass (kg)', 2, 40, 1],
+    ['segmentsAround', 'Segments around', 16, 48, 1],
+    ['segmentsAcross', 'Segments across', 6, 10, 1],
+    ['beadRings', 'Bead width (rings)', 0, 2, 1],
+  ]) {
+    folder.add(GPU_TIRE, key, min, max, step).name(label).onChange(apply(key));
+  }
+  folder.close();
+  return folder;
 }

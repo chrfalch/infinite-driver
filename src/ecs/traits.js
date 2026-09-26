@@ -21,7 +21,8 @@ export const IsPlayer = trait();
 export const CameraTarget = trait();
 export const TerrainChunk = trait(() => ({ cx: 0, cz: 0, collider: null, heights: null }));
 export const WheelRig = trait(() => ({ rig: null }));
-export const SoftTireView = trait(() => ({ soft: null, object: null }));
+// A soft tyre's world-space mesh: from a Rapier soft body, or tyre `index` of a GPU solver.
+export const SoftTireView = trait(() => ({ soft: null, gpu: null, index: 0, object: null }));
 export const SteeringWheel = trait(() => ({ object: null }));
 export const RockField = trait(() => ({ rocks: [], colliders: [] }));
 export const HudLabel = trait(() => ({ text: null, format: null }));

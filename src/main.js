@@ -90,7 +90,7 @@ async function main() {
     HudLabel({
       text: perfText,
       format: (v) => {
-        const tyres = v.controller.wheels ? 'soft tyres' : 'rigid wheels';
+        const tyres = v.controller.gpu ? 'GPU tyres' : v.controller.wheels ? 'Rapier soft tyres' : 'rigid wheels';
         const gpu = render.renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2 (no WebGPU)';
         return `${tyres}    physics ${world.get(Physics).stepMs.toFixed(1)} ms/step    ${gpu}`;
       },
@@ -109,28 +109,37 @@ async function main() {
   attachZoom(render.renderer.domElement);
 
   let last = performance.now();
-  const frame = (now) => {
-    const time = world.get(Time);
-    time.delta = Math.min((now - last) / 1000, 0.1);
-    time.elapsed += time.delta;
-    last = now;
+  // Physics can wait on the GPU, so a frame is async; a frame that arrives while the previous one
+  // is still simulating is skipped rather than overlapped.
+  let busy = false;
+  const frame = async (now) => {
+    if (busy) return;
+    busy = true;
+    try {
+      const time = world.get(Time);
+      time.delta = Math.min((now - last) / 1000, 0.1);
+      time.elapsed += time.delta;
+      last = now;
 
-    readInput(world);
-    stepPhysics(world);
-    syncBodies(world);
-    streamTerrain(world);
-    syncViews(world);
-    syncWheels(world);
-    syncSoftTires(world);
-    followCamera(world);
-    updateHud(world);
+      readInput(world);
+      await stepPhysics(world);
+      syncBodies(world);
+      streamTerrain(world);
+      syncViews(world);
+      syncWheels(world);
+      syncSoftTires(world);
+      followCamera(world);
+      updateHud(world);
 
-    glyph.shape();
-    const { renderer, scene, camera, hudScene, hudCamera } = render;
-    renderer.clear();
-    renderer.render(scene, camera);
-    renderer.clearDepth();
-    renderer.render(hudScene, hudCamera);
+      glyph.shape();
+      const { renderer, scene, camera, hudScene, hudCamera } = render;
+      renderer.clear();
+      renderer.render(scene, camera);
+      renderer.clearDepth();
+      renderer.render(hudScene, hudCamera);
+    } finally {
+      busy = false;
+    }
   };
   render.renderer.setAnimationLoop(frame);
 

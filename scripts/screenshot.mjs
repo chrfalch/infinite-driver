@@ -3,7 +3,7 @@ const exe = `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1208/chro
 const url = process.argv[2] ?? 'http://127.0.0.1:8731/';
 const out = process.argv[3] ?? 'screenshot.png';
 const drive = process.argv[4] ?? '';
-const browser = await chromium.launch({ executablePath: exe, headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const browser = await chromium.launch({ executablePath: exe, headless: true, args: [process.env.GPU ? '--enable-unsafe-webgpu' : '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) console.log('[console]', m.type(), m.text().slice(0, 400)); });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
