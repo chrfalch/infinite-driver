@@ -145,6 +145,8 @@ export function applyDriverInput(state, input, dt, car = CAR) {
   const frontBrake = (brake * 0.35 + hold * 0.25) * dt;
   const rearBrake = (brake * 0.15 + hold * 0.25 + (input.handbrake ? car.handbrakeForce * 0.5 : 0)) * dt;
   const brakes = [frontBrake, frontBrake, rearBrake, rearBrake];
+  // Brake lights: on for the pedal and the handbrake (not for the gentle hold at a standstill).
+  state.braking = brake > 0 || input.handbrake;
   for (let i = 0; i < 4; i++) {
     // Rapier's raycast car ignores the brake on a wheel that has engine force, so a braking wheel
     // gets no drive there. (The jointed car brakes through its axle motors and keeps both.)

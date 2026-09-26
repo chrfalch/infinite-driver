@@ -2,6 +2,7 @@ import { Vector3 } from 'three/webgpu';
 import { AxleRig, IsPlayer, SoftTireView, SteeringWheel, Time, Transform, Vehicle, View, WheelOf, WheelRig } from '../ecs/traits.js';
 import { updateAxleRig } from '../render/axles.js';
 import { steeringGeometry } from '../render/car-mesh.js';
+import { brakeLightMaterial } from '../render/tube-chassis.js';
 import { DRIVETRAIN } from '../vehicle/config.js';
 import { updateGpuTireMesh, updateSoftTireMesh } from '../render/soft-tire-mesh.js';
 import { CAR } from '../vehicle/config.js';
@@ -105,6 +106,15 @@ export function syncWheels(world) {
     // The wheel faces the driver (its +z points at them), so a left turn is a positive roll.
     wheel.object.rotation.z = vehicle.steer * CAR.steeringWheelRatio;
   });
+}
+
+// Brake lights: dim tail-light glow, bright red while braking (a quick fade, like a filament).
+export function syncBrakeLights(world) {
+  const vehicle = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle);
+  if (!vehicle) return;
+  const target = vehicle.braking ? 3.2 : 0.25;
+  const k = Math.min(1, world.get(Time).delta / 0.06);
+  brakeLightMaterial.emissiveIntensity += (target - brakeLightMaterial.emissiveIntensity) * k;
 }
 
 export function syncSoftTires(world) {

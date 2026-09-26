@@ -197,6 +197,8 @@ const T2 = 0.025;
 const plateMat = new MeshStandardMaterial({ color: '#8f9498', roughness: 0.5, metalness: 0.55 });
 const lampMat = new MeshStandardMaterial({ color: '#fff4d6', emissive: '#fff1c2', emissiveIntensity: 0.6, roughness: 0.2 });
 const lampBody = new MeshStandardMaterial({ color: '#1d1e20', roughness: 0.4, metalness: 0.6 });
+// Tail light lens: a dim red glow while driving, bright when braking (set per frame by the game).
+export const brakeLightMaterial = new MeshStandardMaterial({ color: '#7a1010', emissive: '#ff2a1a', emissiveIntensity: 0.25, roughness: 0.3 });
 
 // Sand buggy after the user's reference: few, thick tubes in long flowing bends; low wide rockers
 // that sweep up into a compact nose box; A-pillars that run in one line into the roof and down
@@ -294,6 +296,16 @@ const sandBuggy = {
     }
     // Diamond-plate floor between the rockers.
     b.plate([[0.72, F + 0.02, 0.64], [0.72, F + 0.02, -0.64], [-0.6, F + 0.02, -0.64], [-0.6, F + 0.02, 0.64]], plateMat);
+    // Tail and brake lights on the rear hoop, facing back. The lens material is shared, so the
+    // game dims and brightens it (see brakeLightMaterial).
+    for (const s of [1, -1]) {
+      const housing = b.mesh(new BoxGeometry(0.05, 0.1, 0.16), lampBody);
+      housing.position.set(-2.45, -0.02, s * 0.36);
+      const lens = b.mesh(new BoxGeometry(0.012, 0.08, 0.14), brakeLightMaterial);
+      lens.position.set(-2.478, -0.02, s * 0.36);
+      const bracket = b.mesh(new BoxGeometry(0.06, 0.02, 0.04), lampBody);
+      bracket.position.set(-2.42, 0.04, s * 0.4);
+    }
     // Round lamps on top of the nose box, facing forward.
     for (const s of [1, -1]) {
       const body = b.mesh(new CylinderGeometry(0.075, 0.06, 0.08, 20), lampBody);

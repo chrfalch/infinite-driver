@@ -27,7 +27,7 @@ import { updateHud } from './systems/hud.js';
 import { attachKeyboard, readInput } from './systems/input.js';
 import { stepPhysics, syncBodies } from './systems/physics.js';
 import { streamTerrain } from './systems/terrain.js';
-import { syncAxles, syncSoftTires, syncViews, syncWheels } from './systems/views.js';
+import { syncAxles, syncBrakeLights, syncSoftTires, syncViews, syncWheels } from './systems/views.js';
 import { updateTracks } from './systems/tracks.js';
 import { updateSoil } from './systems/soil.js';
 import { SoilParticles } from './render/soil-particles.js';
@@ -166,6 +166,7 @@ async function main() {
     syncWheels(world);
     syncAxles(world);
     syncSoftTires(world);
+    syncBrakeLights(world);
     updateTracks(world);
     updateSoil(world);
     followCamera(world);
