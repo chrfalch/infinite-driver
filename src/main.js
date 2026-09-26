@@ -63,16 +63,25 @@ async function main() {
 
   const engineText = hud.createText({
     font: inter,
-    text: 'engine off',
+    text: 'idle',
     style: { fontSize: 14, lineHeight: 1.2, color: '#6b6453' },
   });
   engineText.position.set(28, -54, 0);
   render.hudScene.add(engineText);
-  world.spawn(HudLabel({ text: engineText, format: (_, input) => (input.engineOn ? 'engine on' : 'engine off') }));
+  world.spawn(
+    HudLabel({
+      text: engineText,
+      format: (v, input) => {
+        if (input.engineOn) return 'engine on';
+        if (input.brake) return 'braking';
+        return Math.abs(v.speed) < 0.3 ? 'idle' : 'engine braking';
+      },
+    }),
+  );
 
   const hintText = hud.createText({
     font: inter,
-    text: 'W / Up  engine on/off    S / Down  brake    A D / Left Right  steer    Space  handbrake    R  respawn    Scroll  zoom',
+    text: 'W / Up  accelerate (hold)    S / Down  brake    A D / Left Right  steer    Space  handbrake    R  respawn    Scroll  zoom',
     style: { fontSize: 14, lineHeight: 1.2, color: '#8a826f' },
   });
   hintText.position.set(28, -78, 0);
@@ -110,6 +119,7 @@ async function main() {
   window.__game = {
     world,
     RAPIER,
+    render,
     get car() {
       return world.queryFirst(IsPlayer, Vehicle);
     },

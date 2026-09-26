@@ -1,5 +1,6 @@
 import GUI from 'lil-gui';
-import { IsPlayer, Vehicle } from '../ecs/traits.js';
+import { CONTROLS, DEFAULT_CONTROLS, saveControls } from '../controls.js';
+import { Input, IsPlayer, Vehicle } from '../ecs/traits.js';
 import { CAR, DEFAULT_CAR, resetCar, saveCar } from '../vehicle/config.js';
 import { applyWheelSettings } from '../vehicle/physics.js';
 import { rebuildCar, respawnCar } from '../vehicle/spawn.js';
@@ -124,7 +125,7 @@ export function createTuningPanel(world, { heightAt }) {
 
   const actions = {
     copy: async () => {
-      const text = JSON.stringify({ car: CAR, changed: changedSettings() }, null, 2);
+      const text = JSON.stringify({ changed: changedSettings(), controls: CONTROLS, car: CAR }, null, 2);
       const ok = await copyText(text);
       copyButton.name(ok ? 'Copied ✓' : 'Copy failed, see console');
       if (!ok) console.log(text);
@@ -132,6 +133,8 @@ export function createTuningPanel(world, { heightAt }) {
     },
     reset: () => {
       resetCar();
+      Object.assign(CONTROLS, DEFAULT_CONTROLS);
+      saveControls();
       gui.controllersRecursive().forEach((c) => c.updateDisplay());
       applyWheels();
       rebuildCar(world);
@@ -142,6 +145,15 @@ export function createTuningPanel(world, { heightAt }) {
   const copyButton = gui.add(actions, 'copy').name('Copy settings');
   gui.add(actions, 'reset').name('Reset to defaults');
   gui.add(actions, 'respawn').name('Respawn car (R)');
+
+  const controls = gui.addFolder('Controls');
+  controls
+    .add(CONTROLS, 'latchAccelerator')
+    .name('Tap accelerator to latch')
+    .onChange(() => {
+      saveControls();
+      world.get(Input).engineOn = false;
+    });
 
   for (const [title, params] of GROUPS) {
     const folder = gui.addFolder(title);
@@ -158,6 +170,11 @@ export function createTuningPanel(world, { heightAt }) {
     }
     if (title !== 'Engine & brakes') folder.close();
   }
+
+  // Give the keyboard back to the car once a value is committed.
+  gui.onFinishChange(() => {
+    if (isTyping({ target: document.activeElement })) document.activeElement.blur();
+  });
 
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyR' && !isTyping(e)) actions.respawn();

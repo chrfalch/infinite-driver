@@ -1,3 +1,4 @@
+import { CONTROLS } from '../controls.js';
 import { Input } from '../ecs/traits.js';
 import { isTyping } from '../tuning/panel.js';
 
@@ -33,8 +34,13 @@ const tapped = (...codes) => codes.some((c) => taps.has(c));
 
 export function readInput(world) {
   const input = world.get(Input);
-  // The accelerator toggles the engine drive on and off; braking switches it off.
-  if (tapped(...ACCELERATOR)) input.engineOn = !input.engineOn;
+  if (CONTROLS.latchAccelerator) {
+    // Tap to latch the engine on, tap again to switch it off.
+    if (tapped(...ACCELERATOR)) input.engineOn = !input.engineOn;
+  } else {
+    // The engine drives while the accelerator is held; releasing it gives engine braking.
+    input.engineOn = pressed(...ACCELERATOR);
+  }
   input.brake = pressed(...BRAKE) ? 1 : 0;
   if (input.brake) input.engineOn = false;
   input.throttle = input.engineOn ? 1 : 0;
