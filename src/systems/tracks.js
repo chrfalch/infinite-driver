@@ -1,11 +1,13 @@
-import { HeightField, IsPlayer, Time, Tracks, Vehicle } from '../ecs/traits.js';
+import { Deformation, HeightField, IsPlayer, Time, Tracks, Vehicle } from '../ecs/traits.js';
+import { compactSoil } from '../terrain/deformation.js';
 import { GROUND, TIRE } from '../tire/config.js';
 import { CAR } from '../vehicle/config.js';
 
 const CONTACT = 0.035; // tread within this of the ground surface counts as touching
 
 // Contact centre and depth from tyre particles (vec stride 3 or 4), or null when airborne.
-function particleContact(positions, stride, start, count, heightAt, radius) {
+// With `pressed`, every particle below the surface is also collected for soil compaction.
+function particleContact(positions, stride, start, count, heightAt, radius, pressed = null) {
   let sx = 0;
   let sz = 0;
   let n = 0;
@@ -16,6 +18,7 @@ function particleContact(positions, stride, start, count, heightAt, radius) {
     const y = positions[o + 1];
     const z = positions[o + 2];
     const depth = heightAt(x, z) + radius - y;
+    if (pressed && depth > 0) pressed.push({ x, z, depth });
     if (depth > -CONTACT) {
       sx += x;
       sz += z;
@@ -33,7 +36,9 @@ export function updateTracks(world) {
   if (!GROUND.tracks) return;
   const car = world.queryFirst(IsPlayer, Vehicle);
   if (!car) return;
-  const { heightAt } = world.get(HeightField);
+  const { heightAt, surfaceAt } = world.get(HeightField);
+  const deformation = world.get(Deformation)?.map;
+  const pressed = [];
   const { controller, body } = car.get(Vehicle);
   // Axle direction (chassis +z) flattened onto the ground.
   const q = body.rotation();
@@ -48,7 +53,8 @@ export function updateTracks(world) {
     let width = TIRE.width * 0.85;
     if (controller.gpu) {
       const s = controller.gpu.solver;
-      contact = particleContact(s.positions, 4, i * s.perTire, s.perTire, heightAt, 0.02);
+      // Depth is measured from the rutted surface, and pressed particles compact the soil.
+      contact = particleContact(s.positions, 4, i * s.perTire, s.perTire, surfaceAt, 0.02, pressed);
     } else if (controller.wheels) {
       const soft = controller.wheels[i].soft;
       const p = soft.particlePositions();
@@ -65,6 +71,14 @@ export function updateTracks(world) {
     // Deeper sinking and softer soil leave darker tracks.
     const strength = Math.min(1, 0.25 + contact.depth * 5 + softness * 0.5);
     tracks.add(i, heightAt, contact, right, width, strength);
+  }
+  if (deformation && pressed.length) {
+    compactSoil(deformation, pressed, {
+      softness,
+      dt: world.get(Time).delta,
+      right,
+      bermOffset: TIRE.width * 0.5 + 0.1,
+    });
   }
   tracks.update(world.get(Time).delta);
 }

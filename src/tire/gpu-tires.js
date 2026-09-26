@@ -20,18 +20,26 @@ export function createGpuTires(device, count, tire = TIRE, gpu = GPU_TIRE) {
   return { solver, mesh, mirrored };
 }
 
-// Samples the ground on the solver's grid, centred on (x, z).
-export function updateGpuGround(solver, heightAt, x, z, cell = 0.5) {
+// Samples the ground (terrain plus ruts) on the solver's grid, centred on (x, z). The grid spacing
+// matches the deformation map, so ruts are read cell for cell.
+export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell = 0.125) {
   const half = ((GROUND_N - 1) * cell) / 2;
-  const ox = Math.round((x - half) / cell) * cell;
-  const oz = Math.round((z - half) / cell) * cell;
-  if (solver.groundOrigin.x === ox && solver.groundOrigin.z === oz && solver.groundReady) return;
-  const heights = new Float32Array(GROUND_N * GROUND_N);
+  const ix0 = Math.round((x - half) / cell);
+  const iz0 = Math.round((z - half) / cell);
+  const ox = ix0 * cell;
+  const oz = iz0 * cell;
+  const version = deformation?.version ?? 0;
+  if (solver.groundReady && solver.groundOrigin.x === ox && solver.groundOrigin.z === oz && solver.groundVersion === version) return;
+  const heights = solver.groundScratch ?? (solver.groundScratch = new Float32Array(GROUND_N * GROUND_N));
   for (let iz = 0; iz < GROUND_N; iz++) {
-    for (let ix = 0; ix < GROUND_N; ix++) heights[iz * GROUND_N + ix] = heightAt(ox + ix * cell, oz + iz * cell);
+    for (let ix = 0; ix < GROUND_N; ix++) {
+      const offset = deformation ? deformation.cellValue(ix0 + ix, iz0 + iz) : 0;
+      heights[iz * GROUND_N + ix] = heightAt(ox + ix * cell, oz + iz * cell) + offset;
+    }
   }
   solver.setGround(heights, ox, oz, cell);
   solver.groundReady = true;
+  solver.groundVersion = version;
 }
 
 // Picks the rocks nearest to (x, z) and uploads them as convex shapes.

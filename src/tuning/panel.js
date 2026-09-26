@@ -1,6 +1,6 @@
 import GUI from 'lil-gui';
 import { CONTROLS, DEFAULT_CONTROLS, saveControls } from '../controls.js';
-import { Input, IsPlayer, Physics, Tracks, Vehicle } from '../ecs/traits.js';
+import { Deformation, Input, IsPlayer, Physics, Tracks, Vehicle } from '../ecs/traits.js';
 import { CAR, DEFAULT_CAR, resetCar, saveCar } from '../vehicle/config.js';
 import {
   GPU_TIRE,
@@ -257,7 +257,17 @@ export function createTuningPanel(world, { heightAt }) {
       if (solver) solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step);
     });
   ground.add(GROUND, 'tracks').name('Tyre tracks').onChange(saveGround);
-  ground.add({ clear: () => world.get(Tracks).renderer?.clear() }, 'clear').name('Clear tracks');
+  ground
+    .add(
+      {
+        clear: () => {
+          world.get(Tracks).renderer?.clear();
+          world.get(Deformation)?.map?.clear();
+        },
+      },
+      'clear',
+    )
+    .name('Clear tracks and ruts');
 
   // GPU tyre settings: most apply live, mesh and mass rebuild the car.
   addGpuTireFolder(gui, world, scheduleRebuild);

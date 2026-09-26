@@ -14,7 +14,7 @@ import { d, tgpu } from 'typegpu';
 export const MAX_TIRES = 4;
 export const MAX_ROCKS = 48;
 export const ROCK_FACES = 80;
-export const GROUND_N = 97; // ground height samples per side
+export const GROUND_N = 129; // ground height samples per side (16 m at 12.5 cm)
 const WG = 256;
 export const MAX_PER_TIRE = 512; // particles per tyre (workgroup memory)
 
@@ -86,8 +86,8 @@ export class GpuTireSolver {
     for (let i = 0; i < this.perTire; i++) restData.set([restLocal[i * 3], restLocal[i * 3 + 1], restLocal[i * 3 + 2], 0], i * 4);
     this.rest.write(restData);
     this.ground.write(new Float32Array(GROUND_N * GROUND_N));
-    this.groundOrigin = { x: -24, z: -24 };
-    this.groundCell = 0.5;
+    this.groundOrigin = { x: -8, z: -8 };
+    this.groundCell = 0.125;
     this.rockCount = 0;
 
     this.hubData = new Float32Array(MAX_TIRES * 16);
