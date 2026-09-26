@@ -2,6 +2,7 @@ import { TIRE } from '../tire/config.js';
 import { GROUP, createSoftTire, groups } from '../tire/soft-tire.js';
 import { CAR, DRIVETRAIN } from './config.js';
 import { WHEELS, wheelMount } from './physics.js';
+import { IFS_ARM_LIMIT, IFS_RACK, ifsCorner } from './frame-geometry.js';
 
 const DOWN = { x: 0, y: -1, z: 0 };
 const UP = { x: 0, y: 1, z: 0 };
@@ -17,6 +18,8 @@ const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
 const LINK_INERTIA = 1;
 const STEER_STIFFNESS = 4e5;
 const STEER_DAMPING = 8e3;
+// Steering arm: the tie rod end sits this far (m) from the kingpin, so rack travel ≈ arm × sin(angle).
+const IFS_STEER_ARM = 0.14;
 // Brake motor gain (N·m per rad/s); the brake torque caps it, like pad friction.
 const BRAKE_GRIP = 2e5;
 
@@ -32,6 +35,24 @@ function rotate(q, v) {
   };
 }
 const conjugate = (q) => ({ x: -q.x, y: -q.y, z: -q.z, w: q.w });
+const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+const cross = (a, b) => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x });
+const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+const midpoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
+// World position of a point given in a body's local frame.
+function worldPoint(body, local) {
+  const t = body.translation();
+  const r = rotate(body.rotation(), local);
+  return { x: t.x + r.x, y: t.y + r.y, z: t.z + r.z };
+}
+// World velocity of a body's point at world position p.
+function pointVelocity(body, p) {
+  const t = body.translation();
+  const v = body.linvel();
+  const w = body.angvel();
+  const c = cross(w, sub(p, t));
+  return { x: v.x + c.x, y: v.y + c.y, z: v.z + c.z };
+}
 function multiply(a, b) {
   return {
     x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
@@ -71,10 +92,13 @@ export class JointedVehicle {
     const noCollide = groups(0, 0);
     this.solid = !!car.solidAxles;
     this.axles = this.solid ? [this.createSolidAxle(0, 1), this.createSolidAxle(2, 3)] : [];
+    this.rack = this.solid ? null : this.createRack();
     for (let i = 0; i < WHEELS.length; i++) {
       const mount = wheelMount(i, car);
       const front = WHEELS[i].front;
-      const localHub = { x: mount.x, y: mount.y - car.suspensionRestLength, z: mount.z };
+      const localHub = this.solid
+        ? { x: mount.x, y: mount.y - car.suspensionRestLength, z: mount.z }
+        : ifsCorner(i).wheel;
       const worldHub = rotate(q, localHub);
       const at = { x: p.x + worldHub.x, y: p.y + worldHub.y, z: p.z + worldHub.z };
       const makeBody = (mass) => {
@@ -97,6 +121,7 @@ export class JointedVehicle {
       let slider = null;
       let knuckle;
       let steer = null;
+      let ifs = null;
       const solidAxle = this.solid ? this.axles[i < 2 ? 0 : 1] : null;
       if (solidAxle) {
         strut = solidAxle.beam;
@@ -111,19 +136,9 @@ export class JointedVehicle {
           knuckle = strut;
         }
       } else {
-        strut = makeBody(8);
-        slider = world.createImpulseJoint(this.RAPIER.JointData.prismatic(mount, ORIGIN, DOWN), chassis, strut, true);
-        slider.setContactsEnabled(false);
-        slider.configureMotorModel(this.RAPIER.MotorModel.ForceBased);
-        this.joints.push(slider);
-        knuckle = strut;
-        if (front) {
-          knuckle = makeBody(8);
-          steer = world.createImpulseJoint(this.RAPIER.JointData.revolute(ORIGIN, ORIGIN, UP), strut, knuckle, true);
-          steer.setContactsEnabled(false);
-          steer.configureMotorModel(this.RAPIER.MotorModel.ForceBased);
-          this.joints.push(steer);
-        }
+        ifs = this.createCorner(i);
+        strut = ifs.upright;
+        knuckle = ifs.upright;
       }
 
       // Hub on the axle; the tyre's bead is pinned to it.
@@ -168,6 +183,7 @@ export class JointedVehicle {
         knuckle,
         // The body at the wheel centre, used to measure suspension travel.
         center: solidAxle ? (front ? knuckle : hub) : strut,
+        ifs,
         hub,
         axleJoint: axle,
         slider,
@@ -182,6 +198,106 @@ export class JointedVehicle {
       });
     }
     this.applySpringSettings();
+  }
+
+  // A dynamic link body at chassis-local point `local` (turned with the chassis).
+  createLink(local, mass, inertia) {
+    const { RAPIER, world, body: chassis } = this;
+    const q = chassis.rotation();
+    const p = chassis.translation();
+    const w = rotate(q, local);
+    const body = world.createRigidBody(
+      RAPIER.RigidBodyDesc.dynamic().setTranslation(p.x + w.x, p.y + w.y, p.z + w.z).setRotation(q).setCanSleep(false),
+    );
+    world.createCollider(
+      RAPIER.ColliderDesc.ball(0.04).setMassProperties(mass, ORIGIN, { x: inertia, y: inertia, z: inertia }, IDENTITY).setCollisionGroups(groups(0, 0)),
+      body,
+    );
+    this.bodies.push(body);
+    return body;
+  }
+
+  joint(data, a, b) {
+    const j = this.world.createImpulseJoint(data, a, b, true);
+    j.setContactsEnabled(false);
+    this.joints.push(j);
+    return j;
+  }
+
+  // Independent suspension: a steering rack across the nose box, sliding sideways on the chassis.
+  createRack() {
+    const rack = this.createLink(IFS_RACK.center, 4, 0.3);
+    const slide = this.joint(this.RAPIER.JointData.prismatic(IFS_RACK.center, ORIGIN, AXLE), this.body, rack);
+    // The rack is held at the steering position by the joint's limits (a hard constraint): a
+    // position motor is too soft against the tyres' aligning torque and the wheels steer late.
+    slide.setLimits(0, 0);
+    return { body: rack, slide, target: 0 };
+  }
+
+  // One double A-arm corner: lower and upper arms hinged on the chassis, an upright on two ball
+  // joints, and a tie rod from the rack (front) or the chassis (rear, a fixed toe link).
+  createCorner(i) {
+    const { RAPIER, body: chassis } = this;
+    const G = ifsCorner(i);
+    const lower = this.createLink(G.lowerBall, 8, 0.6);
+    const upper = this.createLink(G.upperBall, 5, 0.4);
+    const upright = this.createLink(G.wheel, 10, 0.6);
+    const hinge = (inner, ball, arm) => {
+      const pivot = midpoint(inner[0], inner[1]);
+      const d = sub(inner[0], inner[1]);
+      const len = Math.hypot(d.x, d.y, d.z);
+      const axis = { x: d.x / len, y: d.y / len, z: d.z / len };
+      const j = this.joint(RAPIER.JointData.revolute(pivot, sub(pivot, ball), axis), chassis, arm);
+      j.setLimits(-IFS_ARM_LIMIT, IFS_ARM_LIMIT);
+      return { joint: j, pivot, axis };
+    };
+    const lowerHinge = hinge(G.lowerInner, G.lowerBall, lower);
+    const upperHinge = hinge(G.upperInner, G.upperBall, upper);
+    // Upper arm travel is limited by the lower arm; give it room so it never binds first.
+    upperHinge.joint.setLimits(-IFS_ARM_LIMIT * 1.6, IFS_ARM_LIMIT * 1.6);
+    this.joint(RAPIER.JointData.spherical(ORIGIN, sub(G.lowerBall, G.wheel)), lower, upright);
+    this.joint(RAPIER.JointData.spherical(ORIGIN, sub(G.upperBall, G.wheel)), upper, upright);
+    const tieMid = midpoint(G.tieInner, G.tieOuter);
+    const tie = this.createLink(tieMid, 2, 0.08);
+    this.joint(RAPIER.JointData.spherical(sub(G.tieOuter, tieMid), sub(G.tieOuter, G.wheel)), tie, upright);
+    if (G.front) {
+      this.joint(RAPIER.JointData.spherical(sub(G.tieInner, IFS_RACK.center), sub(G.tieInner, tieMid)), this.rack.body, tie);
+    } else {
+      this.joint(RAPIER.JointData.spherical(G.tieInner, sub(G.tieInner, tieMid)), chassis, tie);
+    }
+    return { G, lower, upper, upright, tie, lowerHinge, upperHinge, shockLocal: sub(G.shockBottom, G.lowerBall) };
+  }
+
+  // Coil-over force for one double A-arm corner. The wheel rate (and bump/rebound damping) is the
+  // same as the other suspensions'; the spring and damper act along the shock between the chassis
+  // and the lower arm, so their force is the wheel force divided by the motion ratio.
+  applyCoilOver(w, dt, qc, pc) {
+    const { car } = this;
+    const c = w.ifs;
+    const top = worldPoint(this.body, c.G.shockTop);
+    const bottom = worldPoint(c.lower, c.shockLocal);
+    const d = sub(bottom, top);
+    const L = Math.hypot(d.x, d.y, d.z) || 1;
+    const u = { x: d.x / L, y: d.y / L, z: d.z / L };
+    // Motion ratio from the lower arm's rotation: shock length change per wheel lift.
+    const axis = rotate(qc, c.lowerHinge.axis);
+    const pivot = worldPoint(this.body, c.lowerHinge.pivot);
+    const ball = c.lower.translation();
+    const up = rotate(qc, UP);
+    const dL = dot(u, cross(axis, sub(bottom, pivot)));
+    const dY = dot(up, cross(axis, sub(ball, pivot)));
+    const ratio = Math.max(0.2, Math.abs(dY) > 1e-6 ? Math.abs(dL / dY) : 0.65);
+    w.motionRatio = ratio;
+    // Wheel force: spring from the rest length, damping from the travel speed (as the sliders).
+    const load = axleLoadFactor(w.front, car);
+    const k = car.suspensionStiffness * car.mass * load;
+    const speed = w.travelSpeed ?? 0;
+    const damping = (speed < 0 ? car.suspensionCompression : car.suspensionRelaxation) * car.mass * load;
+    const wheelForce = k * (car.suspensionRestLength - w.suspensionLength) - damping * speed;
+    const f = Math.max(-2e4, Math.min(6e4, wheelForce)) / ratio;
+    c.lower.addForceAtPoint({ x: u.x * f, y: u.y * f, z: u.z * f }, bottom, true);
+    this.body.addForceAtPoint({ x: -u.x * f, y: -u.y * f, z: -u.z * f }, top, true);
+    w.shockLength = L;
   }
 
   // A beam axle for wheels a and b: chassis → vertical slider → carrier → roll hinge → beam.
@@ -270,6 +386,19 @@ export class JointedVehicle {
   }
   setWheelSteering(i, angle) {
     const w = this.wheels[i];
+    if (this.rack && w.front) {
+      // One rack steers both wheels: its travel follows the mean angle, and the steering arms'
+      // geometry gives each wheel its own angle (Ackermann).
+      w.steering = angle;
+      const mean = (this.wheels[0].steering + (this.wheels[1]?.steering ?? angle)) / 2;
+      const target = -IFS_STEER_ARM * Math.sin(mean);
+      const clamped = Math.max(-IFS_RACK.travel, Math.min(IFS_RACK.travel, target));
+      if (Math.abs(clamped - this.rack.target) > 1e-6) {
+        this.rack.target = clamped;
+        this.rack.slide.setLimits(clamped, clamped);
+      }
+      return;
+    }
     if (!w.steer || Math.abs(w.steering - angle) < 1e-5) return;
     w.steering = angle;
     w.steer.configureMotorPosition(angle, STEER_STIFFNESS, STEER_DAMPING);
@@ -277,6 +406,10 @@ export class JointedVehicle {
   // The measured steering angle of the knuckle on its strut, not the commanded one.
   wheelSteering(i) {
     const w = this.wheels[i];
+    if (w.ifs) {
+      const rel = multiply(conjugate(this.body.rotation()), w.ifs.upright.rotation());
+      return 2 * Math.atan2(rel.y, rel.w);
+    }
     if (!w.steer) return 0;
     const rel = multiply(conjugate(w.strut.rotation()), w.knuckle.rotation());
     return 2 * Math.atan2(rel.y, rel.w);
@@ -294,6 +427,27 @@ export class JointedVehicle {
       position: rotate(qcInv, { x: h.x - pc.x, y: h.y - pc.y, z: h.z - pc.z }),
       steer: multiply(qcInv, kq),
       spin: multiply(conjugate(kq), w.hub.rotation()),
+    };
+  }
+  // Double A-arm points of corner i in the chassis frame, read from the physics links (for drawing).
+  suspensionPose(i) {
+    const w = this.wheels[i];
+    const c = w.ifs;
+    if (!c) return null;
+    const qcInv = conjugate(this.body.rotation());
+    const pc = this.body.translation();
+    const local = (p) => rotate(qcInv, sub(p, pc));
+    const G = c.G;
+    return {
+      lowerInner: G.lowerInner,
+      upperInner: G.upperInner,
+      lowerBall: local(c.lower.translation()),
+      upperBall: local(c.upper.translation()),
+      tieInner: G.front ? local(worldPoint(this.rack.body, sub(G.tieInner, IFS_RACK.center))) : G.tieInner,
+      tieOuter: local(worldPoint(c.upright, sub(G.tieOuter, G.wheel))),
+      shockTop: G.shockTop,
+      shockBottom: local(worldPoint(c.lower, c.shockLocal)),
+      rack: this.rack ? local(this.rack.body.translation()) : null,
     };
   }
   setWheelEngineForce(i, force) {
@@ -375,6 +529,10 @@ export class JointedVehicle {
     for (const w of this.wheels) {
       w.hub.resetTorques(true);
       w.knuckle.resetTorques(true);
+      if (w.ifs) {
+        w.ifs.lower.resetForces(true);
+        w.ifs.lower.resetTorques(true);
+      }
     }
     for (const w of this.wheels) {
       // Suspension length from the wheel centre's position in the chassis frame.
@@ -383,6 +541,8 @@ export class JointedVehicle {
       const length = w.mount.y - local.y;
       const speed = (length - w.suspensionLength) / dt;
       w.suspensionLength = length;
+      w.travelSpeed = speed;
+      if (w.ifs) this.applyCoilOver(w, dt, qc, pc);
       // Bump and rebound damping differ, so pick by direction of travel.
       const load = axleLoadFactor(w.front, car);
       const damping = (speed < 0 ? car.suspensionCompression : car.suspensionRelaxation) * car.mass * load;
@@ -405,7 +565,9 @@ export class JointedVehicle {
       w.axleJoint.setMotorMaxForce(((w.brakeImpulse ?? 0) / dt) * radius);
       const t = { x: spinAxis.x * torque, y: spinAxis.y * torque, z: spinAxis.z * torque };
       w.hub.addTorque(t, true);
-      w.knuckle.addTorque({ x: -t.x, y: -t.y, z: -t.z }, true);
+      // The drive's reaction goes where the differential is: the axle beam (solid) or, with
+      // independent suspension, the chassis that carries the differential.
+      (w.ifs ? this.body : w.knuckle).addTorque({ x: -t.x, y: -t.y, z: -t.z }, true);
     }
   }
 
@@ -494,7 +656,8 @@ export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIR
   const { x: hx, y: hy, z: hz } = car.halfExtents;
   // The jointed car's axles, hubs, knuckles, and tyres add mass; the chassis gets the rest so the
   // whole car weighs car.mass.
-  const unsprung = car.solidAxles ? 292 : 184;
+  // Independent: per corner lower arm 8, upper 5, upright 10, tie rod 2, hub 22 kg, plus the rack.
+  const unsprung = car.solidAxles ? 292 : 192;
   const m = Math.max(600, car.mass - unsprung);
   const inertia = {
     x: (m / 12) * (4 * hy * hy + 4 * hz * hz) * 1.6,

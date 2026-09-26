@@ -44,3 +44,76 @@ export function suspensionMounts(i, car = CAR) {
     lowerArmFrame: { x: m.x, y: g.floorY, z: side * 0.5 },
   };
 }
+
+// Double A-arm (short-long arm) geometry, right front corner (z > 0), at ride height with the
+// wheel centre at y = -0.45. Chassis-local metres. The upper arm is 0.70 of the lower, the arms
+// slope a little down toward the wheel so their lines meet about 3 m inboard: the roll centre sits
+// about 0.3 m above the ground and the wheel gains negative camber in bump. The ball joints give
+// 8° kingpin inclination and 6° caster with about 5 cm scrub radius. The steering arm points out
+// toward the rear axle's centre line (Ackermann), and the tie rod's inner end was placed by a
+// kinematic search so the toe changes less than 0.2° over ±0.15 m of travel (no bump steer). The
+// coil-over sits on the lower arm's rear leg at 65 % of its length (motion ratio about 0.55-0.6).
+const IFS_FRONT_RIGHT = {
+  wheel: [1.35, -0.45, 1.05],
+  lowerInner: [
+    [1.6, -0.5, 0.45],
+    [1.1, -0.5, 0.45],
+  ],
+  upperInner: [
+    [1.53, -0.24, 0.55],
+    [1.13, -0.24, 0.55],
+  ],
+  lowerBall: [1.365, -0.61, 0.955],
+  upperBall: [1.333, -0.29, 0.91],
+  tieInner: [1.5, -0.375, 0.585],
+  tieOuter: [1.48, -0.45, 1.008],
+  shockBottom: [1.272, -0.5715, 0.778],
+  shockTop: [1.22, 0.12, 0.51],
+};
+// The rear is the front mirrored fore and aft, with no caster (both ball joints over the axle)
+// and fixed toe links instead of the rack; the coil-over tops on the rear posts.
+const IFS_REAR_RIGHT = {
+  ...IFS_FRONT_RIGHT,
+  upperBall: [1.35, -0.29, 0.91],
+  lowerBall: [1.35, -0.61, 0.955],
+  shockTop: [1.2, 0.2, 0.6],
+};
+
+// Travel limit for the arms (rad either way from ride height), about ±0.18 m at the wheel.
+export const IFS_ARM_LIMIT = 0.37;
+
+// The double A-arm points of one corner (wheel index 0 FL, 1 FR, 2 RL, 3 RR), chassis-local.
+export function ifsCorner(i) {
+  const front = i < 2;
+  const side = i % 2 === 0 ? -1 : 1;
+  const base = front ? IFS_FRONT_RIGHT : IFS_REAR_RIGHT;
+  const sx = front ? 1 : -1;
+  const P = (p) => ({ x: sx * p[0], y: p[1], z: side * p[2] });
+  const out = { front, side };
+  for (const [key, value] of Object.entries(base)) out[key] = Array.isArray(value[0]) ? value.map(P) : P(value);
+  return out;
+}
+
+// The steering rack (front, independent suspension): its centre and half-length.
+export const IFS_RACK = { center: { x: 1.5, y: -0.375, z: 0 }, halfLength: 0.44, travel: 0.11 };
+
+// Double A-arm points for drawing a corner whose wheel centre is at `hub` (chassis-local), when
+// no physics links exist (the raycast car): the wheel-side points move with the hub.
+export function ifsPoseFromHub(i, hub) {
+  const G = ifsCorner(i);
+  const d = { x: hub.x - G.wheel.x, y: hub.y - G.wheel.y, z: hub.z - G.wheel.z };
+  const move = (p) => ({ x: p.x + d.x, y: p.y + d.y, z: p.z + d.z });
+  const lowerBall = move(G.lowerBall);
+  const pivot = { x: (G.lowerInner[0].x + G.lowerInner[1].x) / 2, y: G.lowerInner[0].y, z: G.lowerInner[0].z };
+  const t = 0.65;
+  return {
+    lowerInner: G.lowerInner,
+    upperInner: G.upperInner,
+    lowerBall,
+    upperBall: move(G.upperBall),
+    tieInner: G.tieInner,
+    tieOuter: move(G.tieOuter),
+    shockTop: G.shockTop,
+    shockBottom: { x: G.shockBottom.x, y: pivot.y + (lowerBall.y - pivot.y) * t, z: pivot.z + (lowerBall.z - pivot.z) * t },
+  };
+}
