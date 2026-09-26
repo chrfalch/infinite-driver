@@ -13,6 +13,7 @@ import {
   TerrainStreaming,
   Tracks,
   Deformation,
+  Soil,
   Time,
   Vehicle,
   WheelRig,
@@ -25,6 +26,8 @@ import { stepPhysics, syncBodies } from './systems/physics.js';
 import { streamTerrain } from './systems/terrain.js';
 import { syncAxles, syncSoftTires, syncViews, syncWheels } from './systems/views.js';
 import { updateTracks } from './systems/tracks.js';
+import { updateSoil } from './systems/soil.js';
+import { SoilParticles } from './render/soil-particles.js';
 import { TireTracks } from './render/tracks.js';
 import { GROUND } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
@@ -51,7 +54,13 @@ async function main() {
   const surfaceAt = (x, z) => heightAt(x, z) + deformation.at(x, z);
   world.add(HeightField({ heightAt, surfaceAt }));
   world.add(Deformation({ map: deformation }));
-  world.add(Tracks({ renderer: new TireTracks(render.scene, { segments: GROUND.trackLength, deformation }) }));
+  world.add(Soil({ particles: new SoilParticles(render.scene), carry: [0, 0, 0, 0] }));
+  world.add(
+    Tracks({
+      renderer: new TireTracks(render.scene, { segments: GROUND.trackLength, deformation }),
+      contacts: [null, null, null, null],
+    }),
+  );
 
   // The car starts just above the ground at the origin.
   spawnCar(world, { position: { x: 0, y: heightAt(0, 0) + startHeight(), z: 0 } });
@@ -149,6 +158,7 @@ async function main() {
       syncAxles(world);
       syncSoftTires(world);
       updateTracks(world);
+      updateSoil(world);
       followCamera(world);
       updateHud(world);
 
@@ -172,7 +182,7 @@ async function main() {
     get car() {
       return world.queryFirst(IsPlayer, Vehicle);
     },
-    traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation },
+    traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil },
   };
 }
 

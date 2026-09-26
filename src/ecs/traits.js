@@ -9,7 +9,9 @@ export const Render = trait(() => ({ renderer: null, scene: null, camera: null, 
 // heightAt: the generated terrain; surfaceAt: terrain plus ruts and berms (see Deformation).
 export const HeightField = trait(() => ({ heightAt: null, surfaceAt: null }));
 export const Deformation = trait(() => ({ map: null }));
-export const Tracks = trait(() => ({ renderer: null }));
+// Tyre contact per wheel this frame ({ x, z, depth } or null), found by the track system.
+export const Tracks = trait(() => ({ renderer: null, contacts: [null, null, null, null] }));
+export const Soil = trait(() => ({ particles: null, carry: [0, 0, 0, 0] }));
 export const TerrainStreaming = trait({ radius: 2, colliderRadius: 1 });
 
 // Entity traits.

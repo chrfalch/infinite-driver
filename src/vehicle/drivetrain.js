@@ -194,13 +194,23 @@ export class Drivetrain {
     const slipW = this.engineW - gearboxEngineW;
     const capacity = p.clutchTorque * this.clutch;
     let clutchT = 0;
-    if (ratio !== 0 && capacity > 0) {
-      // Torque that would bring the engine to the gearbox speed this step, plus what the engine makes.
-      const lockT = (slipW * p.engineInertia) / dt + engineNet;
-      clutchT = Math.max(-capacity, Math.min(capacity, lockT));
+    // Locked: the clutch is fully in and the two sides turn together. The engine then simply
+    // follows the gearbox and passes its net torque through. (Locking it with a stiff torque every
+    // step made the light wheels and the heavy engine fight each other.)
+    const locked = this.clutch > 0.98 && Math.abs(slipW) < rpmToRad(120) && ratio !== 0 && Math.abs(engineNet) <= capacity;
+    if (locked) {
+      clutchT = engineNet;
+      this.engineW = Math.max(rpmToRad(200), gearboxEngineW);
+    } else {
+      if (ratio !== 0 && capacity > 0) {
+        // Slipping: the clutch pulls the two speeds together with at most its capacity, and never
+        // more than it takes to match them this step.
+        const lockT = (slipW * p.engineInertia) / dt + engineNet;
+        clutchT = Math.max(-capacity, Math.min(capacity, lockT));
+      }
+      this.engineW += ((engineNet - clutchT) / p.engineInertia) * dt;
+      this.engineW = Math.max(rpmToRad(200), this.engineW);
     }
-    this.engineW += ((engineNet - clutchT) / p.engineInertia) * dt;
-    this.engineW = Math.max(rpmToRad(200), this.engineW);
 
     // Torque into the gearbox output; reverse flips the sign via the ratio.
     const shaftT = clutchT * ratio * p.efficiency;

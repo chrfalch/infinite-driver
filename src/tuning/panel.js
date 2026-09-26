@@ -1,6 +1,6 @@
 import GUI from 'lil-gui';
 import { CONTROLS, DEFAULT_CONTROLS, saveControls } from '../controls.js';
-import { Deformation, Input, IsPlayer, Physics, Tracks, Vehicle, View } from '../ecs/traits.js';
+import { Deformation, Input, IsPlayer, Physics, Soil, Tracks, Vehicle, View } from '../ecs/traits.js';
 import { paint } from '../render/car-mesh.js';
 import { CAR, DEFAULT_CAR, resetCar, saveCar } from '../vehicle/config.js';
 import {
@@ -312,6 +312,7 @@ export function createTuningPanel(world, { heightAt }) {
         clear: () => {
           world.get(Tracks).renderer?.clear();
           world.get(Deformation)?.map?.clear();
+          world.get(Soil)?.particles?.clear();
         },
       },
       'clear',

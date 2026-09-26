@@ -30,10 +30,11 @@ function particleContact(positions, stride, start, count, heightAt, radius, pres
 }
 
 export function updateTracks(world) {
-  const tracks = world.get(Tracks).renderer;
+  const trackState = world.get(Tracks);
+  const tracks = trackState.renderer;
   if (!tracks) return;
+  trackState.contacts.fill(null);
   tracks.mesh.visible = GROUND.tracks;
-  if (!GROUND.tracks) return;
   const car = world.queryFirst(IsPlayer, Vehicle);
   if (!car) return;
   const { heightAt, surfaceAt } = world.get(HeightField);
@@ -64,13 +65,14 @@ export function updateTracks(world) {
       contact = p && { x: p.x, z: p.z, depth: 0 };
       width = CAR.wheelWidth * 0.9;
     }
+    trackState.contacts[i] = contact;
     if (!contact) {
       tracks.lift(i);
       continue;
     }
     // Deeper sinking and softer soil leave darker tracks.
     const strength = Math.min(1, 0.25 + contact.depth * 5 + softness * 0.5);
-    tracks.add(i, heightAt, contact, right, width, strength);
+    if (GROUND.tracks) tracks.add(i, heightAt, contact, right, width, strength);
   }
   if (deformation && pressed.length) {
     compactSoil(deformation, pressed, {
