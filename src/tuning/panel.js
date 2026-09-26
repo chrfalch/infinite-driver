@@ -140,11 +140,13 @@ export function createTuningPanel(world, { heightAt }) {
       rebuildCar(world);
     },
     respawn: () => respawnCar(world, heightAt),
+    lab: () => (location.href = '/tire-lab.html'),
   };
 
   const copyButton = gui.add(actions, 'copy').name('Copy settings');
   gui.add(actions, 'reset').name('Reset to defaults');
   gui.add(actions, 'respawn').name('Respawn car (R)');
+  gui.add(actions, 'lab').name('Open soft tyre lab →');
 
   const controls = gui.addFolder('Controls');
   controls

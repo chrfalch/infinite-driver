@@ -58,6 +58,32 @@ function pickSize(r) {
   return 1.6 + (r - 0.985) * 60; // rare boulders
 }
 
+// One rock with its world transform baked into its vertices.
+export function makeRock(heightAt, x, z, size, rand, noise) {
+  const sx = size * (0.8 + rand() * 0.5);
+  const sy = size * (0.45 + rand() * 0.35);
+  const sz = size * (0.8 + rand() * 0.5);
+  const yaw = rand() * Math.PI * 2;
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  const sink = sy * (0.25 + rand() * 0.2);
+  const ground = heightAt(x, z);
+  const offset = rand() * 100;
+
+  const vertices = new Float32Array(BASE.verts.length * 3);
+  BASE.verts.forEach(([vx, vy, vz], i) => {
+    const bump = 1 + noise(vx * 1.3 + offset, vy * 1.3, vz * 1.3) * 0.28;
+    // Flatten the underside so rocks sit on the ground.
+    const lx = vx * bump * sx;
+    const ly = Math.max(vy * bump, -0.35) * sy;
+    const lz = vz * bump * sz;
+    vertices[i * 3] = x + lx * cos - lz * sin;
+    vertices[i * 3 + 1] = ground + ly + sy * 0.35 - sink;
+    vertices[i * 3 + 2] = z + lx * sin + lz * cos;
+  });
+  return { x, z, size, vertices, faces: BASE.faces, tint: rand() };
+}
+
 // Deterministic rocks for one chunk. Each rock has a world transform baked into its vertices.
 export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) {
   const rand = mulberry32(hashChunk(seed, cx, cz));
@@ -68,29 +94,7 @@ export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) 
     const z = (cz + rand()) * CHUNK_SIZE;
     const size = pickSize(rand());
     if (Math.hypot(x, z) < SPAWN_CLEAR_RADIUS + size) continue;
-
-    const sx = size * (0.8 + rand() * 0.5);
-    const sy = size * (0.45 + rand() * 0.35);
-    const sz = size * (0.8 + rand() * 0.5);
-    const yaw = rand() * Math.PI * 2;
-    const cos = Math.cos(yaw);
-    const sin = Math.sin(yaw);
-    const sink = sy * (0.25 + rand() * 0.2);
-    const ground = heightAt(x, z);
-    const offset = rand() * 100;
-
-    const vertices = new Float32Array(BASE.verts.length * 3);
-    BASE.verts.forEach(([vx, vy, vz], i) => {
-      const bump = 1 + noise(vx * 1.3 + offset, vy * 1.3, vz * 1.3) * 0.28;
-      // Flatten the underside so rocks sit on the ground.
-      const lx = vx * bump * sx;
-      const ly = Math.max(vy * bump, -0.35) * sy;
-      const lz = vz * bump * sz;
-      vertices[i * 3] = x + lx * cos - lz * sin;
-      vertices[i * 3 + 1] = ground + ly + sy * 0.35 - sink;
-      vertices[i * 3 + 2] = z + lx * sin + lz * cos;
-    });
-    rocks.push({ x, z, size, vertices, faces: BASE.faces, tint: rand() });
+    rocks.push(makeRock(heightAt, x, z, size, rand, noise));
   }
   return rocks;
 }
