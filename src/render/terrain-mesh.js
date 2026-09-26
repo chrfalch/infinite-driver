@@ -1,6 +1,6 @@
 import { createNoise2D } from 'simplex-noise';
 import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, exp, fract, mix, positionWorld, sin, smoothstep, uniform, vec3, vec4 } from 'three/tsl';
+import { attribute, dot, exp, fract, fwidth, mix, positionWorld, sin, smoothstep, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import { gravelShade } from '../terrain/gravel.js';
 import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
@@ -19,7 +19,25 @@ const roadDist = attribute('roadDist', 'float');
 const roadMask = smoothstep(4.3, 2.9, roadDist);
 const rut = roadDist.sub(1.05);
 const rutWear = exp(rut.mul(rut).div(-0.13));
-const roadColor = mix(vec3(0.8, 0.69, 0.54), vec3(0.69, 0.55, 0.4), rutWear.mul(0.8));
+// Gravel road: grey-beige crushed stone, compacted darker in the two ruts, looser and lighter on
+// the crown and the edges. Two layers of texture so it reads as gravel at every zoom: a pebble
+// speckle (18 cm cells of random light/dark stones, for the middle distance) and soft patches
+// of fresher and older gravel (a few metres across).
+const hashCell = (cell) => fract(sin(dot(cell, vec2(12.9898, 78.233))).mul(43758.5453));
+const pebbleCell = positionWorld.xz.div(0.18).floor();
+const pebble = hashCell(pebbleCell);
+const pebbleTone = mix(vec3(0.8, 0.8, 0.82), vec3(1.16, 1.12, 1.06), pebble);
+const pebbleScale = fwidth(positionWorld.x).div(0.18); // cells per pixel
+// Shown in the middle distance: gone when a cell is under ~2 px (shimmer) and when it is over
+// ~25 px (up close the round gravel stones take over and square cells would show).
+const pebbleFade = smoothstep(0.6, 0.25, pebbleScale).mul(smoothstep(0.02, 0.06, pebbleScale));
+const patches = sin(positionWorld.x.mul(0.43).add(sin(positionWorld.z.mul(0.31)).mul(2.1))).mul(sin(positionWorld.z.mul(0.37).add(positionWorld.x.mul(0.11)))).mul(0.07).add(1);
+const crown = smoothstep(0.9, 0.0, roadDist).mul(rutWear.oneMinus());
+const edge = smoothstep(2.2, 3.4, roadDist);
+const gravelBase = mix(vec3(0.63, 0.59, 0.52), vec3(0.72, 0.68, 0.6), crown.add(edge).clamp(0, 1));
+const roadColor = mix(gravelBase, vec3(0.5, 0.45, 0.39), rutWear.mul(0.75))
+  .mul(mix(vec3(1), pebbleTone, pebbleFade.mul(rutWear.mul(0.5).oneMinus())))
+  .mul(patches);
 // Steep faces: horizontal sandstone strata from the world height, per pixel ('steep' per vertex),
 // so the bands stay level across the tall triangles of a cliff.
 const layer = positionWorld.y.div(2.1).add(sin(positionWorld.x.mul(0.07).add(positionWorld.z.mul(0.05))).mul(0.45));
@@ -56,8 +74,8 @@ function colorFor(h, slope, x, z, out) {
 
 // Canyon palette: pale dusty road with darker worn ruts, red-brown dust on the valley and
 // foothills (greener near the road), and sandstone strata in orange, red and cream on steep faces.
-const ROAD = new Color('#dcc6a2');
-const RUT = new Color('#bd9e78');
+const ROAD = new Color('#a39889'); // matches the shader's gravel base (tracks use these)
+const RUT = new Color('#827560');
 const DUST = new Color('#c98a5c');
 const DUST_DARK = new Color('#b36f47');
 const VERGE = new Color('#a8a86a');

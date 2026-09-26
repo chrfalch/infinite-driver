@@ -1,9 +1,11 @@
 import { IsPlayer, RockField, Soil, Time, Vehicle } from '../ecs/traits.js';
 
-// Bushes the car drives over bend away and squash, then spring back up over a few seconds, and a
-// few leaves fly off. Checks the wheels and the car's belly against the bushes of nearby chunks.
+// Bushes the car drives over bend away and go flat, and a few leaves fly off. Like the tyre
+// tracks, a run-over bush stays flattened: it only springs back part of the way (to CRUSHED of the
+// flattening), so a trail of flattened scrub marks where the car went. Checks the wheels and the car's belly against the bushes of nearby chunks.
 const PRESS = 0.08; // s to flatten
-const RECOVER = 1.8; // s to stand back up
+const RECOVER = 2.5; // s to spring back part of the way
+const CRUSHED = 0.7; // share of the flattening that stays
 const REACH = 16; // m around the car to check
 const leaf = { r: 0.36, g: 0.5, b: 0.2 };
 
@@ -30,6 +32,8 @@ export function updateBushes(world) {
     const bushes = field.bushes;
     if (!bushes) return;
     const { plants, amount, bend, active } = bushes;
+    bushes.crushed ??= new Float32Array(plants.length);
+    const crushed = bushes.crushed;
     let dirty = false;
     // Only chunks near the car are tested for new contacts; bent bushes anywhere keep recovering.
     const near = Math.abs(field.cx * 64 + 32 - c.x) < 64 + REACH && Math.abs(field.cz * 64 + 32 - c.z) < 64 + REACH;
@@ -47,6 +51,7 @@ export function updateBushes(world) {
         if (!hit) continue;
         const was = amount[i];
         amount[i] = Math.min(1, amount[i] + dt / PRESS);
+        crushed[i] = Math.max(crushed[i], amount[i] * CRUSHED);
         // Direction in the bush's own frame (instances are turned by p.turn about +y).
         const cs = Math.cos(p.turn);
         const sn = Math.sin(p.turn);
@@ -68,10 +73,10 @@ export function updateBushes(world) {
       const dx = p.x - c.x;
       const dz = p.z - c.z;
       // Recover when the car has moved off.
-      if (dx * dx + dz * dz > 9 || !near) amount[i] = Math.max(0, amount[i] - dt / RECOVER);
-      else amount[i] = Math.max(0, amount[i] - (dt / RECOVER) * 0.25);
+      const rate = dx * dx + dz * dz > 9 || !near ? 1 : 0.25;
+      amount[i] = Math.max(crushed[i], amount[i] - (dt / RECOVER) * rate);
       bend.array[i * 3 + 2] = amount[i];
-      if (amount[i] <= 0) active.delete(i);
+      if (amount[i] <= crushed[i]) active.delete(i);
       dirty = true;
     }
     if (dirty) bend.needsUpdate = true;

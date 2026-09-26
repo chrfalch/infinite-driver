@@ -51,7 +51,7 @@ bushLeaves.positionNode = (() => {
   const p = positionLocal;
   const h = clamp(p.y.div(0.9), 0, 1);
   const amount = bend.z.mul(h);
-  return vec3(p.x.add(bend.x.mul(amount).mul(0.55)), p.y.mul(bend.z.mul(-0.72).add(1)), p.z.add(bend.y.mul(amount).mul(0.55)));
+  return vec3(p.x.add(bend.x.mul(amount).mul(0.6)), p.y.mul(bend.z.mul(-0.85).add(1)), p.z.add(bend.y.mul(amount).mul(0.6)));
 })();
 
 const GREENS = ['#6f8f3a', '#86a147', '#5f7d33', '#98a95a', '#7a8a45'].map((c) => new Color(c));
