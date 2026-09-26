@@ -4,6 +4,7 @@ import {
   Physics,
   Render,
   RigidBody,
+  RockField,
   AxleRig,
   SoftTireView,
   SteeringWheel,
@@ -149,15 +150,99 @@ export function respawnCar(world, heightAt) {
   const fx = 1 - 2 * (q.y * q.y + q.z * q.z);
   const fz = 2 * (q.x * q.z - q.w * q.y);
   const yaw = Math.hypot(fx, fz) > 1e-3 ? Math.atan2(-fz, fx) : 0;
-  return respawnCarAt(world, heightAt, p.x, p.z, yaw);
+  const spot = findSpawnSpot(world, heightAt, p.x, p.z, yaw);
+  return respawnCarAt(world, heightAt, spot.x, spot.z, spot.yaw);
+}
+
+// Car footprint for spawn checks: half length (bumper to rear hoop) and half width over the tyres.
+const HALF_LENGTH = 2.5;
+const HALF_WIDTH = 1.25;
+
+// Heights over the car's footprint at (x, z) facing yaw: corners, edge midpoints and centre.
+function footprint(heightAt, x, z, yaw) {
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  const hs = [];
+  for (const a of [-1, 0, 1]) {
+    for (const b of [-1, 0, 1]) {
+      const lx = a * HALF_LENGTH;
+      const lz = b * HALF_WIDTH;
+      // Local +x is forward (world (cos, -sin) for a yaw about +y), local +z to the right.
+      hs.push(heightAt(x + lx * c + lz * s, z - lx * s + lz * c));
+    }
+  }
+  return { min: Math.min(...hs), max: Math.max(...hs) };
+}
+
+// Rocks and tree trunks near a point, from the loaded terrain chunks.
+function obstaclesNear(world, x, z, radius) {
+  const out = [];
+  world.query(RockField).forEach((e) => {
+    const field = e.get(RockField);
+    for (const r of field.rocks) if (Math.hypot(r.x - x, r.z - z) < radius) out.push({ x: r.x, z: r.z, r: r.size * 1.2 });
+    for (const p of field.plants ?? []) {
+      if (p.kind === 'tree' && Math.hypot(p.x - x, p.z - z) < radius) out.push({ x: p.x, z: p.z, r: 0.5 });
+    }
+  });
+  return out;
+}
+
+// A good place to put the car back on its wheels near (x, z): on the nearest road if the terrain
+// has roads, otherwise the nearest level patch, clear of rocks and trees. The car faces along the
+// road (whichever way is closer to its old heading). Falls back to the old spot.
+export function findSpawnSpot(world, heightAt, x0, z0, yaw0) {
+  const level = (x, z, yaw) => {
+    const f = footprint(heightAt, x, z, yaw);
+    return f.max - f.min < 0.35;
+  };
+  const clear = (x, z) => obstaclesNear(world, x, z, 6).every((o) => Math.hypot(o.x - x, o.z - z) > o.r + HALF_LENGTH + 0.3);
+  const facing = (h) => {
+    const d = Math.atan2(Math.sin(h - yaw0), Math.cos(h - yaw0));
+    return Math.abs(d) <= Math.PI / 2 ? h : h + Math.PI;
+  };
+  // Walk onto the nearest road centre line: a few Newton steps down the road-distance field.
+  const toRoad = (x, z) => {
+    for (let i = 0; i < 8; i++) {
+      const d = heightAt.roadDistance(x, z);
+      if (d < 0.25) break;
+      const e = 0.5;
+      const gx = (heightAt.roadDistance(x + e, z) - heightAt.roadDistance(x - e, z)) / (2 * e);
+      const gz = (heightAt.roadDistance(x, z + e) - heightAt.roadDistance(x, z - e)) / (2 * e);
+      const g = Math.hypot(gx, gz) || 1;
+      x -= (gx / g) * d;
+      z -= (gz / g) * d;
+    }
+    return heightAt.roadDistance(x, z) < 1 ? { x, z } : null;
+  };
+  const roads = typeof heightAt.roadDistance === 'function';
+  for (let ring = 0; ring <= 40; ring++) {
+    const radius = ring * 6;
+    const n = ring === 0 ? 1 : Math.min(48, 8 + ring * 4);
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2;
+      let x = x0 + Math.cos(a) * radius;
+      let z = z0 + Math.sin(a) * radius;
+      let yaw = yaw0;
+      if (roads) {
+        const onRoad = toRoad(x, z);
+        if (!onRoad) continue;
+        ({ x, z } = onRoad);
+        yaw = facing(heightAt.roadHeading(x, z));
+      }
+      if (level(x, z, yaw) && clear(x, z)) return { x, z, yaw };
+    }
+  }
+  return { x: x0, z: z0, yaw: yaw0 };
 }
 
 // Puts the car on its wheels at (x, z), facing `yaw` (radians about +y; 0 faces +x).
 export function respawnCarAt(world, heightAt, x, z, yaw = 0) {
   const car = world.queryFirst(IsPlayer, Vehicle);
   if (car) despawnCar(world, car);
+  // Drop from just above the highest ground under the car, so no wheel starts inside a slope.
+  const ground = footprint(heightAt, x, z, yaw).max;
   return spawnCar(world, {
-    position: { x, y: heightAt(x, z) + startHeight(), z },
+    position: { x, y: ground + startHeight(), z },
     rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
   });
 }
