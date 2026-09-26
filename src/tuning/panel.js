@@ -178,6 +178,15 @@ export function createTuningPanel(world, { heightAt }) {
       saveCar();
       rebuildCar(world);
     });
+  const suspension = { independent: !CAR.solidAxles };
+  controls
+    .add(suspension, 'independent')
+    .name('Independent suspension (off = solid axles)')
+    .onChange(() => {
+      CAR.solidAxles = !suspension.independent;
+      saveCar();
+      rebuildCar(world);
+    });
   controls
     .add(CAR, 'gpuTires')
     .name('GPU tyres (TypeGPU)')

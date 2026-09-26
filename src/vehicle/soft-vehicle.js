@@ -59,6 +59,8 @@ export class JointedVehicle {
     const p = chassis.translation();
     const q = chassis.rotation();
     const noCollide = groups(0, 0);
+    this.solid = !!car.solidAxles;
+    this.axles = this.solid ? [this.createSolidAxle(0, 1), this.createSolidAxle(2, 3)] : [];
     for (let i = 0; i < WHEELS.length; i++) {
       const mount = wheelMount(i, car);
       const front = WHEELS[i].front;
@@ -79,27 +81,39 @@ export class JointedVehicle {
         return body;
       };
 
-      // Suspension: a slider straight down from the mount, sprung by a force-based motor.
-      const strut = makeBody(8);
-      const slider = world.createImpulseJoint(
-        this.RAPIER.JointData.prismatic(mount, ORIGIN, DOWN),
-        chassis,
-        strut,
-        true,
-      );
-      slider.setContactsEnabled(false);
-      slider.configureMotorModel(this.RAPIER.MotorModel.ForceBased);
-      this.joints.push(slider);
-
-      // Steering pivot on the front axle.
-      let knuckle = strut;
+      // Suspension. Independent: a slider straight down from each mount. Solid: the wheel hangs
+      // off the end of its axle beam, which carries the springs (see createSolidAxle).
+      let strut;
+      let slider = null;
+      let knuckle;
       let steer = null;
-      if (front) {
-        knuckle = makeBody(8);
-        steer = world.createImpulseJoint(this.RAPIER.JointData.revolute(ORIGIN, ORIGIN, UP), strut, knuckle, true);
-        steer.setContactsEnabled(false);
-        steer.configureMotorModel(this.RAPIER.MotorModel.ForceBased);
-        this.joints.push(steer);
+      const solidAxle = this.solid ? this.axles[i < 2 ? 0 : 1] : null;
+      if (solidAxle) {
+        strut = solidAxle.beam;
+        const end = { x: 0, y: 0, z: mount.z };
+        if (front) {
+          knuckle = makeBody(8);
+          steer = world.createImpulseJoint(this.RAPIER.JointData.revolute(end, ORIGIN, UP), strut, knuckle, true);
+          steer.setContactsEnabled(false);
+          steer.configureMotorModel(this.RAPIER.MotorModel.ForceBased);
+          this.joints.push(steer);
+        } else {
+          knuckle = strut;
+        }
+      } else {
+        strut = makeBody(8);
+        slider = world.createImpulseJoint(this.RAPIER.JointData.prismatic(mount, ORIGIN, DOWN), chassis, strut, true);
+        slider.setContactsEnabled(false);
+        slider.configureMotorModel(this.RAPIER.MotorModel.ForceBased);
+        this.joints.push(slider);
+        knuckle = strut;
+        if (front) {
+          knuckle = makeBody(8);
+          steer = world.createImpulseJoint(this.RAPIER.JointData.revolute(ORIGIN, ORIGIN, UP), strut, knuckle, true);
+          steer.setContactsEnabled(false);
+          steer.configureMotorModel(this.RAPIER.MotorModel.ForceBased);
+          this.joints.push(steer);
+        }
       }
 
       // Hub on the axle; the tyre's bead is pinned to it.
@@ -118,7 +132,9 @@ export class JointedVehicle {
         hub,
       );
       this.bodies.push(hub);
-      const axle = world.createImpulseJoint(this.RAPIER.JointData.revolute(ORIGIN, ORIGIN, AXLE), knuckle, hub, true);
+      // On a solid rear axle the hub turns on the beam end; otherwise on its knuckle's centre.
+      const seat = solidAxle && !front ? { x: 0, y: 0, z: mount.z } : ORIGIN;
+      const axle = world.createImpulseJoint(this.RAPIER.JointData.revolute(seat, ORIGIN, AXLE), knuckle, hub, true);
       axle.setContactsEnabled(false);
       this.joints.push(axle);
 
@@ -135,6 +151,8 @@ export class JointedVehicle {
         front,
         strut,
         knuckle,
+        // The body at the wheel centre, used to measure suspension travel.
+        center: solidAxle ? (front ? knuckle : hub) : strut,
         hub,
         slider,
         steer,
@@ -150,14 +168,70 @@ export class JointedVehicle {
     this.applySpringSettings();
   }
 
+  // A beam axle for wheels a and b: chassis → vertical slider → carrier → roll hinge → beam.
+  // The slider carries both corners' springs; the roll hinge lets the axle articulate, with the
+  // roll stiffness two coil-overs at the spring spacing would give.
+  createSolidAxle(a, b) {
+    const { RAPIER, world, body: chassis, car } = this;
+    const ma = wheelMount(a, car);
+    const mb = wheelMount(b, car);
+    const mid = { x: (ma.x + mb.x) / 2, y: ma.y, z: 0 };
+    const q = chassis.rotation();
+    const p = chassis.translation();
+    const local = { x: mid.x, y: mid.y - car.suspensionRestLength, z: 0 };
+    const wp = rotate(q, local);
+    const at = { x: p.x + wp.x, y: p.y + wp.y, z: p.z + wp.z };
+    const make = (mass, inertia) => {
+      const b = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(at.x, at.y, at.z).setRotation(q).setCanSleep(false));
+      world.createCollider(RAPIER.ColliderDesc.ball(0.05).setMassProperties(mass, ORIGIN, inertia, IDENTITY).setCollisionGroups(groups(0, 0)), b);
+      this.bodies.push(b);
+      return b;
+    };
+    const carrier = make(10, { x: 2, y: 2, z: 2 });
+    const track = Math.abs(ma.z - mb.z);
+    const beamI = (60 * track * track) / 12;
+    const beam = make(60, { x: beamI, y: beamI, z: 1.5 });
+    // The differential can hit rocks.
+    world.createCollider(
+      RAPIER.ColliderDesc.ball(0.15).setTranslation(0, 0.02, track * 0.06).setMass(0.01).setFriction(0.4).setCollisionGroups(groups(GROUP.CHASSIS, GROUP.WORLD)),
+      beam,
+    );
+    const slider = world.createImpulseJoint(RAPIER.JointData.prismatic(mid, ORIGIN, DOWN), chassis, carrier, true);
+    slider.setContactsEnabled(false);
+    slider.configureMotorModel(RAPIER.MotorModel.ForceBased);
+    // Roll about the car's forward axis (+x).
+    const roll = world.createImpulseJoint(RAPIER.JointData.revolute(ORIGIN, ORIGIN, { x: 1, y: 0, z: 0 }), carrier, beam, true);
+    roll.setContactsEnabled(false);
+    roll.configureMotorModel(RAPIER.MotorModel.ForceBased);
+    this.joints.push(slider, roll);
+    return { beam, carrier, slider, roll, mid, springSpan: track * 0.5, length: car.suspensionRestLength, rollAngle: 0 };
+  }
+
   applySpringSettings() {
     const { car } = this;
     const k = car.suspensionStiffness * car.mass; // N/m per corner, as Rapier's raycast car scales it
     for (const w of this.wheels) {
-      w.slider.setLimits(car.suspensionRestLength - car.maxSuspensionTravel, car.suspensionRestLength + 0.08);
-      w.slider.configureMotorPosition(car.suspensionRestLength, k, car.suspensionCompression * car.mass);
+      w.slider?.setLimits(car.suspensionRestLength - car.maxSuspensionTravel, car.suspensionRestLength + 0.08);
+      w.slider?.configureMotorPosition(car.suspensionRestLength, k, car.suspensionCompression * car.mass);
       w.steer?.configureMotorPosition(w.steering, STEER_STIFFNESS, STEER_DAMPING);
     }
+    for (const axle of this.axles) {
+      axle.slider.setLimits(car.suspensionRestLength - car.maxSuspensionTravel, car.suspensionRestLength + 0.08);
+      // Articulation limit: about ±20°, typical of a long-travel beam axle.
+      axle.roll.setLimits(-0.35, 0.35);
+      this.configureAxleSprings(axle, 0, 0);
+    }
+  }
+
+  // Two corner springs as one vertical spring plus a roll spring; damping picks bump or rebound.
+  configureAxleSprings(axle, heaveSpeed, rollSpeed) {
+    const { car } = this;
+    const k = car.suspensionStiffness * car.mass;
+    const half = axle.springSpan / 2;
+    const heaveDamp = (heaveSpeed < 0 ? car.suspensionCompression : car.suspensionRelaxation) * car.mass;
+    const rollDamp = (Math.abs(rollSpeed) > 0 ? (car.suspensionCompression + car.suspensionRelaxation) / 2 : car.suspensionCompression) * car.mass;
+    axle.slider.configureMotorPosition(car.suspensionRestLength, 2 * k, 2 * heaveDamp);
+    axle.roll.configureMotorPosition(0, 2 * k * half * half, 2 * rollDamp * half * half);
   }
 
   // ---- The raycast-controller surface used by the game ----
@@ -255,16 +329,28 @@ export class JointedVehicle {
     const qc = this.body.rotation();
     const pc = this.body.translation();
     const qcInv = conjugate(qc);
+    for (const axle of this.axles) {
+      const c = axle.carrier.translation();
+      const local = rotate(qcInv, { x: c.x - pc.x, y: c.y - pc.y, z: c.z - pc.z });
+      const length = axle.mid.y - local.y;
+      const heave = (length - axle.length) / dt;
+      axle.length = length;
+      const rel = multiply(conjugate(axle.carrier.rotation()), axle.beam.rotation());
+      const angle = 2 * Math.atan2(rel.x, rel.w);
+      const rollSpeed = (angle - axle.rollAngle) / dt;
+      axle.rollAngle = angle;
+      this.configureAxleSprings(axle, heave, rollSpeed);
+    }
     for (const w of this.wheels) {
-      // Suspension length from the strut's position in the chassis frame.
-      const s = w.strut.translation();
+      // Suspension length from the wheel centre's position in the chassis frame.
+      const s = (w.center ?? w.strut).translation();
       const local = rotate(qcInv, { x: s.x - pc.x, y: s.y - pc.y, z: s.z - pc.z });
       const length = w.mount.y - local.y;
       const speed = (length - w.suspensionLength) / dt;
       w.suspensionLength = length;
       // Bump and rebound damping differ, so pick by direction of travel.
       const damping = (speed < 0 ? car.suspensionCompression : car.suspensionRelaxation) * car.mass;
-      w.slider.configureMotorPosition(car.suspensionRestLength, car.suspensionStiffness * car.mass, damping);
+      w.slider?.configureMotorPosition(car.suspensionRestLength, car.suspensionStiffness * car.mass, damping);
 
       // Hub spin relative to its knuckle, about the axle.
       const rel = multiply(conjugate(w.knuckle.rotation()), w.hub.rotation());
