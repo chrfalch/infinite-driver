@@ -103,7 +103,8 @@ export function effectiveTire(tire, performance) {
   return { ...tire, pgsIterations: 1, substeps: 1, segmentsAround: 20, segmentsAcross: 6 };
 }
 export function effectiveGpuTire(gpu, performance, ground = GROUND) {
-  const withSoil = { ...gpu, soilStiffness: soilStiffness(ground.softness) };
+  // Loose soil grips less than firm ground.
+  const withSoil = { ...gpu, soilStiffness: soilStiffness(ground.softness), friction: gpu.friction * (1 - 0.4 * ground.softness) };
   if (!performance) return withSoil;
   return { ...withSoil, substeps: Math.min(gpu.substeps, 3), iterations: Math.min(gpu.iterations, 6), segmentsAround: 32, segmentsAcross: 8 };
 }

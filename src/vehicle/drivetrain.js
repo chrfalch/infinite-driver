@@ -36,7 +36,7 @@ export const DEFAULT_DRIVETRAIN = Object.freeze({
   downshiftRpm: 1500,
   coastDownshiftRpm: 2700, // off throttle the automatic holds lower gears for engine braking
   minShiftInterval: 0.9, // s
-  launchRpm: 1600, // the automatic clutch is fully in by this engine speed when pulling away
+  launchRpm: 2200, // the automatic clutch is fully in by this engine speed when pulling away
   frontShare: 0.4, // centre differential torque split to the front axle
   centerLock: false,
   frontLock: false,
@@ -166,7 +166,11 @@ export class Drivetrain {
     if (this.shiftTimer <= 0 && this.gear !== 0) {
       const gearboxRpm = radToRpm(Math.abs(gearboxEngineW));
       if (gearboxRpm >= p.idleRpm) target = 1;
-      else if (throttle > 0) target = Math.min(1, Math.max(0, (this.rpm - p.idleRpm) / (p.launchRpm - p.idleRpm)));
+      else if (throttle > 0) {
+        // Bite progressively (squared), so the engine can rev into its torque before it is loaded.
+        const x = Math.min(1, Math.max(0, (this.rpm - p.idleRpm) / (p.launchRpm - p.idleRpm)));
+        target = x * x;
+      }
       else target = 0; // rolling slowly off throttle: declutch rather than stall
     }
     this.clutch += Math.max(-dt / 0.12, Math.min(dt / 0.25, target - this.clutch));

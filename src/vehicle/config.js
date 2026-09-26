@@ -29,7 +29,7 @@ export const DEFAULT_CAR = Object.freeze({
   sideFrictionStiffness: 1.0,
 
   maxBrakeForce: 16500, // N across all wheels
-  handbrakeForce: 8000, // N on the rear axle
+  handbrakeForce: 16000, // N on the rear axle, enough to hold the rears against the engine
   maxSteer: 0.62, // rad at walking pace
   steerRate: 2.0, // rad/s
   steeringWheelRatio: 9, // visual: steering wheel turns this much more than the road wheels
