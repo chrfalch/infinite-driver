@@ -533,7 +533,9 @@ export class GpuTireSolver {
 
   // Runs one physics step for all tyres. Resolves with per-hub [fx, fy, fz, _, tx, ty, tz, _].
   // With readPositions, the particle positions are copied back too (for drawing).
-  async step(hubs, { readPositions = false } = {}) {
+  // Pipelined use: submit() records and queues a step without waiting; the returned promise
+  // resolves with the forces once the GPU is done. step() is submit() followed by waiting.
+  submit(hubs, { readPositions = false } = {}) {
     this.writeHubs(hubs);
     const encoder = this.root['~unstable'].createCommandEncoder();
     const pass = encoder.beginComputePass();
@@ -543,16 +545,26 @@ export class GpuTireSolver {
     raw.copyBufferToBuffer(this.raw.hubOut, 0, this.hubStaging, 0, MAX_TIRES * 2 * 16);
     if (readPositions) raw.copyBufferToBuffer(this.raw.pos, 0, this.posStaging, 0, this.count * 16);
     encoder.submit();
+    return this.collect(readPositions);
+  }
 
-    await this.hubStaging.mapAsync(GPUMapMode.READ);
+  async collect(readPositions) {
+    const maps = [this.hubStaging.mapAsync(GPUMapMode.READ)];
+    if (readPositions) maps.push(this.posStaging.mapAsync(GPUMapMode.READ));
+    await Promise.all(maps);
     this.hubForces.set(new Float32Array(this.hubStaging.getMappedRange()));
     this.hubStaging.unmap();
     if (readPositions) {
-      await this.posStaging.mapAsync(GPUMapMode.READ);
       this.positions.set(new Float32Array(this.posStaging.getMappedRange()));
       this.posStaging.unmap();
     }
     return this.hubForces;
+  }
+
+  // Runs one physics step for all tyres and waits for the per-hub forces (and, with
+  // readPositions, the particle positions, mapped together with the forces).
+  step(hubs, { readPositions = false } = {}) {
+    return this.submit(hubs, { readPositions });
   }
 
   destroy() {

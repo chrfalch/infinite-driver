@@ -441,7 +441,19 @@ export class JointedVehicle {
   // drive and brake torques from updateVehicle).
   async stepTyres({ readPositions = false } = {}) {
     if (!this.gpu) return;
-    const f = await this.gpu.solver.step(this.hubStates(), { readPositions });
+    let f;
+    if (this.gpu.pipelined) {
+      // Pipelined: use the forces from the step submitted last time (the GPU worked on them while
+      // Rapier stepped and the frame ran), then queue this step. Costs one step of force latency
+      // but the main thread no longer waits for the GPU on every step.
+      const pending = this.pendingTyres;
+      if (pending) f = await pending;
+      // A rebuild can destroy the solver while a readback is still queued; ignore that failure.
+      this.pendingTyres = this.gpu.solver.submit(this.hubStates(), { readPositions }).catch(() => null);
+      if (!f) return;
+    } else {
+      f = await this.gpu.solver.step(this.hubStates(), { readPositions });
+    }
     this.wheels.forEach((w, t) => {
       w.hub.resetForces(true);
       w.hub.addForce({ x: f[t * 8], y: f[t * 8 + 1], z: f[t * 8 + 2] }, true);

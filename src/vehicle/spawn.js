@@ -40,6 +40,7 @@ export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, 
     const gpu = effectiveGpuTire(GPU_TIRE, CONTROLS.performance);
     gpuTires = createGpuTires(device, WHEELS.length, TIRE, gpu);
     gpuTires.solver.setParams(gpu, world.get(Physics).step);
+    gpuTires.pipelined = gpu.pipelined;
   }
   const { body, controller } = soft
     ? createSoftCarBody(rapier, physicsWorld, position, CAR, tire, { gpuTires })

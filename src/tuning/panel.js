@@ -37,6 +37,7 @@ const GROUPS = [
       ['maxSteer', 'Max steer angle (rad)', 0.1, 1, 0.01, 'live'],
       ['steerRate', 'Steer speed (rad/s)', 0.2, 8, 0.1, 'live'],
       ['steeringWheelRatio', 'Steering wheel ratio', 1, 20, 0.5, 'live'],
+      ['ackermann', 'Ackermann geometry', 0, 1, 0.05, 'live'],
     ],
   ],
   [
@@ -47,6 +48,10 @@ const GROUPS = [
       ['suspensionRelaxation', 'Damping (rebound)', 0, 10, 0.05, 'wheels'],
       ['suspensionRestLength', 'Rest length (m)', 0.1, 1, 0.01, 'wheels'],
       ['maxSuspensionTravel', 'Max travel (m)', 0.05, 0.8, 0.01, 'wheels'],
+      ['antiDive', 'Anti-dive / anti-squat', 0, 1, 0.05, 'live'],
+      ['rollStiffness', 'Solid-axle roll stiffness ×', 0.2, 3, 0.05, 'rebuild'],
+      ['pinionReaction', 'Axle torque reaction', 0, 2, 0.05, 'live'],
+      ['rigidBodyRoll', 'Body roll (rigid wheels)', 0, 2, 0.05, 'live'],
     ],
   ],
   [

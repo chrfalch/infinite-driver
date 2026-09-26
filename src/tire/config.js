@@ -70,6 +70,9 @@ export const DEFAULT_GPU_TIRE = Object.freeze({
   friction: 1.1,
   contactRadius: 0.02,
   relaxation: 1.0,
+  // Do not wait for the GPU each step (forces arrive one step late). Faster, but the wheel spin
+  // coupling goes unstable with the current tyre stiffness, so it is off for now.
+  pipelined: false,
   pressureLead: 1.0, // substeps of spin the pressure normal is turned ahead (cancels spin drag)
   rubberMass: 12,
 });
