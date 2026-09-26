@@ -217,8 +217,8 @@ const sandBuggy = {
     const MHF = [-0.6, F, 0.66];
     const MHT = [-0.6, 0.9, 0.5];
     const HDR = [0.25, 0.88, 0.52];
-    const RHT = [-1.75, 0.12, 0.45];
-    const RHB = [-1.75, -0.25, 0.45];
+    const RHT = [-2.0, 0.12, 0.44];
+    const RHB = [-2.0, -0.25, 0.44];
 
     // Rockers: along the floor edge, then a gentle rise into the bottom of the nose box.
     b.sym([MHF, [0.72, F, 0.66], NRB, NFB], T, 0.3);
@@ -236,7 +236,7 @@ const sandBuggy = {
     b.tube([[2.05, -0.12, 0.4], [2.25, -0.12, 0.32], [2.25, -0.12, -0.32], [2.05, -0.12, -0.4]], T2, 0.14);
     // A-pillars: from the top of the nose box up to the header, back along the roof, over the
     // main hoop, and down in one long bend to the rear hoop.
-    const RRF = [-1.15, 0.86, 0.48]; // rear end of the roof
+    const RRF = [-1.3, 0.86, 0.48]; // rear end of the roof
     b.sym([NRT, HDR, MHT, RRF, RHT, RHB], T, 0.2);
     b.cross(HDR, T2);
     b.cross(RRF, T2);
