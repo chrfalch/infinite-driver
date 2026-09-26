@@ -121,8 +121,20 @@ async function main() {
   // Physics can wait on the GPU, so a frame is async; a frame that arrives while the previous one
   // is still simulating is skipped rather than overlapped.
   let busy = false;
+  const draw = () => {
+    const { renderer, scene, camera, hudScene, hudCamera } = render;
+    renderer.clear();
+    renderer.render(scene, camera);
+    renderer.clearDepth();
+    renderer.render(hudScene, hudCamera);
+  };
   const frame = async (now) => {
-    if (busy) return;
+    // Still draw the last state: Safari shows a blank (white) canvas for any animation frame that
+    // submits nothing, which flickers whenever a physics step waits on the GPU past a frame.
+    if (busy) {
+      draw();
+      return;
+    }
     busy = true;
     try {
       const time = world.get(Time);
@@ -152,11 +164,7 @@ async function main() {
       }
 
       glyph.shape();
-      const { renderer, scene, camera, hudScene, hudCamera } = render;
-      renderer.clear();
-      renderer.render(scene, camera);
-      renderer.clearDepth();
-      renderer.render(hudScene, hudCamera);
+      draw();
     } finally {
       busy = false;
     }
