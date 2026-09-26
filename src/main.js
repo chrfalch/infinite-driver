@@ -23,8 +23,9 @@ import { stepPhysics, syncBodies } from './systems/physics.js';
 import { streamTerrain } from './systems/terrain.js';
 import { syncSoftTires, syncViews, syncWheels } from './systems/views.js';
 import { createHeightField } from './terrain/height.js';
-import { spawnCar, startHeight } from './vehicle/spawn.js';
+import { respawnCar, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
+import { createTouchControls } from './ui/touch-controls.js';
 
 async function main() {
   const container = document.getElementById('app');
@@ -44,7 +45,10 @@ async function main() {
 
   // The car starts just above the ground at the origin.
   spawnCar(world, { position: { x: 0, y: heightAt(0, 0) + startHeight(), z: 0 } });
-  createTuningPanel(world, { heightAt });
+  const panel = createTuningPanel(world, { heightAt });
+  const touch = createTouchControls({ onRespawn: () => respawnCar(world, heightAt) });
+  // Small screens start with the panel folded so the road stays visible.
+  if (window.innerWidth < 700 || touch.isVisible()) panel.close();
 
   streamTerrain(world, { force: true });
 
@@ -99,11 +103,14 @@ async function main() {
 
   const hintText = hud.createText({
     font: inter,
-    text: 'W / Up  accelerate (hold)    S / Down  brake    A D / Left Right  steer    Space  handbrake    R  respawn    Scroll  zoom',
+    text: '',
     style: { fontSize: 14, lineHeight: 1.2, color: '#8a826f' },
   });
   hintText.position.set(28, -78, 0);
   render.hudScene.add(hintText);
+  const KEY_HINT = 'W / Up  accelerate (hold)    S / Down  brake    A D / Left Right  steer    Space  handbrake    R  respawn    Scroll  zoom';
+  const TOUCH_HINT = 'Hold the up button to drive, down to brake    Pinch to zoom';
+  world.spawn(HudLabel({ text: hintText, format: () => (touch.isVisible() ? TOUCH_HINT : KEY_HINT) }));
 
   attachKeyboard();
   attachZoom(render.renderer.domElement);

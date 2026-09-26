@@ -3,8 +3,26 @@ import { Input } from '../ecs/traits.js';
 import { isTyping } from '../tuning/panel.js';
 
 const keys = new Set();
+// Keys held through the on-screen touch buttons.
+const virtualKeys = new Set();
 // Fresh presses since the last frame (key repeat is ignored).
 const taps = new Set();
+// Listeners told about the first real key press (used to hide the touch buttons).
+const hardwareKeyListeners = new Set();
+
+export function onHardwareKey(listener) {
+  hardwareKeyListeners.add(listener);
+  return () => hardwareKeyListeners.delete(listener);
+}
+
+export function pressVirtual(code) {
+  if (!virtualKeys.has(code)) taps.add(code);
+  virtualKeys.add(code);
+}
+
+export function releaseVirtual(code) {
+  virtualKeys.delete(code);
+}
 
 const ACCELERATOR = ['KeyW', 'ArrowUp'];
 const BRAKE = ['KeyS', 'ArrowDown'];
@@ -15,6 +33,7 @@ export function attachKeyboard(target = window) {
     if (isTyping(e)) return;
     if (!e.repeat) taps.add(e.code);
     keys.add(e.code);
+    hardwareKeyListeners.forEach((listener) => listener(e));
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
   };
   const up = (e) => keys.delete(e.code);
@@ -29,7 +48,7 @@ export function attachKeyboard(target = window) {
   };
 }
 
-const pressed = (...codes) => codes.some((c) => keys.has(c));
+const pressed = (...codes) => codes.some((c) => keys.has(c) || virtualKeys.has(c));
 const tapped = (...codes) => codes.some((c) => taps.has(c));
 
 export function readInput(world) {

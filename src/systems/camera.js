@@ -3,7 +3,9 @@ import { CameraTarget, Render, Time, Transform, Vehicle } from '../ecs/traits.js
 // True isometric: the camera looks down the (-1, -1, -1) diagonal.
 const ISO_OFFSET = { x: 60, y: 60, z: 60 };
 const params = new URLSearchParams(location.search);
-const state = { x: 0, y: 0, z: 0, zoom: 1, userZoom: Number(params.get('zoom')) || 1, ready: false };
+// Short (phone) screens start closer so the car is not tiny.
+const defaultZoom = globalThis.innerHeight < 500 ? 1.7 : 1;
+const state = { x: 0, y: 0, z: 0, zoom: 1, userZoom: Number(params.get('zoom')) || defaultZoom, ready: false };
 
 // Mouse wheel or trackpad pinch zooms in and out.
 export function attachZoom(target = window) {
@@ -15,6 +17,28 @@ export function attachZoom(target = window) {
     },
     { passive: false },
   );
+  // Two-finger pinch zooms on touch screens.
+  let pinch = null;
+  const spread = (touches) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+  target.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.touches.length === 2) pinch = { distance: spread(e.touches), zoom: state.userZoom };
+    },
+    { passive: true },
+  );
+  target.addEventListener(
+    'touchmove',
+    (e) => {
+      if (!pinch || e.touches.length !== 2) return;
+      e.preventDefault();
+      state.userZoom = Math.min(4, Math.max(0.4, pinch.zoom * (spread(e.touches) / pinch.distance)));
+    },
+    { passive: false },
+  );
+  target.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) pinch = null;
+  });
 }
 
 export function followCamera(world) {
