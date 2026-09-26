@@ -5,6 +5,7 @@
 import {
   BoxGeometry,
   BufferAttribute,
+  CylinderGeometry,
   BufferGeometry,
   CurvePath,
   Group,
@@ -201,68 +202,84 @@ const lampBody = new MeshStandardMaterial({ color: '#1d1e20', roughness: 0.4, me
 // into the rear frame; a shoulder bar; diamond-plate floor; round lamps.
 const sandBuggy = {
   name: 'Sand buggy',
-  note: 'After your reference: chunky tube in long bends, low wide rockers into a nose box, flowing A-pillars into the rear frame.',
+  note: 'After your reference: chunky tube in long bends, a low nose box with a hoop bumper, A-pillars that run into a long roof and down to the rear hoop.',
   paint: '#f0643c',
   pickups: {
-    shockTop: (front) => (front ? [1.2, 0.2, 0.6] : [-1.22, 0.3, 0.62]),
+    shockTop: (front) => (front ? [1.22, 0.12, 0.51] : [-1.2, 0.2, 0.6]),
     lowerLink: (front) => [front ? 0.4 : -0.4, -0.43, 0.42],
     upperLink: (front) => [front ? 0.7 : -0.7, -0.26, 0.25],
   },
   build(b) {
-    const F = 0.42; // floor height (tube centre below the chassis origin)
-    // Rockers: one tube per side from the rear frame, along the floor, up into the nose box.
-    b.sym([[-1.62, -0.24, 0.5], [-1.0, -F, 0.68], [0.7, -F, 0.68], [1.2, -0.22, 0.52], [1.82, -0.18, 0.4]], T, 0.34);
-    // Nose box: front uprights and top rails that run back to the dash.
-    b.sym([[1.82, -0.18, 0.4], [1.86, 0.1, 0.36], [1.0, 0.2, 0.5]], T, 0.12);
-    b.cross([1.86, 0.1, 0.36], T2);
-    b.cross([1.82, -0.18, 0.4], T);
-    b.sym([[1.2, -0.22, 0.52], [1.2, 0.2, 0.6]], T2); // shock post
-    b.cross([1.2, 0.2, 0.6], T2);
-    b.sym([[1.2, 0.2, 0.6], [1.6, 0.14, 0.38]], T2);
-    b.sym([[1.82, -0.18, 0.4], [1.2, 0.2, 0.6]], T2 * 0.8); // nose diagonal
-    // A-pillar to roof to rear frame: one long bent tube per side.
-    b.sym([[1.0, 0.2, 0.5], [0.22, 0.86, 0.5], [-0.6, 0.9, 0.48], [-1.32, 0.52, 0.5], [-1.72, 0.12, 0.42], [-1.62, -0.24, 0.5]], T, 0.36);
-    b.cross([0.22, 0.86, 0.5], T2);
-    b.cross([1.0, 0.2, 0.5], T2);
-    // Main hoop behind the seats.
-    b.tube([[-0.6, -F, 0.68], [-0.6, 0.9, 0.48], [-0.6, 0.9, -0.48], [-0.6, -F, -0.68]], T, 0.18);
-    b.cross([-0.6, 0.36, 0.6], T2); // harness bar
-    b.tube([[0.22, 0.86, 0.5], [-0.6, 0.9, -0.48]], T2 * 0.85);
-    // Shoulder bar: from the nose box along the side, bowed out, to the main hoop and the rear towers.
-    b.sym([[1.2, 0.2, 0.6], [0.35, 0.28, 0.7], [-0.6, 0.36, 0.63], [-1.22, 0.3, 0.62]], T2, 0.3);
-    // Dash bar with the steering column support.
-    b.cross([0.62, 0.36, 0.56], T2);
-    b.sym([[0.62, 0.36, 0.56], [0.72, 0.52, 0.52]], T2 * 0.8);
-    // Rear frame: tower posts, lower rails, and the rear hoop.
-    b.sym([[-1.22, 0.3, 0.62], [-1.12, -0.36, 0.56]], T2);
-    b.sym([[-1.0, -F, 0.68], [-1.12, -0.36, 0.56]], T2 * 0.8);
-    b.cross([-1.22, 0.3, 0.62], T2);
-    b.cross([-1.72, 0.12, 0.42], T2);
-    b.cross([-1.62, -0.24, 0.5], T);
-    b.sym([[-1.32, 0.52, 0.5], [-1.22, 0.3, 0.62]], T2 * 0.8);
-    b.cross([-1.32, 0.52, 0.5], T2);
-    // Floor cross members and the link mounts.
-    for (const x of [0.7, 0.1, -0.6, -1.0]) b.cross([x, -F, 0.68], T2);
+    const F = -0.4; // floor tube centre
+    // Nose box corners (right side): rear-bottom, rear-top, front-bottom, front-top.
+    const NRB = [1.05, -0.3, 0.52];
+    const NRT = [1.05, 0.12, 0.54];
+    const NFB = [1.8, -0.3, 0.42];
+    const NFT = [1.8, 0.12, 0.42];
+    // Main hoop feet and top, windshield header, rear hoop.
+    const MHF = [-0.6, F, 0.66];
+    const MHT = [-0.6, 0.9, 0.5];
+    const HDR = [0.25, 0.88, 0.52];
+    const RHT = [-1.75, 0.12, 0.45];
+    const RHB = [-1.75, -0.25, 0.45];
+
+    // Rockers: along the floor edge, then a gentle rise into the bottom of the nose box.
+    b.sym([MHF, [0.72, F, 0.66], NRB, NFB], T, 0.3);
+    // Rear lower rails: from the main hoop feet up to the bottom of the rear hoop.
+    b.sym([MHF, [-1.2, -0.33, 0.58], RHB], T, 0.2);
+    // Nose box: uprights, top rails, crosses, and one side diagonal.
+    b.sym([NRB, NRT], T2);
+    b.sym([NFB, NFT], T2);
+    b.sym([NRT, NFT], T);
+    b.sym([NFT, NRB], T2 * 0.8);
+    b.cross(NFT, T2);
+    b.cross(NFB, T2);
+    b.cross([1.22, 0.12, 0.51], T2); // front shock cross member
+    // Hoop bumper wrapped round the front of the nose box.
+    b.tube([[1.8, -0.12, 0.42], [2.0, -0.12, 0.34], [2.0, -0.12, -0.34], [1.8, -0.12, -0.42]], T2, 0.14);
+    // A-pillars: from the top of the nose box up to the header, back along the roof, over the
+    // main hoop, and down in one long bend to the rear hoop.
+    const RRF = [-1.15, 0.86, 0.48]; // rear end of the roof
+    b.sym([NRT, HDR, MHT, RRF, RHT, RHB], T, 0.2);
+    b.cross(HDR, T2);
+    b.cross(RRF, T2);
+    // Main hoop and harness bar.
+    b.tube([MHF, MHT, [MHT[0], MHT[1], -MHT[2]], [MHF[0], MHF[1], -MHF[2]]], T, 0.18);
+    b.cross([-0.6, 0.38, 0.6], T2);
+    // Side bars: nose box to main hoop, slightly bowed out, then on to the rear hoop.
+    b.sym([NRT, [0.25, 0.17, 0.69], [-0.6, 0.2, 0.655]], T, 0.4);
+    b.sym([[-0.6, 0.2, 0.655], [-1.2, 0.2, 0.6], RHT], T2, 0.2);
+    // Rear posts from the lower rail up through the shock mount to the rear of the roof.
+    b.sym([[-1.2, -0.33, 0.58], [-1.2, 0.2, 0.6], RRF], T2, 0.08);
+    b.cross([-1.2, 0.2, 0.6], T2);
+    b.cross(RHT, T2);
+    b.cross(RHB, T);
+    b.tube([RHB, [RHT[0], RHT[1], -RHT[2]]], T2 * 0.8); // rear diagonal
+    // Dash bar between the A-pillars.
+    b.cross([0.69, 0.46, 0.53], T2);
+    // Floor cross members and link mounts.
+    for (const x of [0.72, 0.1, -0.6]) b.cross([x, F, 0.66], T2);
     for (const f of [1, -1]) {
       const u = sandBuggy.pickups.upperLink(f > 0);
-      b.sym([[u[0], -F, 0.68], u], T2 * 0.8);
+      b.sym([[u[0], F, 0.66], u], T2 * 0.8);
       b.cross(u, T2 * 0.8);
       b.tab(u);
       b.tab(sandBuggy.pickups.lowerLink(f > 0));
       b.tab(sandBuggy.pickups.shockTop(f > 0), 'z');
     }
     // Diamond-plate floor between the rockers.
-    b.plate([[0.7, -F + 0.02, 0.66], [0.7, -F + 0.02, -0.66], [-0.95, -F + 0.02, -0.66], [-0.95, -F + 0.02, 0.66]], plateMat);
-    // Round lamps on the nose.
+    b.plate([[0.72, F + 0.02, 0.64], [0.72, F + 0.02, -0.64], [-0.6, F + 0.02, -0.64], [-0.6, F + 0.02, 0.64]], plateMat);
+    // Round lamps on top of the nose box, facing forward.
     for (const s of [1, -1]) {
-      const body = b.mesh(new SphereGeometry(0.075, 16, 12, 0, Math.PI), lampBody);
-      body.position.set(1.9, 0.18, s * 0.24);
-      body.rotation.y = -Math.PI / 2;
-      const lens = b.mesh(new SphereGeometry(0.068, 16, 4, 0, Math.PI * 2, 0, 0.35), lampMat);
-      lens.position.set(1.905, 0.18, s * 0.24);
-      lens.rotation.z = -Math.PI / 2;
+      const body = b.mesh(new CylinderGeometry(0.075, 0.06, 0.08, 20), lampBody);
+      body.rotation.z = Math.PI / 2;
+      body.position.set(1.86, 0.22, s * 0.34);
+      const lens = b.mesh(new CylinderGeometry(0.066, 0.066, 0.01, 20), lampMat);
+      lens.rotation.z = Math.PI / 2;
+      lens.position.set(1.905, 0.22, s * 0.34);
+      const stem = b.mesh(new CylinderGeometry(0.012, 0.012, 0.08, 8), lampBody);
+      stem.position.set(1.82, 0.16, s * 0.36);
     }
-    b.cross([1.88, 0.18, 0.3], T2 * 0.7);
   },
 };
 

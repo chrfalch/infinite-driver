@@ -102,18 +102,29 @@ if (design.spare) {
   const r = add(new Mesh(new CylinderGeometry(0.25, 0.25, 0.31, 24), rim), sx, sy, sz);
   r.rotation.z = Math.PI / 2 - design.spare.tilt;
 }
-// Seats and steering for scale.
+// Bucket seats and the steering for scale.
 for (const s of [1, -1]) {
-  add(new Mesh(new BoxGeometry(0.5, 0.1, 0.46), seatMat), -0.2, -0.26, s * 0.3);
-  const back = add(new Mesh(new BoxGeometry(0.1, 0.62, 0.46), seatMat), -0.46, 0.05, s * 0.3);
-  back.rotation.z = 0.2;
+  const z = s * 0.3;
+  add(new Mesh(new BoxGeometry(0.46, 0.08, 0.4), seatMat), -0.18, -0.3, z);
+  for (const side of [1, -1]) {
+    const bolster = add(new Mesh(new BoxGeometry(0.44, 0.1, 0.07), seatMat), -0.18, -0.24, z + side * 0.2);
+    bolster.rotation.x = side * 0.25;
+  }
+  const back = add(new Mesh(new BoxGeometry(0.08, 0.7, 0.4), seatMat), -0.45, 0.05, z);
+  back.rotation.z = 0.22;
+  for (const side of [1, -1]) {
+    const wing = add(new Mesh(new BoxGeometry(0.1, 0.62, 0.06), seatMat), -0.42, 0.02, z + side * 0.21);
+    wing.rotation.z = 0.22;
+    wing.rotation.x = side * 0.3;
+  }
 }
-const wheel = add(new Mesh(new TorusGeometry(0.18, 0.018, 8, 24), dark), 0.3, 0.3, -0.3);
+const wheel = add(new Mesh(new TorusGeometry(0.17, 0.02, 8, 28), dark), 0.28, 0.28, -0.3);
 wheel.rotation.y = Math.PI / 2;
-wheel.rotation.x = 0.5;
+wheel.rotation.x = 0.45;
+between([0.69, 0.46, -0.3], [0.3, 0.29, -0.3], 0.018, dark);
 
 const camera = new PerspectiveCamera(32, innerWidth / innerHeight, 0.1, 100);
-const views = { '3q': [5.2, 2.6, 5.2], '3qr': [-5.2, 2.6, 5.4], side: [0, 1.2, 8.2], front: [8.2, 1.4, 0], top: [0.01, 9, 0] };
+const views = { ref: [4.6, 1.5, -5.4], '3q': [5.2, 2.6, 5.2], '3qr': [-5.2, 2.6, 5.4], side: [0, 1.2, 8.2], front: [8.2, 1.4, 0], top: [0.01, 9, 0] };
 const eye = views[view] ?? views['3q'];
 let az = Math.atan2(eye[2], eye[0]);
 let el = Math.atan2(eye[1], Math.hypot(eye[0], eye[2]));
