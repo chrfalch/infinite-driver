@@ -217,8 +217,8 @@ const sandBuggy = {
     const MHF = [-0.6, F, 0.66];
     const MHT = [-0.6, 0.9, 0.5];
     const HDR = [0.25, 0.88, 0.52];
-    const RHT = [-2.0, 0.12, 0.44];
-    const RHB = [-2.0, -0.25, 0.44];
+    const RHT = [-2.4, 0.12, 0.44];
+    const RHB = [-2.4, -0.25, 0.44];
 
     // Rockers: along the floor edge, then a gentle rise into the bottom of the nose box.
     b.sym([MHF, [0.72, F, 0.66], NRB, NFB], T, 0.3);
@@ -236,7 +236,7 @@ const sandBuggy = {
     b.tube([[2.05, -0.12, 0.4], [2.25, -0.12, 0.32], [2.25, -0.12, -0.32], [2.05, -0.12, -0.4]], T2, 0.14);
     // A-pillars: from the top of the nose box up to the header, back along the roof, over the
     // main hoop, and down in one long bend to the rear hoop.
-    const RRF = [-1.3, 0.86, 0.48]; // rear end of the roof
+    const RRF = [-1.5, 0.84, 0.48]; // rear end of the roof
     b.sym([NRT, HDR, MHT, RRF, RHT, RHB], T, 0.2);
     b.cross(HDR, T2);
     b.cross(RRF, T2);
@@ -252,6 +252,13 @@ const sandBuggy = {
     b.cross(RHT, T2);
     b.cross(RHB, T);
     b.tube([RHB, [RHT[0], RHT[1], -RHT[2]]], T2 * 0.8); // rear diagonal
+    // Engine bay behind the seats: cradle cross tubes with mount tabs, and a radiator frame.
+    b.cross([-0.75, -0.38, 0.64], T2);
+    b.cross([-1.2, -0.33, 0.58], T2);
+    b.cross([-1.85, -0.29, 0.51], T2);
+    for (const x of [-0.75, -1.2]) b.tab([x, -0.33, 0.2]);
+    b.sym([[-1.85, -0.29, 0.51], [-2.1, 0.5, 0.44]], T2 * 0.8);
+    b.cross([-2.1, 0.5, 0.44], T2 * 0.8);
     // Dash bar between the A-pillars.
     b.cross([0.69, 0.46, 0.53], T2);
     // Floor cross members and link mounts.
