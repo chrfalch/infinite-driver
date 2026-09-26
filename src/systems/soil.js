@@ -48,6 +48,51 @@ export function updateSoil(world) {
       soil.carry[i] = 0;
       continue;
     }
+    // Sideways sliding (understeer or oversteer): the tyre bulldozes soil and gravel out toward
+    // the way it slides. Slip below about 0.8 m/s (a few degrees of slip angle) throws nothing.
+    const hub = controller.wheels?.[i]?.hub;
+    if (hub) {
+      const hq = hub.rotation();
+      // The hub's axle (+z) flattened onto the ground.
+      let ax = 2 * (hq.x * hq.z + hq.w * hq.y);
+      let az = 1 - 2 * (hq.x * hq.x + hq.y * hq.y);
+      const al = Math.hypot(ax, az) || 1;
+      ax /= al;
+      az /= al;
+      const hv = hub.linvel();
+      const lateral = hv.x * ax + hv.z * az;
+      soil.lateral ??= [0, 0, 0, 0];
+      soil.lateral[i] += (lateral - soil.lateral[i]) * Math.min(1, delta / 0.1);
+      const slide = Math.abs(soil.lateral[i]);
+      soil.carryLat ??= [0, 0, 0, 0];
+      soil.carryLat[i] += softness * Math.max(0, slide - 0.8) * 60 * delta;
+      const out = Math.sign(soil.lateral[i]);
+      if (soil.carryLat[i] >= 1) terrainColorAt(heightAt, contact.x, contact.z, tmp);
+      while (soil.carryLat[i] >= 1) {
+        soil.carryLat[i] -= 1;
+        const size = 0.02 + Math.random() * 0.04;
+        const along = (Math.random() - 0.5) * 0.4;
+        const x = contact.x + ax * out * 0.18 + fx * along;
+        const z = contact.z + az * out * 0.18 + fz * along;
+        const throwSpeed = Math.min(6, slide * 0.7 + Math.random() * 1.2);
+        const c = 0.62 + Math.random() * 0.2;
+        const color = { r: tmp.r * c, g: tmp.g * c * 0.97, b: tmp.b * c * 0.92 };
+        const emitted = particles.emit(
+          x,
+          surfaceAt(x, z) + 0.05,
+          z,
+          v.x * 0.7 + ax * out * throwSpeed + fx * along * 2,
+          0.8 + Math.random() * 1.8 + slide * 0.15,
+          v.z * 0.7 + az * out * throwSpeed + fz * along * 2,
+          size,
+          color,
+        );
+        if (emitted && deformation && deformation.at(contact.x, contact.z) > -MAX_DIG) {
+          deformation.add(contact.x, contact.z, -(size * size * size * 2 * soilPerClump) / cellArea);
+        }
+      }
+    }
+
     // Use a smoothed spin: soft tyres make the raw spin jitter a little even when parked.
     soil.spin ??= [0, 0, 0, 0];
     soil.spin[i] += (controller.wheelSpin(i) - soil.spin[i]) * Math.min(1, delta / 0.15);
