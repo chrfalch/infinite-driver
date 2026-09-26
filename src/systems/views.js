@@ -5,7 +5,7 @@ import { steeringGeometry } from '../render/car-mesh.js';
 import { DRIVETRAIN } from '../vehicle/config.js';
 import { updateGpuTireMesh, updateSoftTireMesh } from '../render/soft-tire-mesh.js';
 import { CAR } from '../vehicle/config.js';
-import { rimInnerFace } from '../render/wheel-inset.js';
+import { ifsPoseFromHub } from '../vehicle/frame-geometry.js';
 
 export function syncViews(world) {
   world.query(Transform, View).updateEach(([transform, view]) => {
@@ -27,6 +27,8 @@ function span(object, from, to, axis) {
   const length = dir.length();
   object.position.copy(from).addScaledVector(dir, 0.5);
   object.quaternion.setFromUnitVectors(axis, dir.divideScalar(length));
+  // Unit-length cylinders (the double A-arm parts) are stretched to fit.
+  if (axis === Y) object.scale.set(1, length, 1);
   return length;
 }
 
@@ -65,15 +67,27 @@ export function syncWheels(world) {
       span(rig.lowerArm, rig.lowerPivot, b, X);
       a.set(rig.shockTop.x, hubY + 0.06, rig.shockTop.z * 0.94);
     } else {
-      // Independent: A-arms from the frame brackets to the inner face of the hub.
-      const hubInnerZ = mount.z - side * (rimInnerFace() + 0.03);
-      a.set(mount.x, hubY + 0.12, hubInnerZ);
-      span(rig.upperArm, rig.upperPivot, a, X);
-      b.set(mount.x, hubY - 0.12, hubInnerZ);
-      span(rig.lowerArm, rig.lowerPivot, b, X);
-      // The shock sits on the lower arm, near the hub.
-      a.lerpVectors(rig.lowerPivot, b, 0.72);
-      a.y += 0.04;
+      // Double A-arms from the physics links (or, for the raycast car, moved with the hub).
+      const pose = controller.suspensionPose?.(index) ?? ifsPoseFromHub(index, rig.hub.position);
+      const f = rig.ifs;
+      const V = (p, out) => out.set(p.x, p.y, p.z);
+      const bj = V(pose.lowerBall, new Vector3());
+      const ub = V(pose.upperBall, new Vector3());
+      span(f.lower[0], V(pose.lowerInner[0], a), bj, Y);
+      span(f.lower[1], V(pose.lowerInner[1], a), bj, Y);
+      span(f.upper[0], V(pose.upperInner[0], a), ub, Y);
+      span(f.upper[1], V(pose.upperInner[1], a), ub, Y);
+      span(f.upright, bj, ub, Y);
+      const to = V(pose.tieOuter, new Vector3());
+      // Steering arm from the middle of the upright out to the tie rod end.
+      span(f.steeringArm, a.lerpVectors(bj, ub, 0.5), to, Y);
+      span(f.tieRod, V(pose.tieInner, b), to, Y);
+      f.joints[0].position.copy(bj);
+      f.joints[1].position.copy(ub);
+      f.joints[2].position.copy(to);
+      V(pose.tieInner, f.joints[3].position);
+      V(pose.shockBottom, a);
+      rig.shockTop.set(pose.shockTop.x, pose.shockTop.y, pose.shockTop.z);
     }
     dir.subVectors(rig.shockTop, a);
     const length = dir.length();

@@ -95,7 +95,23 @@ export function createAxleRig() {
   const rearShaft = createShaft();
   group.add(front.group, rear.group, transfer, frontShaft.pivot, rearShaft.pivot);
   group.add(frontShaft.jointA, frontShaft.jointB, rearShaft.jointA, rearShaft.jointB);
-  return { group, front, rear, transfer, frontShaft, rearShaft, steering, angles: [0, 0] };
+  // Independent suspension: the differentials hang on the chassis and drive the hubs through
+  // half-shafts with a CV joint at each end; the steering is a rack across the nose box.
+  let independent = null;
+  if (!CAR.solidAxles) {
+    for (const axle of [front, rear]) axle.beamLeft.visible = axle.beamRight.visible = false;
+    for (const part of [steering.pitman, steering.dragLink, steering.tieRod, ...steering.arms]) part.visible = false;
+    const halfShafts = [0, 1, 2, 3].map(() => unitCylinder(0.03, shaftMat, 10));
+    const cvs = [0, 1, 2, 3, 4, 5, 6, 7].map(() => {
+      const boot = shadowed(new Mesh(new SphereGeometry(0.05, 12, 8), jointMat));
+      boot.scale.set(1, 1, 1.3);
+      return boot;
+    });
+    const rack = unitCylinder(0.035, housing, 12);
+    group.add(...halfShafts, ...cvs, rack);
+    independent = { halfShafts, cvs, rack };
+  }
+  return { group, front, rear, transfer, frontShaft, rearShaft, steering, independent, angles: [0, 0] };
 }
 
 // hubs: chassis-local hub centres in wheel order FL, FR, RL, RR. shaftSpin: [front, rear]
@@ -117,15 +133,31 @@ export function updateAxleRig(rig, hubs, shaftSpin, dt, steerQuats = null, geome
     // Housing ends just inboard of each wheel.
     a.set(left.x, left.y, left.z + inset);
     b.set(right.x, right.y, right.z - inset);
-    const mid = new Vector3().addVectors(a, b).multiplyScalar(0.5);
-    // Differential sits off-centre toward the driveshaft side, like most 4x4s.
-    const diffPos = mid.clone().lerp(b, 0.12);
-    place(axle.beamLeft, a, diffPos);
-    place(axle.beamRight, diffPos, b);
-    axle.diff.position.copy(diffPos);
-    // Tilt the pumpkin with the beam.
-    dir.subVectors(b, a).normalize();
-    axle.diff.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), dir);
+    let diffPos;
+    if (rig.independent) {
+      // Differential fixed to the chassis between the lower arm pivots; half-shafts to the hubs.
+      diffPos = new Vector3(left.x > 0 ? 1.35 : -1.35, -0.4, 0.08);
+      axle.diff.position.copy(diffPos);
+      axle.diff.quaternion.identity();
+      const k = axle === rig.front ? 0 : 2;
+      [a, b].forEach((hub, s) => {
+        const inner = diffPos.clone().add(new Vector3(0, 0, s === 0 ? -0.17 : 0.1));
+        const shaft = rig.independent.halfShafts[k + s];
+        place(shaft, inner, hub);
+        rig.independent.cvs[(k + s) * 2].position.copy(inner);
+        rig.independent.cvs[(k + s) * 2 + 1].position.copy(hub);
+      });
+    } else {
+      const mid = new Vector3().addVectors(a, b).multiplyScalar(0.5);
+      // Differential sits off-centre toward the driveshaft side, like most 4x4s.
+      diffPos = mid.clone().lerp(b, 0.12);
+      place(axle.beamLeft, a, diffPos);
+      place(axle.beamRight, diffPos, b);
+      axle.diff.position.copy(diffPos);
+      // Tilt the pumpkin with the beam.
+      dir.subVectors(b, a).normalize();
+      axle.diff.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), dir);
+    }
 
     // Propshaft from the transfer case to the differential input (facing the transfer case).
     const toCase = Math.sign(rig.transfer.position.x - diffPos.x);
@@ -141,7 +173,16 @@ export function updateAxleRig(rig, hubs, shaftSpin, dt, steerQuats = null, geome
     shaft.jointB.rotation.x = angle;
   }
 
-  if (steerQuats && geometry) updateSteering(rig.steering, hubs, steerQuats, geometry, steer);
+  if (rig.independent && geometry) {
+    // Rack housing across the nose box; the tie rods are drawn with the wheels.
+    place(rig.independent.rack, a.set(geometry.rack.x, geometry.rack.y, -0.44), b.set(geometry.rack.x, geometry.rack.y, 0.44));
+    const st = rig.steering;
+    st.box.position.copy(geometry.box);
+    place(st.upperShaft, geometry.joint1, geometry.joint2);
+    place(st.lowerShaft, geometry.joint2, geometry.box);
+    st.joints[0].position.copy(geometry.joint1);
+    st.joints[1].position.copy(geometry.joint2);
+  } else if (steerQuats && geometry) updateSteering(rig.steering, hubs, steerQuats, geometry, steer);
 }
 
 const tipA = new Vector3();

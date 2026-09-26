@@ -20,6 +20,8 @@ updateOffset();
 const params = new URLSearchParams(location.search);
 // Short (phone) screens start closer so the car is not tiny.
 const defaultZoom = globalThis.innerHeight < 500 ? 1.7 : 1;
+// ?look=<dx>,<dz> shifts the view target (world metres), for close-up screenshots.
+const LOOK = (params.get('look') ?? '0,0').split(',').map(Number);
 const state = { x: 0, y: 0, z: 0, zoom: 1, userZoom: Number(params.get('zoom')) || defaultZoom, ready: false };
 
 // Mouse wheel or trackpad pinch zooms in and out.
@@ -100,9 +102,9 @@ export function followCamera(world) {
   const v = target.get(Vehicle)?.body.linvel() ?? { x: 0, y: 0, z: 0 };
   const lead = 0.45;
   const k = 1 - Math.exp(-delta * 3.5);
-  state.x += (position.x + v.x * lead - state.x) * k;
+  state.x += (position.x + LOOK[0] + v.x * lead - state.x) * k;
   state.y += (position.y - state.y) * k;
-  state.z += (position.z + v.z * lead - state.z) * k;
+  state.z += (position.z + (LOOK[1] || 0) + v.z * lead - state.z) * k;
 
   // Pull back slightly as speed builds.
   const targetZoom = state.userZoom / (1 + speed * 0.012);

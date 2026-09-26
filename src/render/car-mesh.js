@@ -5,6 +5,7 @@ import {
   Group,
   Mesh,
   MeshStandardMaterial,
+  SphereGeometry,
   TorusGeometry,
   TubeGeometry,
   Vector3,
@@ -14,7 +15,7 @@ import { wheelMount } from '../vehicle/physics.js';
 import { createAxleRig } from './axles.js';
 import { createTubeChassis } from './tube-chassis.js';
 import { mergeByMaterial } from './merge-geometry.js';
-import { frameGeometry, suspensionMounts } from '../vehicle/frame-geometry.js';
+import { IFS_RACK, frameGeometry, suspensionMounts } from '../vehicle/frame-geometry.js';
 import { rimInnerFace } from './wheel-inset.js';
 
 const frame = new MeshStandardMaterial({ color: '#2d2f31', roughness: 0.7, metalness: 0.3 });
@@ -50,19 +51,21 @@ function bar(a, b, radius, material) {
 // Wheel → column (rising toward the driver at 25°, the wheel square to it) → universal joint under
 // the dash → intermediate shaft → universal joint → short input shaft → steering box inside the
 // nose box, just behind the front axle. Each joint only takes a moderate angle.
-export function steeringGeometry() {
+export function steeringGeometry({ independent = !CAR.solidAxles } = {}) {
   const tilt = (25 * Math.PI) / 180;
   const faceNormal = new Vector3(-Math.cos(tilt), Math.sin(tilt), 0); // up and back at the driver
   const wheelCenter = new Vector3(0.24, 0.24, -0.3);
   const columnAxis = faceNormal.clone().negate(); // from the wheel toward the dash
   const joint1 = wheelCenter.clone().addScaledVector(columnAxis, 0.5);
-  const box = new Vector3(1.0, -0.28, -0.4);
+  // Solid axles: a steering box inside the nose box. Independent: the pinion on the rack.
+  const rack = new Vector3(IFS_RACK.center.x, IFS_RACK.center.y, 0);
+  const box = independent ? new Vector3(rack.x - 0.02, rack.y + 0.06, -0.3) : new Vector3(1.0, -0.28, -0.4);
   // The box's input shaft points up and back toward the driver, a little steeper than the
   // intermediate shaft, so both joints share the bend.
   const toJoint1 = joint1.clone().sub(box).normalize();
   const boxInput = toJoint1.clone().lerp(new Vector3(-0.2, 1, 0).normalize(), 0.3).normalize();
   const joint2 = box.clone().addScaledVector(boxInput, 0.14);
-  return { wheelCenter, faceNormal, columnAxis, joint1, joint2, box, boxInput };
+  return { wheelCenter, faceNormal, columnAxis, joint1, joint2, box, boxInput, rack };
 }
 
 // Bend (degrees) at each steering universal joint.
@@ -82,7 +85,7 @@ export function createCarMesh() {
   // Parts fixed to the chassis go into `body`, merged into one mesh per material at the end.
   const body = new Group();
   body.name = 'tube chassis';
-  body.add(createTubeChassis(0).group);
+  body.add(createTubeChassis(0, { independent: !CAR.solidAxles }).group);
 
   // Bucket seats on the floor, driver on the left (-z): cushion, back, and side bolsters.
   for (const z of [-0.3, 0.3]) {
@@ -257,6 +260,30 @@ export function createWheelRig(index, { softTire = null } = {}) {
   const upperArm = shadowed(new Mesh(new BoxGeometry(1, 0.05, 0.07), frame));
   const lowerArm = shadowed(new Mesh(new BoxGeometry(1, 0.06, 0.09), frame));
   root.add(upperArm, lowerArm);
+  upperArm.visible = lowerArm.visible = CAR.solidAxles;
+
+  // Double A-arms: two legs per arm, the upright between the ball joints, the tie rod, and the
+  // ball joints themselves. Placed each frame from the suspension pose (see syncWheels).
+  let ifs = null;
+  if (!CAR.solidAxles) {
+    const leg = (r, material = frame) => {
+      const m = shadowed(new Mesh(new CylinderGeometry(r, r, 1, 10), material));
+      root.add(m);
+      return m;
+    };
+    ifs = {
+      lower: [leg(0.024), leg(0.024)],
+      upper: [leg(0.02), leg(0.02)],
+      upright: leg(0.035),
+      steeringArm: leg(0.018),
+      tieRod: leg(0.014, chrome),
+      joints: [0, 1, 2, 3].map(() => {
+        const j = new Mesh(new SphereGeometry(0.03, 12, 8), damperMat);
+        root.add(j);
+        return j;
+      }),
+    };
+  }
 
   return {
     object: root,
@@ -273,6 +300,7 @@ export function createWheelRig(index, { softTire = null } = {}) {
     upperPivot,
     lowerPivot,
     solid: CAR.solidAxles,
+    ifs,
     side,
     mount,
   };

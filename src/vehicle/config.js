@@ -8,7 +8,7 @@ export const DEFAULT_CAR = Object.freeze({
   // Run the soft tyres on the GPU (TypeGPU compute) instead of Rapier's soft bodies.
   gpuTires: true,
   // Beam axles front and rear (articulating); false gives independent suspension at each corner.
-  solidAxles: true,
+  solidAxles: false,
   mass: 1800,
   // Physics box for the body tub and frame. The wheels stick out past it.
   halfExtents: { x: 1.95, y: 0.34, z: 0.6 },

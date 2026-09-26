@@ -17,7 +17,7 @@ import {
   TubeGeometry,
   Vector3,
 } from 'three/webgpu';
-import { PICKUPS as SAND_BUGGY_PICKUPS } from '../vehicle/frame-geometry.js';
+import { PICKUPS as SAND_BUGGY_PICKUPS, ifsCorner } from '../vehicle/frame-geometry.js';
 
 const MAIN = 0.024; // 48 mm OD main hoops and rails
 const SEC = 0.019; // 38 mm OD bracing
@@ -206,7 +206,7 @@ const sandBuggy = {
   note: 'After your reference: chunky tube in long bends, a low nose box with a hoop bumper, A-pillars that run into a long roof and down to the rear hoop.',
   paint: '#f0643c',
   pickups: SAND_BUGGY_PICKUPS,
-  build(b) {
+  build(b, { independent = false } = {}) {
     const F = -0.4; // floor tube centre
     // Nose box corners (right side): rear-bottom, rear-top, front-bottom, front-top.
     const NRB = [1.05, -0.3, 0.52];
@@ -264,12 +264,33 @@ const sandBuggy = {
     // Floor cross members and link mounts.
     for (const x of [0.72, 0.1, -0.6]) b.cross([x, F, 0.66], T2);
     for (const f of [1, -1]) {
+      b.tab(sandBuggy.pickups.shockTop(f > 0), 'z');
+      if (independent) {
+        // Double A-arm pivots: a pivot rail under each side for the lower arm, hung from the nose
+        // box (front) or the rear rails, a cross member between them, and tabs for the upper arm.
+        const G = ifsCorner(f > 0 ? 1 : 3);
+        const arr = (p) => [p.x, p.y, p.z];
+        const [l0, l1] = G.lowerInner.map(arr);
+        const [u0, u1] = G.upperInner.map(arr);
+        b.sym([l0, l1], T2 * 0.8);
+        for (const l of [l0, l1]) {
+          const above = f > 0 ? [l[0], -0.3, 0.52 - 0.12 * (l[0] - 1.05)] : [l[0], -0.33 + (l[0] + 1.2) * -0.067, 0.58 + (l[0] + 1.2) * 0.117];
+          b.sym([above, l], T2 * 0.8);
+          b.cross(l, T2 * 0.8);
+          b.tab(l);
+        }
+        for (const u of [u0, u1]) {
+          const inner = f > 0 ? [u[0], u[1], 0.52 - 0.12 * (u[0] - 1.05)] : [u[0], u[1], 0.6];
+          b.sym([inner, u], T2 * 0.7);
+          b.tab(u);
+        }
+        continue;
+      }
       const u = sandBuggy.pickups.upperLink(f > 0);
       b.sym([[u[0], F, 0.66], u], T2 * 0.8);
       b.cross(u, T2 * 0.8);
       b.tab(u);
       b.tab(sandBuggy.pickups.lowerLink(f > 0));
-      b.tab(sandBuggy.pickups.shockTop(f > 0), 'z');
     }
     // Diamond-plate floor between the rockers.
     b.plate([[0.72, F + 0.02, 0.64], [0.72, F + 0.02, -0.64], [-0.6, F + 0.02, -0.64], [-0.6, F + 0.02, 0.64]], plateMat);
@@ -413,9 +434,9 @@ export const DESIGNS = [
   },
 ];
 
-export function createTubeChassis(index = 0) {
+export function createTubeChassis(index = 0, options = {}) {
   const design = DESIGNS[index % DESIGNS.length];
   const b = new Builder(new MeshStandardMaterial({ color: design.paint, roughness: 0.4, metalness: 0.3 }));
-  design.build(b);
+  design.build(b, options);
   return { group: b.finish(), design };
 }
