@@ -73,6 +73,7 @@ const between = (a, b, r, mat) => {
   car.add(m);
 };
 const HUB_Y = -0.45;
+const P = design.pickups ?? PICKUPS;
 for (const f of [1, -1]) {
   const x = f * 1.35;
   for (const s of [1, -1]) {
@@ -82,17 +83,24 @@ for (const f of [1, -1]) {
     r.rotation.x = Math.PI / 2;
     const tread = add(new Mesh(new TorusGeometry(0.44, 0.03, 6, 32), rubber), x, HUB_Y, s * 1.05);
     // Coil-over from the shock top to the axle.
-    const top = PICKUPS.shockTop(f > 0);
+    const top = P.shockTop(f > 0);
     const bottom = [x - f * 0.05, HUB_Y + 0.08, s * 0.72];
     between([top[0], top[1], s * top[2]], bottom, 0.03, dark);
     between([top[0], top[1] - 0.08, s * top[2]], [bottom[0], bottom[1] + 0.18, bottom[2]], 0.055, coil);
     // Links.
-    const lo = PICKUPS.lowerLink(f > 0), up = PICKUPS.upperLink(f > 0);
+    const lo = P.lowerLink(f > 0), up = P.upperLink(f > 0);
     between([lo[0], lo[1] - 0.02, s * lo[2]], [x, HUB_Y - 0.1, s * 0.5], 0.022, dark);
     between([up[0], up[1] - 0.02, s * up[2]], [x - f * 0.05, HUB_Y + 0.12, s * 0.3], 0.02, dark);
   }
   between([x, HUB_Y, -0.9], [x, HUB_Y, 0.9], 0.05, dark);
   add(new Mesh(new SphereGeometry(0.15, 20, 14), dark), x, HUB_Y, 0.12);
+}
+if (design.spare) {
+  const [sx, sy, sz] = design.spare.position;
+  const t = add(new Mesh(new CylinderGeometry(0.46, 0.46, 0.3, 32), rubber), sx, sy, sz);
+  t.rotation.z = Math.PI / 2 - design.spare.tilt;
+  const r = add(new Mesh(new CylinderGeometry(0.25, 0.25, 0.31, 24), rim), sx, sy, sz);
+  r.rotation.z = Math.PI / 2 - design.spare.tilt;
 }
 // Seats and steering for scale.
 for (const s of [1, -1]) {

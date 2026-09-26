@@ -190,7 +190,84 @@ function shockTower(b, f, from, { railZ = 0.43, kickY = -0.08 } = {}) {
   b.tab(top, 'z');
 }
 
+const T = 0.031; // 62 mm OD: the chunky tube of the sand buggy
+const T2 = 0.025;
+const plateMat = new MeshStandardMaterial({ color: '#c9ccce', roughness: 0.45, metalness: 0.5 });
+const lampMat = new MeshStandardMaterial({ color: '#fff4d6', emissive: '#fff1c2', emissiveIntensity: 0.6, roughness: 0.2 });
+const lampBody = new MeshStandardMaterial({ color: '#1d1e20', roughness: 0.4, metalness: 0.6 });
+
+// Sand buggy after the user's reference: few, thick tubes in long flowing bends; low wide rockers
+// that sweep up into a compact nose box; A-pillars that run in one line into the roof and down
+// into the rear frame; a shoulder bar; diamond-plate floor; round lamps.
+const sandBuggy = {
+  name: 'Sand buggy',
+  note: 'After your reference: chunky tube in long bends, low wide rockers into a nose box, flowing A-pillars into the rear frame.',
+  paint: '#f0643c',
+  pickups: {
+    shockTop: (front) => (front ? [1.2, 0.2, 0.6] : [-1.22, 0.3, 0.62]),
+    lowerLink: (front) => [front ? 0.4 : -0.4, -0.43, 0.42],
+    upperLink: (front) => [front ? 0.7 : -0.7, -0.26, 0.25],
+  },
+  build(b) {
+    const F = 0.42; // floor height (tube centre below the chassis origin)
+    // Rockers: one tube per side from the rear frame, along the floor, up into the nose box.
+    b.sym([[-1.62, -0.24, 0.5], [-1.0, -F, 0.68], [0.7, -F, 0.68], [1.2, -0.22, 0.52], [1.82, -0.18, 0.4]], T, 0.34);
+    // Nose box: front uprights and top rails that run back to the dash.
+    b.sym([[1.82, -0.18, 0.4], [1.86, 0.1, 0.36], [1.0, 0.2, 0.5]], T, 0.12);
+    b.cross([1.86, 0.1, 0.36], T2);
+    b.cross([1.82, -0.18, 0.4], T);
+    b.sym([[1.2, -0.22, 0.52], [1.2, 0.2, 0.6]], T2); // shock post
+    b.cross([1.2, 0.2, 0.6], T2);
+    b.sym([[1.2, 0.2, 0.6], [1.6, 0.14, 0.38]], T2);
+    b.sym([[1.82, -0.18, 0.4], [1.2, 0.2, 0.6]], T2 * 0.8); // nose diagonal
+    // A-pillar to roof to rear frame: one long bent tube per side.
+    b.sym([[1.0, 0.2, 0.5], [0.22, 0.86, 0.5], [-0.6, 0.9, 0.48], [-1.32, 0.52, 0.5], [-1.72, 0.12, 0.42], [-1.62, -0.24, 0.5]], T, 0.36);
+    b.cross([0.22, 0.86, 0.5], T2);
+    b.cross([1.0, 0.2, 0.5], T2);
+    // Main hoop behind the seats.
+    b.tube([[-0.6, -F, 0.68], [-0.6, 0.9, 0.48], [-0.6, 0.9, -0.48], [-0.6, -F, -0.68]], T, 0.18);
+    b.cross([-0.6, 0.36, 0.6], T2); // harness bar
+    b.tube([[0.22, 0.86, 0.5], [-0.6, 0.9, -0.48]], T2 * 0.85);
+    // Shoulder bar: from the nose box along the side, bowed out, to the main hoop and the rear towers.
+    b.sym([[1.2, 0.2, 0.6], [0.35, 0.28, 0.7], [-0.6, 0.36, 0.63], [-1.22, 0.3, 0.62]], T2, 0.3);
+    // Dash bar with the steering column support.
+    b.cross([0.62, 0.36, 0.56], T2);
+    b.sym([[0.62, 0.36, 0.56], [0.72, 0.52, 0.52]], T2 * 0.8);
+    // Rear frame: tower posts, lower rails, and the rear hoop.
+    b.sym([[-1.22, 0.3, 0.62], [-1.12, -0.36, 0.56]], T2);
+    b.sym([[-1.0, -F, 0.68], [-1.12, -0.36, 0.56]], T2 * 0.8);
+    b.cross([-1.22, 0.3, 0.62], T2);
+    b.cross([-1.72, 0.12, 0.42], T2);
+    b.cross([-1.62, -0.24, 0.5], T);
+    b.sym([[-1.32, 0.52, 0.5], [-1.22, 0.3, 0.62]], T2 * 0.8);
+    b.cross([-1.32, 0.52, 0.5], T2);
+    // Floor cross members and the link mounts.
+    for (const x of [0.7, 0.1, -0.6, -1.0]) b.cross([x, -F, 0.68], T2);
+    for (const f of [1, -1]) {
+      const u = sandBuggy.pickups.upperLink(f > 0);
+      b.sym([[u[0], -F, 0.68], u], T2 * 0.8);
+      b.cross(u, T2 * 0.8);
+      b.tab(u);
+      b.tab(sandBuggy.pickups.lowerLink(f > 0));
+      b.tab(sandBuggy.pickups.shockTop(f > 0), 'z');
+    }
+    // Diamond-plate floor between the rockers.
+    b.plate([[0.7, -F + 0.02, 0.66], [0.7, -F + 0.02, -0.66], [-0.95, -F + 0.02, -0.66], [-0.95, -F + 0.02, 0.66]], plateMat);
+    // Round lamps on the nose.
+    for (const s of [1, -1]) {
+      const body = b.mesh(new SphereGeometry(0.075, 16, 12, 0, Math.PI), lampBody);
+      body.position.set(1.9, 0.18, s * 0.24);
+      body.rotation.y = -Math.PI / 2;
+      const lens = b.mesh(new SphereGeometry(0.068, 16, 4, 0, Math.PI * 2, 0, 0.35), lampMat);
+      lens.position.set(1.905, 0.18, s * 0.24);
+      lens.rotation.z = -Math.PI / 2;
+    }
+    b.cross([1.88, 0.18, 0.3], T2 * 0.7);
+  },
+};
+
 export const DESIGNS = [
+  sandBuggy,
   {
     name: 'Ultra4 rock bouncer',
     note: 'Short, tall and fully triangulated. Exo cage with the shock towers built into the cage.',
