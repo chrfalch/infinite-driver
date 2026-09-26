@@ -4,8 +4,6 @@ import { ThreeConfig } from '@pmndrs/glyph/three';
 import GUI from 'lil-gui';
 import { createNoise3D } from 'simplex-noise';
 import {
-  BufferAttribute,
-  BufferGeometry,
   CylinderGeometry,
   Group,
   Mesh,
@@ -13,6 +11,7 @@ import {
   BoxGeometry,
 } from 'three/webgpu';
 import { createRocksMesh } from '../render/rock-mesh.js';
+import { createSoftTireMesh, updateSoftTireMesh } from '../render/soft-tire-mesh.js';
 import { createRenderer } from '../render/scene.js';
 import { createChunkMesh } from '../render/terrain-mesh.js';
 import { CHUNK_SIZE, sampleChunk } from '../terrain/chunk.js';
@@ -97,32 +96,17 @@ async function main() {
   scene.add(rimGroup);
 
   // Tyre: a mesh whose vertices are the soft body's particles.
-  const rubber = new MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
-  const tireMesh = new Mesh(new BufferGeometry(), rubber);
-  tireMesh.castShadow = true;
-  tireMesh.frustumCulled = false;
-  scene.add(tireMesh);
-
   let tire = null;
+  let tireMesh = null;
   const buildTire = () => {
     if (tire) world.removeSoftBody(tire.soft);
-    tire = createSoftTire(RAPIER, world, hub, TIRE);
-    const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new BufferAttribute(tire.soft.particlePositions(), 3));
-    geometry.setIndex(new BufferAttribute(tire.mesh.indices, 1));
-    // Tread blocks: alternate shades around the tread so rolling and squash are easy to see.
-    const { nu, nv } = tire.mesh;
-    const colors = new Float32Array(nu * nv * 3);
-    for (let i = 0; i < nu; i++) {
-      for (let j = 0; j < nv; j++) {
-        const onTread = Math.cos((j / nv) * Math.PI * 2) > 0.3;
-        const shade = onTread ? (i % 2 ? 0.075 : 0.025) : 0.045;
-        colors.set([shade, shade * 0.96, shade * 0.9], (i * nv + j) * 3);
-      }
+    if (tireMesh) {
+      scene.remove(tireMesh);
+      tireMesh.geometry.dispose();
     }
-    geometry.setAttribute('color', new BufferAttribute(colors, 3));
-    tireMesh.geometry.dispose();
-    tireMesh.geometry = geometry;
+    tire = createSoftTire(RAPIER, world, hub, TIRE);
+    tireMesh = createSoftTireMesh(tire.soft, tire.mesh);
+    scene.add(tireMesh);
   };
   buildTire();
 
@@ -213,6 +197,7 @@ async function main() {
   size.add(TIRE, 'segmentsAcross', 4, 16, 1).name('Segments across').onChange(onTire('segmentsAcross'));
   size.add(TIRE, 'beadRings', 0, 2, 1).name('Bead width (rings)').onChange(onTire('beadRings'));
   size.add(TIRE, 'substeps', 0, 6, 1).name('Solver substeps').onChange(onTire('substeps'));
+  size.add(TIRE, 'pgsIterations', 0, 6, 1).name('Solver iterations').onChange(onTire('pgsIterations'));
   size.close();
   const lab = gui.addFolder('Lab');
   lab.add(LAB, 'load', 20, 1500, 10).name('Load on hub (kg)').onChange(setLoad);
@@ -282,10 +267,7 @@ async function main() {
     const q = hub.rotation();
     rimGroup.position.set(p.x, p.y, p.z);
     rimGroup.quaternion.set(q.x, q.y, q.z, q.w);
-    const pos = tireMesh.geometry.getAttribute('position');
-    pos.array.set(tire.soft.particlePositions());
-    pos.needsUpdate = true;
-    tireMesh.geometry.computeVertexNormals();
+    updateSoftTireMesh(tireMesh, tire.soft);
 
     statsTimer -= delta;
     if (statsTimer <= 0) {

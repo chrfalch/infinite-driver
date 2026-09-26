@@ -1,5 +1,6 @@
 import { Vector3 } from 'three/webgpu';
-import { SteeringWheel, Transform, Vehicle, View, WheelOf, WheelRig } from '../ecs/traits.js';
+import { SoftTireView, SteeringWheel, Transform, Vehicle, View, WheelOf, WheelRig } from '../ecs/traits.js';
+import { updateSoftTireMesh } from '../render/soft-tire-mesh.js';
 import { CAR } from '../vehicle/config.js';
 
 export function syncViews(world) {
@@ -67,4 +68,8 @@ export function syncWheels(world) {
     // The column faces forward, so a left turn (positive steer) is a negative roll about its z.
     wheel.object.rotation.z = -vehicle.steer * CAR.steeringWheelRatio;
   });
+}
+
+export function syncSoftTires(world) {
+  world.query(SoftTireView).updateEach(([view]) => updateSoftTireMesh(view.object, view.soft));
 }

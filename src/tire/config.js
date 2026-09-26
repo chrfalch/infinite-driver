@@ -19,6 +19,7 @@ export const DEFAULT_TIRE = Object.freeze({
   damping: 1.0, // damping ratio of every constraint
   beadRings: 1, // extra particle rings each side of the bead pinned to the rim
   substeps: 2, // extra solver substeps for the tyre and what it touches
+  pgsIterations: 3, // extra solver iterations per substep; fewer is faster but softer
   rubberMass: 12, // kg per tyre
   friction: 1.1,
 });

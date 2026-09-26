@@ -12,20 +12,15 @@ import {
 } from '../ecs/traits.js';
 import { createRocksMesh } from '../render/rock-mesh.js';
 import { createChunkMesh } from '../render/terrain-mesh.js';
-import { CHUNK_RES, CHUNK_SIZE, chunkKey, sampleChunk, toRapierHeights } from '../terrain/chunk.js';
+import { CHUNK_SIZE, chunkKey, chunkTrimesh, sampleChunk } from '../terrain/chunk.js';
 import { generateRocks } from '../terrain/rocks.js';
 
 const MAX_BUILDS_PER_FRAME = 2;
 
 function addColliders(physics, chunk, field) {
   const { rapier, world } = physics;
-  const ground = rapier.ColliderDesc.heightfield(CHUNK_RES, CHUNK_RES, toRapierHeights(chunk.heights), {
-    x: CHUNK_SIZE,
-    y: 1,
-    z: CHUNK_SIZE,
-  })
-    .setTranslation((chunk.cx + 0.5) * CHUNK_SIZE, 0, (chunk.cz + 0.5) * CHUNK_SIZE)
-    .setFriction(1.0);
+  const { vertices, indices } = chunkTrimesh(chunk.heights, chunk.cx, chunk.cz);
+  const ground = rapier.ColliderDesc.trimesh(vertices, indices).setFriction(1.0);
   chunk.collider = world.createCollider(ground);
   field.colliders = field.rocks
     .map((rock) => rapier.ColliderDesc.convexHull(rock.vertices))

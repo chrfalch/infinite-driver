@@ -116,6 +116,26 @@ export function createCarMesh() {
   return { object: car, steeringWheel };
 }
 
+// The wheel rim with lug nuts; a spoke pair makes the spin visible when the tyre is soft.
+function createRim(rimRadius, w, spokes) {
+  const group = new Group();
+  const hub = shadowed(new Mesh(new CylinderGeometry(rimRadius, rimRadius, w + 0.02, 20), rim));
+  hub.rotation.x = Math.PI / 2;
+  group.add(hub);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    group.add(box(0.05, 0.05, w + 0.05, damperMat, Math.cos(a) * rimRadius * 0.52, Math.sin(a) * rimRadius * 0.52, 0));
+  }
+  if (spokes) {
+    for (let i = 0; i < 3; i++) {
+      const spoke = box(rimRadius * 1.9, 0.045, w + 0.04, damperMat, 0, 0, 0);
+      spoke.rotation.z = (i / 3) * Math.PI;
+      group.add(spoke);
+    }
+  }
+  return group;
+}
+
 function createTyre() {
   const group = new Group();
   const r = CAR.wheelRadius;
@@ -131,14 +151,7 @@ function createTyre() {
     b.rotation.z = a + Math.PI / 2;
     group.add(b);
   }
-  const hub = shadowed(new Mesh(new CylinderGeometry(r * 0.58, r * 0.58, w + 0.02, 16), rim));
-  hub.rotation.x = Math.PI / 2;
-  group.add(hub);
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2;
-    const nut = box(0.05, 0.05, w + 0.05, damperMat, Math.cos(a) * r * 0.3, Math.sin(a) * r * 0.3, 0);
-    group.add(nut);
-  }
+  group.add(createRim(r * 0.58, w, false));
   return group;
 }
 
@@ -156,7 +169,8 @@ function createSpringGeometry() {
 const springGeometry = createSpringGeometry();
 
 // One corner of the car: steered, spinning wheel, coil-over shock, and two control arms.
-export function createWheelRig(index) {
+// With soft tyres the rig only carries the rim; the tyre is its own world-space mesh.
+export function createWheelRig(index, { softTire = null } = {}) {
   const mount = wheelMount(index);
   const side = Math.sign(mount.z);
   const w = CAR.wheelWidth;
@@ -166,7 +180,7 @@ export function createWheelRig(index) {
   // The hub carries the wheel; it moves up and down with the suspension.
   const hub = new Group();
   const steer = new Group();
-  const spin = createTyre();
+  const spin = softTire ? createRim(softTire.rimRadius, softTire.width * 0.85, true) : createTyre();
   steer.add(spin);
   // Knuckle stays with the steering but not the spin.
   steer.add(box(0.14, 0.26, 0.08, frame, 0, 0, -side * (w / 2 + 0.06)));

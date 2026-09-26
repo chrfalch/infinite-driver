@@ -29,6 +29,35 @@ export function toRapierHeights(heights, res = CHUNK_RES) {
   return out;
 }
 
+// World-space triangle mesh of a chunk, split along the same diagonal as the render mesh and
+// wound so normals face up. Soft bodies collide with triangle meshes but not heightfields.
+export function chunkTrimesh(heights, cx, cz, size = CHUNK_SIZE, res = CHUNK_RES) {
+  const n = res + 1;
+  const step = size / res;
+  const vertices = new Float32Array(n * n * 3);
+  for (let iz = 0; iz < n; iz++) {
+    for (let ix = 0; ix < n; ix++) {
+      const i = ix + iz * n;
+      vertices[i * 3] = cx * size + ix * step;
+      vertices[i * 3 + 1] = heights[i];
+      vertices[i * 3 + 2] = cz * size + iz * step;
+    }
+  }
+  const indices = new Uint32Array(res * res * 6);
+  let k = 0;
+  for (let iz = 0; iz < res; iz++) {
+    for (let ix = 0; ix < res; ix++) {
+      const a = ix + iz * n;
+      const b = a + 1;
+      const c = a + n;
+      const d = c + 1;
+      indices.set([a, c, b, b, c, d], k);
+      k += 6;
+    }
+  }
+  return { vertices, indices };
+}
+
 export function chunkKey(cx, cz) {
   return `${cx},${cz}`;
 }

@@ -1,5 +1,7 @@
 // A short-wheelbase 4x4, roughly 1.8 t. Chassis-local axes: +x forward, +y up, +z right.
 export const DEFAULT_CAR = Object.freeze({
+  // Soft-body tyres on a fully jointed car; false uses Rapier's raycast vehicle with rigid wheels.
+  softTires: true,
   mass: 1800,
   // Physics box for the body tub and frame. The wheels stick out past it.
   halfExtents: { x: 1.95, y: 0.34, z: 0.6 },
@@ -58,6 +60,10 @@ function merge(target, source) {
 
 // The live, tunable settings. Systems read from this object every step.
 export const CAR = merge(clone(DEFAULT_CAR), loadSaved());
+
+// ?tires=rigid or ?tires=soft overrides the saved choice for this visit.
+const tiresParam = globalThis.location ? new URLSearchParams(globalThis.location.search).get('tires') : null;
+if (tiresParam === 'rigid' || tiresParam === 'soft') CAR.softTires = tiresParam === 'soft';
 
 export function saveCar() {
   try {

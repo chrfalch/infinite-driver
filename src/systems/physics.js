@@ -8,7 +8,10 @@ export function stepPhysics(world) {
   const input = world.get(Input);
   physics.accumulator = Math.min(physics.accumulator + delta, 0.1);
 
+  const t0 = performance.now();
+  let steps = 0;
   while (physics.accumulator >= physics.step) {
+    steps++;
     world.query(Vehicle).updateEach(([vehicle]) => {
       applyDriverInput(vehicle, input, physics.step);
       vehicle.controller.updateVehicle(physics.step);
@@ -17,6 +20,7 @@ export function stepPhysics(world) {
     physics.world.step();
     physics.accumulator -= physics.step;
   }
+  if (steps) physics.stepMs = physics.stepMs * 0.95 + ((performance.now() - t0) / steps) * 0.05;
 }
 
 export function syncBodies(world) {

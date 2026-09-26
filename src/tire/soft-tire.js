@@ -5,7 +5,7 @@ export const GROUP = { WORLD: 0x0001, RIM: 0x0002, TIRE: 0x0004, CHASSIS: 0x0008
 export const groups = (member, filter) => (member << 16) | filter;
 
 // Torus around the local z axis (the axle), with an elliptical tube: half-width across, half-height radially.
-export function torusMesh(tire = TIRE) {
+export function torusMesh(tire = TIRE, { mirror = false } = {}) {
   const nu = Math.round(tire.segmentsAround);
   const nv = Math.round(tire.segmentsAcross);
   const major = (tire.outerRadius + tire.rimRadius) / 2;
@@ -17,7 +17,7 @@ export function torusMesh(tire = TIRE) {
     for (let j = 0; j < nv; j++) {
       const v = (j / nv) * Math.PI * 2;
       const r = major + radial * Math.cos(v);
-      vertices.set([r * Math.cos(u), r * Math.sin(u), across * Math.sin(v)], (i * nv + j) * 3);
+      vertices.set([r * Math.cos(u), r * Math.sin(u), (mirror ? -across : across) * Math.sin(v)], (i * nv + j) * 3);
     }
   }
   const indices = new Uint32Array(nu * nv * 6);
@@ -28,8 +28,12 @@ export function torusMesh(tire = TIRE) {
       const b = ((i + 1) % nu) * nv + j;
       const c = ((i + 1) % nu) * nv + ((j + 1) % nv);
       const d = i * nv + ((j + 1) % nv);
-      // Outward winding, so the enclosed volume is positive.
-      indices.set([a, b, c, a, c, d], k);
+      // Outward winding, so the enclosed volume is positive. The diagonal alternates in a
+      // checkerboard so the mesh has no handedness (one-way diagonals make the tyre steer).
+      const tris = (i + j) % 2 === 0 ? [a, b, c, a, c, d] : [a, b, d, b, c, d];
+      // A mirrored tyre (right side of the car) flips the winding to stay outward.
+      if (mirror) for (let t = 0; t < 6; t += 3) [tris[t + 1], tris[t + 2]] = [tris[t + 2], tris[t + 1]];
+      indices.set(tris, k);
       k += 6;
     }
   }
@@ -72,14 +76,15 @@ function transform(points, p, q) {
 }
 
 // Builds a soft tyre around `hub` (a rigid body whose local z is the axle) and pins its bead to it.
-export function createSoftTire(RAPIER, world, hub, tire = TIRE) {
-  const mesh = torusMesh(tire);
+export function createSoftTire(RAPIER, world, hub, tire = TIRE, { mirror = false } = {}) {
+  const mesh = torusMesh(tire, { mirror });
   const vertices = transform(mesh.vertices, hub.translation(), hub.rotation());
   const desc = RAPIER.SoftBodyDesc.trimesh(vertices, mesh.indices)
     .setMass(tire.rubberMass)
     .setMaterial(tireMaterial(RAPIER, tire))
     .setVolumeFactor(tire.inflation)
     .setAdditionalSolverIterations(Math.round(tire.substeps ?? 0))
+    .setAdditionalPgsIterations(Math.round(tire.pgsIterations))
     .setSurfaceCollider(
       RAPIER.ColliderDesc.ball(0.01)
         .setFriction(tire.friction)
@@ -107,4 +112,5 @@ export const TIRE_REBUILD_KEYS = [
   'friction',
   'beadRings',
   'substeps',
+  'pgsIterations',
 ];

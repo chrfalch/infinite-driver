@@ -4,7 +4,7 @@ import { relation, trait } from 'koota';
 // Callback traits are stored by reference, so systems can mutate them in place.
 export const Time = trait(() => ({ delta: 0, elapsed: 0 }));
 export const Input = trait(() => ({ engineOn: false, throttle: 0, brake: 0, steer: 0, handbrake: false }));
-export const Physics = trait(() => ({ rapier: null, world: null, accumulator: 0, step: 1 / 120 }));
+export const Physics = trait(() => ({ rapier: null, world: null, accumulator: 0, step: 1 / 120, stepMs: 0 }));
 export const Render = trait(() => ({ renderer: null, scene: null, camera: null, sun: null, hudScene: null, hudCamera: null }));
 export const HeightField = trait(() => ({ heightAt: null }));
 export const TerrainStreaming = trait({ radius: 2, colliderRadius: 1 });
@@ -21,6 +21,7 @@ export const IsPlayer = trait();
 export const CameraTarget = trait();
 export const TerrainChunk = trait(() => ({ cx: 0, cz: 0, collider: null, heights: null }));
 export const WheelRig = trait(() => ({ rig: null }));
+export const SoftTireView = trait(() => ({ soft: null, object: null }));
 export const SteeringWheel = trait(() => ({ object: null }));
 export const RockField = trait(() => ({ rocks: [], colliders: [] }));
 export const HudLabel = trait(() => ({ text: null, format: null }));

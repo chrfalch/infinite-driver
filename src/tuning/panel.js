@@ -1,7 +1,9 @@
 import GUI from 'lil-gui';
 import { CONTROLS, DEFAULT_CONTROLS, saveControls } from '../controls.js';
-import { Input, IsPlayer, Vehicle } from '../ecs/traits.js';
+import { Input, IsPlayer, Physics, Vehicle } from '../ecs/traits.js';
 import { CAR, DEFAULT_CAR, resetCar, saveCar } from '../vehicle/config.js';
+import { TIRE, resetTire, saveTire } from '../tire/config.js';
+import { TIRE_REBUILD_KEYS, updateSoftTire } from '../tire/soft-tire.js';
 import { applyWheelSettings } from '../vehicle/physics.js';
 import { rebuildCar, respawnCar } from '../vehicle/spawn.js';
 
@@ -125,7 +127,7 @@ export function createTuningPanel(world, { heightAt }) {
 
   const actions = {
     copy: async () => {
-      const text = JSON.stringify({ changed: changedSettings(), controls: CONTROLS, car: CAR }, null, 2);
+      const text = JSON.stringify({ changed: changedSettings(), controls: CONTROLS, car: CAR, tire: TIRE }, null, 2);
       const ok = await copyText(text);
       copyButton.name(ok ? 'Copied ✓' : 'Copy failed, see console');
       if (!ok) console.log(text);
@@ -133,6 +135,7 @@ export function createTuningPanel(world, { heightAt }) {
     },
     reset: () => {
       resetCar();
+      resetTire();
       Object.assign(CONTROLS, DEFAULT_CONTROLS);
       saveControls();
       gui.controllersRecursive().forEach((c) => c.updateDisplay());
@@ -157,6 +160,14 @@ export function createTuningPanel(world, { heightAt }) {
       world.get(Input).engineOn = false;
     });
 
+  controls
+    .add(CAR, 'softTires')
+    .name('Soft tyres')
+    .onChange(() => {
+      saveCar();
+      rebuildCar(world);
+    });
+
   for (const [title, params] of GROUPS) {
     const folder = gui.addFolder(title);
     for (const [path, label, min, max, step, mode] of params) {
@@ -172,6 +183,41 @@ export function createTuningPanel(world, { heightAt }) {
     }
     if (title !== 'Engine & brakes') folder.close();
   }
+
+  // Soft tyre settings: most apply live to the four tyres, size and mesh rebuild the car.
+  const softFolder = gui.addFolder('Soft tyres');
+  const onTire = (key) => () => {
+    saveTire();
+    if (!CAR.softTires) return;
+    if (TIRE_REBUILD_KEYS.includes(key)) scheduleRebuild();
+    else {
+      const car = world.queryFirst(IsPlayer, Vehicle);
+      const { controller } = car.get(Vehicle);
+      const rapier = world.get(Physics).rapier;
+      controller.wheels?.forEach((w) => updateSoftTire(rapier, w.soft, TIRE));
+    }
+  };
+  for (const [key, label, min, max, step] of [
+    ['inflation', 'Air pressure (inflation ×)', 0.8, 1.3, 0.01],
+    ['airStiffness', 'Air stiffness (Hz)', 20, 800, 10],
+    ['carcassStiffness', 'Carcass / cords (Hz)', 20, 800, 10],
+    ['sidewallStiffness', 'Sidewall bending (Hz)', 0, 120, 1],
+    ['shapeMemory', 'Shape memory (Hz)', 0, 120, 1],
+    ['damping', 'Damping ratio', 0, 2, 0.05],
+    ['friction', 'Rubber friction', 0.2, 2, 0.05],
+    ['rubberMass', 'Rubber mass (kg)', 2, 40, 1],
+    ['outerRadius', 'Outer radius (m)', 0.3, 0.8, 0.01],
+    ['rimRadius', 'Rim radius (m)', 0.15, 0.6, 0.01],
+    ['width', 'Width (m)', 0.12, 0.6, 0.01],
+    ['segmentsAround', 'Segments around', 12, 48, 1],
+    ['segmentsAcross', 'Segments across', 4, 16, 1],
+    ['beadRings', 'Bead width (rings)', 0, 2, 1],
+    ['substeps', 'Solver substeps', 0, 6, 1],
+    ['pgsIterations', 'Solver iterations', 0, 6, 1],
+  ]) {
+    softFolder.add(TIRE, key, min, max, step).name(label).onChange(onTire(key));
+  }
+  softFolder.close();
 
   // Give the keyboard back to the car once a value is committed.
   gui.onFinishChange(() => {

@@ -21,9 +21,9 @@ import { updateHud } from './systems/hud.js';
 import { attachKeyboard, readInput } from './systems/input.js';
 import { stepPhysics, syncBodies } from './systems/physics.js';
 import { streamTerrain } from './systems/terrain.js';
-import { syncViews, syncWheels } from './systems/views.js';
+import { syncSoftTires, syncViews, syncWheels } from './systems/views.js';
 import { createHeightField } from './terrain/height.js';
-import { spawnCar } from './vehicle/spawn.js';
+import { spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
 
 async function main() {
@@ -38,12 +38,12 @@ async function main() {
   physicsWorld.timestep = 1 / 120;
 
   world.add(Time, Input, TerrainStreaming);
-  world.add(Physics({ rapier: RAPIER, world: physicsWorld, accumulator: 0, step: 1 / 120 }));
+  world.add(Physics({ rapier: RAPIER, world: physicsWorld, accumulator: 0, step: 1 / 120, stepMs: 0 }));
   world.add(Render(render));
   world.add(HeightField({ heightAt }));
 
   // The car starts just above the ground at the origin.
-  spawnCar(world, { position: { x: 0, y: heightAt(0, 0) + 1.2, z: 0 } });
+  spawnCar(world, { position: { x: 0, y: heightAt(0, 0) + startHeight(), z: 0 } });
   createTuningPanel(world, { heightAt });
 
   streamTerrain(world, { force: true });
@@ -79,6 +79,23 @@ async function main() {
     }),
   );
 
+  const perfText = hud.createText({
+    font: inter,
+    text: '',
+    style: { fontSize: 12, lineHeight: 1.2, color: '#9a927e' },
+  });
+  perfText.position.set(28, -100, 0);
+  render.hudScene.add(perfText);
+  world.spawn(
+    HudLabel({
+      text: perfText,
+      format: (v) => {
+        const tyres = v.controller.wheels ? 'soft tyres' : 'rigid wheels';
+        return `${tyres}    physics ${world.get(Physics).stepMs.toFixed(1)} ms/step`;
+      },
+    }),
+  );
+
   const hintText = hud.createText({
     font: inter,
     text: 'W / Up  accelerate (hold)    S / Down  brake    A D / Left Right  steer    Space  handbrake    R  respawn    Scroll  zoom',
@@ -103,6 +120,7 @@ async function main() {
     streamTerrain(world);
     syncViews(world);
     syncWheels(world);
+    syncSoftTires(world);
     followCamera(world);
     updateHud(world);
 
@@ -123,7 +141,7 @@ async function main() {
     get car() {
       return world.queryFirst(IsPlayer, Vehicle);
     },
-    traits: { Vehicle, WheelRig, SteeringWheel, Input, Time },
+    traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics },
   };
 }
 
