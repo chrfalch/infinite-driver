@@ -54,7 +54,7 @@ async function main() {
   const surfaceAt = (x, z) => heightAt(x, z) + deformation.at(x, z);
   world.add(HeightField({ heightAt, surfaceAt }));
   world.add(Deformation({ map: deformation }));
-  world.add(Soil({ particles: new SoilParticles(render.scene), carry: [0, 0, 0, 0] }));
+  world.add(Soil({ particles: new SoilParticles(render.scene), carry: [0, 0, 0, 0], spin: [0, 0, 0, 0] }));
   world.add(
     Tracks({
       renderer: new TireTracks(render.scene, { segments: GROUND.trackLength, deformation }),

@@ -48,8 +48,17 @@ export function updateSoil(world) {
       soil.carry[i] = 0;
       continue;
     }
-    const slip = controller.wheelSpin(i) * radius - ground;
-    const rate = softness * (Math.max(0, Math.abs(slip) - 0.8) * 45 + Math.max(0, Math.abs(ground) - 3) * 1.2);
+    // Use a smoothed spin: soft tyres make the raw spin jitter a little even when parked.
+    soil.spin ??= [0, 0, 0, 0];
+    soil.spin[i] += (controller.wheelSpin(i) - soil.spin[i]) * Math.min(1, delta / 0.15);
+    const tread = soil.spin[i] * radius; // tread speed, m/s
+    // Only a wheel that is actually turning throws soil.
+    if (Math.abs(tread) < 1.2) {
+      soil.carry[i] = 0;
+      continue;
+    }
+    const slip = tread - ground;
+    const rate = softness * (Math.max(0, Math.abs(slip) - 1.0) * 45 + Math.max(0, Math.abs(ground) - 3) * 1.2);
     soil.carry[i] += rate * delta;
     // Soil flies opposite to the tread's motion at the contact patch.
     const back = slip >= 0 ? -1 : 1;
