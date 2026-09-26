@@ -1,9 +1,15 @@
 import { Input } from '../ecs/traits.js';
 
 const keys = new Set();
+// Fresh presses since the last frame (key repeat is ignored).
+const taps = new Set();
+
+const ACCELERATOR = ['KeyW', 'ArrowUp'];
+const BRAKE = ['KeyS', 'ArrowDown'];
 
 export function attachKeyboard(target = window) {
   const down = (e) => {
+    if (!e.repeat) taps.add(e.code);
     keys.add(e.code);
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
   };
@@ -20,12 +26,17 @@ export function attachKeyboard(target = window) {
 }
 
 const pressed = (...codes) => codes.some((c) => keys.has(c));
+const tapped = (...codes) => codes.some((c) => taps.has(c));
 
 export function readInput(world) {
   const input = world.get(Input);
-  input.throttle = pressed('KeyW', 'ArrowUp') ? 1 : 0;
-  input.brake = pressed('KeyS', 'ArrowDown') ? 1 : 0;
+  // The accelerator toggles the engine drive on and off; braking switches it off.
+  if (tapped(...ACCELERATOR)) input.engineOn = !input.engineOn;
+  input.brake = pressed(...BRAKE) ? 1 : 0;
+  if (input.brake) input.engineOn = false;
+  input.throttle = input.engineOn ? 1 : 0;
   // Positive steer turns left.
   input.steer = (pressed('KeyA', 'ArrowLeft') ? 1 : 0) - (pressed('KeyD', 'ArrowRight') ? 1 : 0);
   input.handbrake = pressed('Space');
+  taps.clear();
 }

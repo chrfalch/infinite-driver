@@ -82,12 +82,21 @@ async function main() {
   render.hudScene.add(speedText);
   world.spawn(HudLabel({ text: speedText, format: (v) => `${Math.round(Math.abs(v.speed) * 3.6)} km/h` }));
 
+  const engineText = hud.createText({
+    font: inter,
+    text: 'engine off',
+    style: { fontSize: 14, lineHeight: 1.2, color: '#6b6453' },
+  });
+  engineText.position.set(28, -54, 0);
+  render.hudScene.add(engineText);
+  world.spawn(HudLabel({ text: engineText, format: (_, input) => (input.engineOn ? 'engine on' : 'engine off') }));
+
   const hintText = hud.createText({
     font: inter,
-    text: 'W A S D or arrows  drive    Space  handbrake    Scroll  zoom',
+    text: 'W / Up  engine on/off    S / Down  brake    A D / Left Right  steer    Space  handbrake    Scroll  zoom',
     style: { fontSize: 14, lineHeight: 1.2, color: '#8a826f' },
   });
-  hintText.position.set(28, -56, 0);
+  hintText.position.set(28, -78, 0);
   render.hudScene.add(hintText);
 
   attachKeyboard();
@@ -119,7 +128,7 @@ async function main() {
   render.renderer.setAnimationLoop(frame);
 
   // Handy for debugging from the console.
-  window.__game = { world, car, RAPIER, traits: { Vehicle, WheelRig, SteeringWheel } };
+  window.__game = { world, car, RAPIER, traits: { Vehicle, WheelRig, SteeringWheel, Input, Time } };
 }
 
 main().catch((error) => {

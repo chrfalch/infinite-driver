@@ -3,7 +3,7 @@ import { relation, trait } from 'koota';
 // World traits (global state).
 // Callback traits are stored by reference, so systems can mutate them in place.
 export const Time = trait(() => ({ delta: 0, elapsed: 0 }));
-export const Input = trait(() => ({ throttle: 0, brake: 0, steer: 0, handbrake: false }));
+export const Input = trait(() => ({ engineOn: false, throttle: 0, brake: 0, steer: 0, handbrake: false }));
 export const Physics = trait(() => ({ rapier: null, world: null, accumulator: 0, step: 1 / 120 }));
 export const Render = trait(() => ({ renderer: null, scene: null, camera: null, sun: null, hudScene: null, hudCamera: null }));
 export const HeightField = trait(() => ({ heightAt: null }));
