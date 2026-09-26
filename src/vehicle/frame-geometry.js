@@ -82,15 +82,27 @@ const IFS_REAR_RIGHT = {
 // Travel limit for the arms (rad either way from ride height), about ±0.18 m at the wheel.
 export const IFS_ARM_LIMIT = 0.37;
 
+// Track width: the chassis pivots stay where they are on the tube chassis and the outer points
+// (wheel, ball joints, tie-rod end) move out or in, so the arms get longer or shorter. The coil-over
+// stays at 65 % along the lower arm. Limited so the arms keep a sensible length.
+const DESIGN_HALF_TRACK = 1.05;
+export function ifsTrackOffset(car = CAR) {
+  return Math.max(-0.2, Math.min(0.45, car.track / 2 - DESIGN_HALF_TRACK));
+}
+const OUTBOARD = { wheel: 1, lowerBall: 1, upperBall: 1, tieOuter: 1, shockBottom: 0.65 };
+
 // The double A-arm points of one corner (wheel index 0 FL, 1 FR, 2 RL, 3 RR), chassis-local.
-export function ifsCorner(i) {
+export function ifsCorner(i, car = CAR) {
   const front = i < 2;
   const side = i % 2 === 0 ? -1 : 1;
   const base = front ? IFS_FRONT_RIGHT : IFS_REAR_RIGHT;
   const sx = front ? 1 : -1;
-  const P = (p) => ({ x: sx * p[0], y: p[1], z: side * p[2] });
+  const dz = ifsTrackOffset(car);
   const out = { front, side };
-  for (const [key, value] of Object.entries(base)) out[key] = Array.isArray(value[0]) ? value.map(P) : P(value);
+  for (const [key, value] of Object.entries(base)) {
+    const P = (p) => ({ x: sx * p[0], y: p[1], z: side * (p[2] + dz * (OUTBOARD[key] ?? 0)) });
+    out[key] = Array.isArray(value[0]) ? value.map(P) : P(value);
+  }
   return out;
 }
 

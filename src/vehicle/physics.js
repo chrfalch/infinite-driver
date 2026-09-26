@@ -12,7 +12,8 @@ export function wheelMount(i, car = CAR) {
   return {
     x: (w.front ? 1 : -1) * car.wheelBase * 0.5,
     y: car.wheelMountY,
-    z: (i % 2 === 0 ? -1 : 1) * car.track * 0.5,
+    // Independent suspension limits the track to what its arms allow (see ifsTrackOffset).
+    z: (i % 2 === 0 ? -1 : 1) * (car.solidAxles === false ? Math.max(0.85, Math.min(1.5, car.track * 0.5)) : car.track * 0.5),
   };
 }
 

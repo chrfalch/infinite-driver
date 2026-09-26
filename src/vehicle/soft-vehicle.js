@@ -110,7 +110,7 @@ export class JointedVehicle {
       const front = WHEELS[i].front;
       const localHub = this.solid
         ? { x: mount.x, y: mount.y - car.suspensionRestLength, z: mount.z }
-        : ifsCorner(i).wheel;
+        : ifsCorner(i, car).wheel;
       const worldHub = rotate(q, localHub);
       const at = { x: p.x + worldHub.x, y: p.y + worldHub.y, z: p.z + worldHub.z };
       const makeBody = (mass) => {
@@ -250,7 +250,7 @@ export class JointedVehicle {
   // joints, and a tie rod from the rack (front) or the chassis (rear, a fixed toe link).
   createCorner(i) {
     const { RAPIER, body: chassis } = this;
-    const G = ifsCorner(i);
+    const G = ifsCorner(i, this.car);
     const lower = this.createLink(G.lowerBall, 8, 0.6);
     const upper = this.createLink(G.upperBall, 5, 0.4);
     const upright = this.createLink(G.wheel, 10, 0.6);
