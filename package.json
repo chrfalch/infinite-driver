@@ -1,0 +1,29 @@
+{
+  "name": "html-page",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "dev": "vite",
+    "build": "vite build",
+    "bake:font": "glyph bake --input assets/fonts/Inter-Regular.ttf --output public/fonts/inter-latin.font.glb --unicodes U+0020-007E,U+00B0,U+00B7,U+2014 --bitmap 32 --msdf --slug"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": "true",
+  "devDependencies": {
+    "playwright-core": "^1.63.0",
+    "vite": "^8.3.1",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.21.0",
+    "@pmndrs/glyph": "^0.1.0",
+    "koota": "^0.6.6",
+    "simplex-noise": "^4.0.3",
+    "three": "^0.186.1"
+  }
+}
