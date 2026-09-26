@@ -18,7 +18,7 @@ export function isTouchDevice() {
   return (globalThis.matchMedia?.('(pointer: coarse)').matches ?? false) || (navigator.maxTouchPoints ?? 0) > 0;
 }
 
-export function createTouchControls({ onRespawn } = {}) {
+export function createTouchControls({ onRespawn, onCamera } = {}) {
   const param = new URLSearchParams(location.search).get('touch');
   const root = document.createElement('div');
   root.className = 'touch-controls';
@@ -71,6 +71,13 @@ export function createTouchControls({ onRespawn } = {}) {
   respawn.setAttribute('aria-label', 'Respawn car');
   respawn.addEventListener('click', () => onRespawn?.());
   root.append(respawn);
+  const camera = document.createElement('button');
+  camera.type = 'button';
+  camera.className = 'touch-btn area-camera small';
+  camera.textContent = 'Follow cam';
+  camera.setAttribute('aria-label', 'Toggle follow camera');
+  camera.addEventListener('click', () => camera.classList.toggle('down', !!onCamera?.()));
+  root.append(camera);
   document.body.append(root);
 
   const setVisible = (visible) => {

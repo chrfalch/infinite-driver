@@ -30,6 +30,22 @@ const defaultZoom = globalThis.innerHeight < 500 ? 1.7 : 1;
 const LOOK = (params.get('look') ?? '0,0').split(',').map(Number);
 const state = { x: 0, y: 0, z: 0, zoom: 1, userZoom: Number(params.get('zoom')) || defaultZoom, ready: false };
 
+// Follow ("helicopter") mode, toggled with C: the camera keeps the angle it had to the car when the
+// mode was switched on and swings round behind the car's turns with a little lag, like a chase
+// helicopter. Dragging still changes the angle (and the new angle is kept).
+const follow = { on: false, relative: 0, heading: null };
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+let carAzimuth = 0; // the car's forward direction in the camera's azimuth convention
+export function toggleFollowCamera() {
+  follow.on = !follow.on;
+  follow.relative = wrap(view.azimuth - carAzimuth);
+  follow.heading = carAzimuth;
+  return follow.on;
+}
+export function isFollowCamera() {
+  return follow.on;
+}
+
 // Mouse wheel or trackpad pinch zooms in and out.
 export function attachZoom(target = window) {
   target.addEventListener(
@@ -72,6 +88,7 @@ export function attachZoom(target = window) {
   target.addEventListener('pointermove', (e) => {
     if (!drag) return;
     view.azimuth += (e.clientX - drag.x) * 0.006;
+    follow.relative += (e.clientX - drag.x) * 0.006;
     view.elevation = Math.min(MAX_ELEVATION, Math.max(MIN_ELEVATION, view.elevation + (e.clientY - drag.y) * 0.005));
     drag = { x: e.clientX, y: e.clientY };
     updateOffset();
@@ -84,6 +101,7 @@ export function attachZoom(target = window) {
   target.addEventListener('pointercancel', endDrag);
   target.addEventListener('contextmenu', (e) => e.preventDefault());
   target.addEventListener('dblclick', () => {
+    follow.on = false;
     view.azimuth = ISO_AZIMUTH;
     view.elevation = ISO_ELEVATION;
     updateOffset();
@@ -103,6 +121,18 @@ export function followCamera(world) {
 
   if (!state.ready) {
     Object.assign(state, { x: position.x, y: position.y, z: position.z, zoom: state.userZoom, ready: true });
+  }
+  // The car's heading (forward axis flattened) as a camera azimuth: offset (cos az, sin az) points
+  // from the car to the camera, so the forward direction (cos yaw, -sin yaw) is az = -yaw.
+  const q = target.get(Transform).quaternion;
+  const fx = 1 - 2 * (q.y * q.y + q.z * q.z);
+  const fz = 2 * (q.x * q.z - q.w * q.y);
+  if (Math.hypot(fx, fz) > 0.2) carAzimuth = Math.atan2(fz, fx);
+  if (follow.on) {
+    // The heading the camera tracks lags the car (about 0.6 s), so turns swing the view smoothly.
+    follow.heading += wrap(carAzimuth - follow.heading) * (1 - Math.exp(-delta / 0.6));
+    view.azimuth = follow.heading + follow.relative;
+    updateOffset();
   }
   // Look ahead in the direction of travel so the car does not drift toward the screen edge.
   const v = target.get(Vehicle)?.body.linvel() ?? { x: 0, y: 0, z: 0 };

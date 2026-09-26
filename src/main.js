@@ -22,7 +22,7 @@ import {
 } from './ecs/traits.js';
 import { createRenderer } from './render/scene.js';
 import { createGauges } from './ui/gauges.js';
-import { attachZoom, followCamera } from './systems/camera.js';
+import { attachZoom, followCamera, isFollowCamera, toggleFollowCamera } from './systems/camera.js';
 import { updateHud } from './systems/hud.js';
 import { attachKeyboard, readInput } from './systems/input.js';
 import { stepPhysics, syncBodies } from './systems/physics.js';
@@ -75,7 +75,7 @@ async function main() {
     rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
   });
   const panel = createTuningPanel(world, { heightAt });
-  const touch = createTouchControls({ onRespawn: () => requestRespawn(world, heightAt) });
+  const touch = createTouchControls({ onRespawn: () => requestRespawn(world, heightAt), onCamera: () => toggleFollowCamera() });
   // Small screens start with the panel folded so the road stays visible.
   if (window.innerWidth < 700 || touch.isVisible()) panel.close();
 
@@ -114,9 +114,9 @@ async function main() {
   hintText.position.set(28, -24, 0);
   render.hudScene.add(hintText);
   const KEY_HINT =
-    'W / Up  accelerate (hold)    S / Down  brake, reverse    A D  steer    Q E  shift    L  low range    Space  handbrake    R  respawn';
+    'W / Up  accelerate (hold)    S / Down  brake, reverse    A D  steer    Q E  shift    L  low range    Space  handbrake    R  respawn    C  follow camera';
   const TOUCH_HINT = 'Hold the up button to drive, down to brake    Pinch to zoom';
-  world.spawn(HudLabel({ text: hintText, format: () => (touch.isVisible() ? TOUCH_HINT : KEY_HINT) }));
+  world.spawn(HudLabel({ text: hintText, format: () => (touch.isVisible() ? TOUCH_HINT : KEY_HINT) + (isFollowCamera() ? '    [follow camera on]' : '') }));
 
   attachKeyboard();
   attachZoom(render.renderer.domElement);

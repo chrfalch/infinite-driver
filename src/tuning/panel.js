@@ -19,6 +19,7 @@ import { applyWheelSettings } from '../vehicle/physics.js';
 import { DRIVETRAIN, resetDrivetrain, saveDrivetrain } from '../vehicle/config.js';
 import { requestRebuild, requestRespawn } from '../vehicle/spawn.js';
 import { setGravelAmount } from '../render/terrain-mesh.js';
+import { toggleFollowCamera } from '../systems/camera.js';
 
 // [path, label, min, max, step, apply] — apply is 'live' (read every step), 'wheels' (pushed to
 // the Rapier controller), or 'rebuild' (shape or mass: the car is rebuilt in place).
@@ -335,6 +336,7 @@ export function createTuningPanel(world, { heightAt }) {
 
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyR' && !isTyping(e)) actions.respawn();
+    if (e.code === 'KeyC' && !isTyping(e)) toggleFollowCamera();
   });
   return gui;
 }
