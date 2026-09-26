@@ -92,9 +92,13 @@ export function applyDriverInput(state, input, dt, car = CAR) {
   controller.setWheelEngineForce(2, rear);
   controller.setWheelEngineForce(3, rear);
 
+  // Off the accelerator the engine holds the car back through the 4WD driveline.
+  const engineBrake = input.throttle === 0 && input.brake === 0 ? car.engineBrakeForce : 0;
+
   // Rapier applies brake as an impulse per step, so convert from force.
-  const frontBrake = brake * 0.35 * dt;
-  const rearBrake = (brake * 0.15 + (input.handbrake ? car.handbrakeForce * 0.5 : 0)) * dt;
+  const frontBrake = (brake * 0.35 + engineBrake * car.frontDriveShare * 0.5) * dt;
+  const rearBrake =
+    (brake * 0.15 + engineBrake * (1 - car.frontDriveShare) * 0.5 + (input.handbrake ? car.handbrakeForce * 0.5 : 0)) * dt;
   controller.setWheelBrake(0, frontBrake);
   controller.setWheelBrake(1, frontBrake);
   controller.setWheelBrake(2, rearBrake);

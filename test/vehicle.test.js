@@ -73,6 +73,21 @@ describe('car physics', () => {
     expect(decel).toBeLessThan(1.2);
   });
 
+  it('slows to a stop off the accelerator, more gently than braking', () => {
+    const { state, run } = setup();
+    run(2, idle);
+    state.body.setLinvel({ x: 13.9, y: 0, z: 0 }, true); // 50 km/h
+    let t = 0;
+    run(15, idle, () => {
+      if (state.body.linvel().x > 0.3) t += 1 / 120;
+    });
+    const decel = (13.9 - 0.3) / t / 9.81;
+    console.log('coast 50 km/h to stop (s)', t.toFixed(2), 'decel (g)', decel.toFixed(2));
+    expect(t).toBeGreaterThan(3);
+    expect(t).toBeLessThan(8);
+    expect(state.body.linvel().x).toBeLessThan(0.05);
+  });
+
   it('turns and holds plausible lateral grip', () => {
     const { state, run } = setup();
     run(2, idle);

@@ -25,6 +25,7 @@ export const CAR = {
   enginePower: 130000, // W
   reverseForce: 3600,
   maxBrakeForce: 16500, // N across all wheels
+  engineBrakeForce: 4200, // N off throttle, about 0.26 g with drag and rolling resistance
   handbrakeForce: 8000, // N on the rear axle
   maxSteer: 0.62, // rad at walking pace
   steerRate: 2.0, // rad/s
