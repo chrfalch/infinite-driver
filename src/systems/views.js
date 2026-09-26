@@ -113,9 +113,19 @@ export function syncAxles(world) {
     });
     if (hubs.length < 4 || hubs.includes(undefined)) return;
     const { controller, speed, steer } = car.get(Vehicle);
-    // Propshafts turn at wheel speed times the final drive.
+    // Each propshaft turns with its own axle's wheels (times the final drive), smoothed, and stops
+    // dead below a crawl so measurement noise never turns a parked car's shafts.
     const radius = controller.tire?.outerRadius ?? CAR.wheelRadius;
-    const wheelW = controller.wheelSpin ? [0, 1, 2, 3].reduce((s, i) => s + controller.wheelSpin(i), 0) / 4 : speed / radius;
-    updateAxleRig(car.get(AxleRig).rig, hubs, wheelW * DRIVETRAIN.finalDrive, delta, steerQuats, steeringGeometry(), steer);
+    const spin = (i) => (controller.wheelSpin ? controller.wheelSpin(i) : speed / radius);
+    const rig = car.get(AxleRig).rig;
+    rig.axleSpin ??= [0, 0];
+    const k = Math.min(1, delta / 0.1);
+    const targets = [(spin(0) + spin(1)) / 2, (spin(2) + spin(3)) / 2];
+    targets.forEach((w, a) => {
+      rig.axleSpin[a] += (w - rig.axleSpin[a]) * k;
+      if (Math.abs(rig.axleSpin[a] * radius) < 0.15) rig.axleSpin[a] = 0;
+    });
+    const wheelW = rig.axleSpin.map((w) => w * DRIVETRAIN.finalDrive);
+    updateAxleRig(rig, hubs, wheelW, delta, steerQuats, steeringGeometry(), steer);
   });
 }

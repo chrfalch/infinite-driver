@@ -88,21 +88,24 @@ export function createAxleRig() {
   const rearShaft = createShaft();
   group.add(front.group, rear.group, transfer, frontShaft.pivot, rearShaft.pivot);
   group.add(frontShaft.jointA, frontShaft.jointB, rearShaft.jointA, rearShaft.jointB);
-  return { group, front, rear, transfer, frontShaft, rearShaft, steering, angle: 0 };
+  return { group, front, rear, transfer, frontShaft, rearShaft, steering, angles: [0, 0] };
 }
 
-// hubs: chassis-local hub centres in wheel order FL, FR, RL, RR. shaftSpin: propshaft rad/s.
+// hubs: chassis-local hub centres in wheel order FL, FR, RL, RR. shaftSpin: [front, rear]
+// propshaft speeds in rad/s.
 // steerQuats: chassis-local knuckle rotations of the front wheels; geometry: steeringGeometry().
 export function updateAxleRig(rig, hubs, shaftSpin, dt, steerQuats = null, geometry = null, steer = 0) {
   const { y: hy } = CAR.halfExtents;
   const inset = CAR.wheelWidth / 2 + 0.08;
   // Transfer case hangs under the frame, a little behind the middle.
   rig.transfer.position.set(-0.1, -hy - 0.08, 0.12);
-  rig.angle += shaftSpin * dt;
+  rig.angles ??= [0, 0];
+  rig.angles[0] += shaftSpin[0] * dt;
+  rig.angles[1] += shaftSpin[1] * dt;
 
-  for (const [axle, left, right, shaft] of [
-    [rig.front, hubs[0], hubs[1], rig.frontShaft],
-    [rig.rear, hubs[2], hubs[3], rig.rearShaft],
+  for (const [axle, left, right, shaft, angle] of [
+    [rig.front, hubs[0], hubs[1], rig.frontShaft, rig.angles[0]],
+    [rig.rear, hubs[2], hubs[3], rig.rearShaft, rig.angles[1]],
   ]) {
     // Housing ends just inboard of each wheel.
     a.set(left.x, left.y, left.z + inset);
@@ -124,11 +127,11 @@ export function updateAxleRig(rig, hubs, shaftSpin, dt, steerQuats = null, geome
     place(shaft.pivot, output, input);
     shaft.pivot.scale.set(1, 1, 1);
     shaft.spinner.scale.set(1, output.distanceTo(input), 1);
-    shaft.spinner.rotation.y = rig.angle;
+    shaft.spinner.rotation.y = angle;
     shaft.jointA.position.copy(output);
     shaft.jointB.position.copy(input);
-    shaft.jointA.rotation.x = rig.angle;
-    shaft.jointB.rotation.x = rig.angle;
+    shaft.jointA.rotation.x = angle;
+    shaft.jointB.rotation.x = angle;
   }
 
   if (steerQuats && geometry) updateSteering(rig.steering, hubs, steerQuats, geometry, steer);

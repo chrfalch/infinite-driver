@@ -14,6 +14,7 @@ import {
   Tracks,
   Deformation,
   Soil,
+  AxleRig,
   Time,
   Vehicle,
   WheelRig,
@@ -182,7 +183,7 @@ async function main() {
     get car() {
       return world.queryFirst(IsPlayer, Vehicle);
     },
-    traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil },
+    traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig },
   };
 }
 

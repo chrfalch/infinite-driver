@@ -17,6 +17,8 @@ const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
 const LINK_INERTIA = 1;
 const STEER_STIFFNESS = 4e5;
 const STEER_DAMPING = 8e3;
+// Brake motor gain (N·m per rad/s); the brake torque caps it, like pad friction.
+const BRAKE_GRIP = 2e5;
 
 // Quaternion helpers on plain {x, y, z, w} objects.
 function rotate(q, v) {
@@ -136,6 +138,11 @@ export class JointedVehicle {
       const seat = solidAxle && !front ? { x: 0, y: 0, z: mount.z } : ORIGIN;
       const axle = world.createImpulseJoint(this.RAPIER.JointData.revolute(seat, ORIGIN, AXLE), knuckle, hub, true);
       axle.setContactsEnabled(false);
+      // The axle joint's motor is the brake: it drives the relative spin to zero with at most the
+      // brake torque, solved inside the physics step, so a braked wheel holds without chatter.
+      axle.configureMotorModel(this.RAPIER.MotorModel.ForceBased);
+      axle.configureMotorVelocity(0, BRAKE_GRIP);
+      axle.setMotorMaxForce(0);
       this.joints.push(axle);
 
       // Right-side tyres are mirror images of the left, like a real pair.
@@ -154,6 +161,7 @@ export class JointedVehicle {
         // The body at the wheel centre, used to measure suspension travel.
         center: solidAxle ? (front ? knuckle : hub) : strut,
         hub,
+        axleJoint: axle,
         slider,
         steer,
         soft,
@@ -342,6 +350,10 @@ export class JointedVehicle {
       this.configureAxleSprings(axle, heave, rollSpeed);
     }
     for (const w of this.wheels) {
+      w.hub.resetTorques(true);
+      w.knuckle.resetTorques(true);
+    }
+    for (const w of this.wheels) {
       // Suspension length from the wheel centre's position in the chassis frame.
       const s = (w.center ?? w.strut).translation();
       const local = rotate(qcInv, { x: s.x - pc.x, y: s.y - pc.y, z: s.z - pc.z });
@@ -362,21 +374,13 @@ export class JointedVehicle {
       w.rotation = -2 * Math.atan2(rel.z, rel.w);
       w.spinRate = -spin; // forward rolling is a negative spin about the axle
 
-      // Engine: forward drive rolls the wheel about -axle. Brakes oppose the spin.
+      // Engine: forward drive rolls the wheel about -axle; its reaction goes into the knuckle (and
+      // through it the chassis). Brakes are the axle joint's motor, capped at the brake torque.
       const radius = this.tire.outerRadius;
-      let torque = -w.engineForce * radius;
-      const brakeTorque = ((w.brakeImpulse ?? 0) / dt) * radius;
-      if (brakeTorque > 0) {
-        // Never more than what stops the wheel this step, so brakes hold instead of flipping sign.
-        const hubInertia = 22 * this.tire.rimRadius * this.tire.rimRadius * 0.5 + this.tire.rubberMass * radius * radius;
-        const stop = (Math.abs(spin) * hubInertia) / dt;
-        torque += -Math.sign(spin) * Math.min(brakeTorque, stop);
-      }
+      const torque = -w.engineForce * radius;
+      w.axleJoint.setMotorMaxForce(((w.brakeImpulse ?? 0) / dt) * radius);
       const t = { x: spinAxis.x * torque, y: spinAxis.y * torque, z: spinAxis.z * torque };
-      w.hub.resetTorques(true);
       w.hub.addTorque(t, true);
-      // The reaction goes into the knuckle (and through it the chassis).
-      w.knuckle.resetTorques(true);
       w.knuckle.addTorque({ x: -t.x, y: -t.y, z: -t.z }, true);
     }
   }
