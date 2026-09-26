@@ -54,3 +54,46 @@ describe('terrain collider', () => {
     expect(createHeightField({ seed: 3, mode: "hills" })(10, 20)).toBe(createHeightField({ seed: 3, mode: "hills" })(10, 20));
   });
 });
+
+describe('canyon terrain', () => {
+  const heightAt = createHeightField({ seed: 1337, mode: 'canyon' });
+
+  it('starts on a road', () => {
+    expect(heightAt.roadDistance(0, 0)).toBeLessThan(0.5);
+  });
+
+  it('keeps roads drivable: gentle along and across the road', () => {
+    // Walk 300 m along the road from the origin and check the grade.
+    let x = 0;
+    let z = 0;
+    let yaw = heightAt.roadHeading(0, 0);
+    let steepest = 0;
+    for (let i = 0; i < 300; i++) {
+      const fx = Math.cos(yaw);
+      const fz = -Math.sin(yaw);
+      const nx = x + fx;
+      const nz = z + fz;
+      steepest = Math.max(steepest, Math.abs(heightAt(nx, nz) - heightAt(x, z)));
+      // Across the road: 2 m either side of the centre line.
+      const side = Math.abs(heightAt(nx - fz * 2, nz + fx * 2) - heightAt(nx + fz * 2, nz - fx * 2)) / 4;
+      expect(side).toBeLessThan(0.12);
+      x = nx;
+      z = nz;
+      // Follow the road's heading, keeping the direction of travel.
+      const h = heightAt.roadHeading(x, z);
+      yaw = Math.cos(h - yaw) >= 0 ? h : h + Math.PI;
+      expect(heightAt.roadDistance(x, z)).toBeLessThan(1.5);
+    }
+    expect(steepest).toBeLessThan(0.15); // under 15 % grade per metre
+  });
+
+  it('has cliffs away from the roads', () => {
+    let tallest = 0;
+    for (let x = -300; x <= 300; x += 10) for (let z = -300; z <= 300; z += 10) tallest = Math.max(tallest, heightAt(x, z));
+    expect(tallest).toBeGreaterThan(25);
+  });
+
+  it('is deterministic', () => {
+    expect(createHeightField({ seed: 5, mode: 'canyon' })(123, -45)).toBe(createHeightField({ seed: 5, mode: 'canyon' })(123, -45));
+  });
+});

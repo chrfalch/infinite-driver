@@ -1,4 +1,6 @@
-import { CameraTarget, Render, Time, Transform, Vehicle } from '../ecs/traits.js';
+import { CameraTarget, HeightField, Render, Time, Transform, Vehicle } from '../ecs/traits.js';
+import { HORIZON, createBackdrop } from '../render/backdrop.js';
+import { VIEW_HEIGHT } from '../render/scene.js';
 
 // True isometric by default: the camera looks down the (-1, -1, -1) diagonal (azimuth 45°,
 // elevation 35.3°). ?az=<degrees> starts the view turned around the car. Dragging with the mouse
@@ -10,6 +12,10 @@ const MIN_ELEVATION = (12 * Math.PI) / 180;
 const MAX_ELEVATION = (88 * Math.PI) / 180;
 const view = { azimuth: ISO_AZIMUTH, elevation: ISO_ELEVATION };
 const offset = { x: 0, y: 0, z: 0 };
+// Below this elevation the view switches to perspective, with a horizon, sky and backdrop.
+const PERSPECTIVE_BELOW = (30 * Math.PI) / 180;
+let backdrop = null;
+let orthoFog = null;
 function updateOffset() {
   const h = DISTANCE * Math.cos(view.elevation);
   offset.x = h * Math.cos(view.azimuth);
@@ -116,6 +122,37 @@ export function followCamera(world) {
 
   camera.position.set(state.x + offset.x, state.y + offset.y, state.z + offset.z);
   camera.lookAt(state.x, state.y, state.z);
+
+  // Low views: a perspective camera framing the same area around the car (same visible height at
+  // the car), kept above the ground, with haze and the backdrop on the horizon.
+  const render = world.get(Render);
+  const low = view.elevation < PERSPECTIVE_BELOW;
+  backdrop ??= createBackdrop(render.scene);
+  orthoFog ??= { color: render.scene.fog.color.clone(), near: render.scene.fog.near, far: render.scene.fog.far, background: render.scene.background };
+  if (low) {
+    const persp = render.perspective;
+    const d = VIEW_HEIGHT / state.zoom / 2 / Math.tan((persp.fov * Math.PI) / 360);
+    const inv = 1 / DISTANCE;
+    let px = state.x + offset.x * inv * d;
+    let py = state.y + offset.y * inv * d;
+    let pz = state.z + offset.z * inv * d;
+    const heightAt = world.get(HeightField)?.heightAt;
+    if (heightAt) py = Math.max(py, heightAt(px, pz) + 1.5);
+    persp.position.set(px, py, pz);
+    persp.lookAt(state.x, state.y + 0.6, state.z);
+    render.activeCamera = persp;
+    render.scene.fog.color.copy(HORIZON);
+    render.scene.fog.near = 80;
+    render.scene.fog.far = 210;
+    render.scene.background = HORIZON;
+  } else {
+    render.activeCamera = camera;
+    render.scene.fog.color.copy(orthoFog.color);
+    render.scene.fog.near = orthoFog.near;
+    render.scene.fog.far = orthoFog.far;
+    render.scene.background = orthoFog.background;
+  }
+  backdrop.update(render.activeCamera, state, low);
 
   // The sun and its shadow box travel with the car.
   sun.target.position.set(state.x, state.y, state.z);

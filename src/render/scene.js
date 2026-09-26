@@ -4,6 +4,7 @@ import {
   Fog,
   HemisphereLight,
   OrthographicCamera,
+  PerspectiveCamera,
   PCFSoftShadowMap,
   Scene,
   WebGPURenderer,
@@ -37,6 +38,9 @@ export async function createRenderer(container) {
   scene.add(sun, sun.target);
 
   const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+  // Low, tilted views switch to a perspective camera so the horizon and backdrop show (see
+  // followCamera); the orthographic camera keeps the isometric look for everything else.
+  const perspective = new PerspectiveCamera(38, 1, 0.3, 2500);
 
   // The shadow box follows the car (see followCamera) and is only as big as the visible ground:
   // the circle around the screen's footprint on the ground, which is stretched in depth because the
@@ -68,6 +72,8 @@ export async function createRenderer(container) {
     camera.top = VIEW_HEIGHT / 2;
     camera.bottom = -VIEW_HEIGHT / 2;
     camera.updateProjectionMatrix();
+    perspective.aspect = aspect;
+    perspective.updateProjectionMatrix();
     hudCamera.right = w;
     hudCamera.bottom = -h;
     hudCamera.updateProjectionMatrix();
@@ -75,5 +81,5 @@ export async function createRenderer(container) {
   resize();
   window.addEventListener('resize', resize);
 
-  return { renderer, scene, camera, sun, hudScene, hudCamera, resize };
+  return { renderer, scene, camera, perspective, activeCamera: camera, sun, hudScene, hudCamera, resize };
 }

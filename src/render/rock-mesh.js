@@ -4,6 +4,9 @@ export const rockMaterial = new MeshStandardMaterial({ vertexColors: true, rough
 
 const LIGHT = new Color('#a39a8c');
 const DARK = new Color('#6f675d');
+// Red sandstone for the canyon.
+const RED_LIGHT = new Color('#cf8d62');
+const RED_DARK = new Color('#8f4a2d');
 const tmp = new Color();
 
 // All rocks of a chunk merged into one flat-shaded mesh.
@@ -14,7 +17,8 @@ export function createRocksMesh(rocks) {
   const colors = new Float32Array(triangles * 9);
   let o = 0;
   for (const rock of rocks) {
-    tmp.copy(DARK).lerp(LIGHT, rock.tint);
+    if (rock.red) tmp.copy(RED_DARK).lerp(RED_LIGHT, rock.tint);
+    else tmp.copy(DARK).lerp(LIGHT, rock.tint);
     for (const face of rock.faces) {
       for (const vi of face) {
         positions[o] = rock.vertices[vi * 3];
