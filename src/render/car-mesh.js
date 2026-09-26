@@ -13,7 +13,6 @@ import { CAR } from '../vehicle/config.js';
 import { wheelMount } from '../vehicle/physics.js';
 import { createAxleRig } from './axles.js';
 import { createTubeChassis } from './tube-chassis.js';
-import { createV8 } from './v8-engine.js';
 import { mergeByMaterial } from './merge-geometry.js';
 import { frameGeometry, suspensionMounts } from '../vehicle/frame-geometry.js';
 import { rimInnerFace } from './wheel-inset.js';
@@ -84,8 +83,6 @@ export function createCarMesh() {
   const body = new Group();
   body.name = 'tube chassis';
   body.add(createTubeChassis(0).group);
-  // V8 in the engine bay behind the seats, gearbox over the rear axle, radiator at the back.
-  body.add(createV8({ x: -0.97 }));
 
   // Bucket seats on the floor, driver on the left (-z): cushion, back, and side bolsters.
   for (const z of [-0.3, 0.3]) {
