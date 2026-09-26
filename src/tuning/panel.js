@@ -1,6 +1,7 @@
 import GUI from 'lil-gui';
 import { CONTROLS, DEFAULT_CONTROLS, saveControls } from '../controls.js';
-import { Deformation, Input, IsPlayer, Physics, Tracks, Vehicle } from '../ecs/traits.js';
+import { Deformation, Input, IsPlayer, Physics, Tracks, Vehicle, View } from '../ecs/traits.js';
+import { paint } from '../render/car-mesh.js';
 import { CAR, DEFAULT_CAR, resetCar, saveCar } from '../vehicle/config.js';
 import {
   GPU_TIRE,
@@ -185,6 +186,14 @@ export function createTuningPanel(world, { heightAt }) {
       rebuildCar(world);
     });
   controls
+    .add(CONTROLS, 'showBody')
+    .name('Show body (off = see axles)')
+    .onChange(() => {
+      saveControls();
+      applyBodyVisibility(world);
+    });
+  applyBodyVisibility(world);
+  controls
     .add(CONTROLS, 'performance')
     .name('Performance preset')
     .onChange(() => {
@@ -351,4 +360,13 @@ function addGpuTireFolder(gui, world, scheduleRebuild) {
   }
   folder.close();
   return folder;
+}
+
+// Body panels share the paint material; hiding them shows the frame and running gear.
+export function applyBodyVisibility(world) {
+  const car = world.queryFirst(IsPlayer, Vehicle);
+  const object = car?.get(View)?.object;
+  object?.traverse((o) => {
+    if (o.isMesh && o.material === paint) o.visible = CONTROLS.showBody;
+  });
 }

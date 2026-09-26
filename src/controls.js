@@ -7,6 +7,8 @@ export const DEFAULT_CONTROLS = Object.freeze({
   latchAccelerator: false,
   // Cheaper tyre simulation: fewer solver passes and a coarser mesh.
   performance: false,
+  // Hide the body panels to see the frame, axles, and suspension.
+  showBody: true,
 });
 
 function load() {

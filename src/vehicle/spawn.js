@@ -4,6 +4,7 @@ import {
   Physics,
   Render,
   RigidBody,
+  AxleRig,
   SoftTireView,
   SteeringWheel,
   Transform,
@@ -12,7 +13,7 @@ import {
   WheelOf,
   WheelRig,
 } from '../ecs/traits.js';
-import { createCarMesh, createWheelRig } from '../render/car-mesh.js';
+import { createCarMesh, createWheelRig, paint } from '../render/car-mesh.js';
 import { createSoftTireMesh } from '../render/soft-tire-mesh.js';
 import { CONTROLS } from '../controls.js';
 import { effectiveGpuTire, effectiveTire, GPU_TIRE, TIRE } from '../tire/config.js';
@@ -47,7 +48,10 @@ export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, 
   body.setLinvel(linvel, true);
   body.setAngvel(angvel, true);
 
-  const { object, steeringWheel } = createCarMesh();
+  const { object, steeringWheel, axles } = createCarMesh();
+  object.traverse((o) => {
+    if (o.isMesh && o.material === paint) o.visible = CONTROLS.showBody;
+  });
   scene.add(object);
   const car = world.spawn(
     IsPlayer,
@@ -58,6 +62,7 @@ export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, 
     Vehicle({ controller, body, drivetrain: drivetrain ?? new Drivetrain(DRIVETRAIN), steer, speed: 0 }),
     View({ object }),
     SteeringWheel({ object: steeringWheel }),
+    AxleRig({ rig: axles }),
   );
   WHEELS.forEach((_, index) => {
     const rig = createWheelRig(index, { softTire: soft ? TIRE : null });

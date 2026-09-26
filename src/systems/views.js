@@ -1,5 +1,7 @@
 import { Vector3 } from 'three/webgpu';
-import { SoftTireView, SteeringWheel, Transform, Vehicle, View, WheelOf, WheelRig } from '../ecs/traits.js';
+import { AxleRig, SoftTireView, SteeringWheel, Time, Transform, Vehicle, View, WheelOf, WheelRig } from '../ecs/traits.js';
+import { updateAxleRig } from '../render/axles.js';
+import { DRIVETRAIN } from '../vehicle/config.js';
 import { updateGpuTireMesh, updateSoftTireMesh } from '../render/soft-tire-mesh.js';
 import { CAR } from '../vehicle/config.js';
 
@@ -84,5 +86,23 @@ export function syncSoftTires(world) {
   world.query(SoftTireView).updateEach(([view]) => {
     if (view.gpu) updateGpuTireMesh(view.object, view.gpu, view.index);
     else updateSoftTireMesh(view.object, view.soft);
+  });
+}
+
+// Axles and propshafts follow the hub positions set by syncWheels.
+export function syncAxles(world) {
+  const { delta } = world.get(Time);
+  world.query(Vehicle, AxleRig).forEach((car) => {
+    const hubs = [];
+    world.query(WheelOf(car), WheelRig).forEach((wheel) => {
+      const { index } = wheel.get(WheelOf(car));
+      hubs[index] = wheel.get(WheelRig).rig.hub.position;
+    });
+    if (hubs.length < 4 || hubs.includes(undefined)) return;
+    const { controller, speed } = car.get(Vehicle);
+    // Propshafts turn at wheel speed times the final drive.
+    const radius = controller.tire?.outerRadius ?? CAR.wheelRadius;
+    const wheelW = controller.wheelSpin ? [0, 1, 2, 3].reduce((s, i) => s + controller.wheelSpin(i), 0) / 4 : speed / radius;
+    updateAxleRig(car.get(AxleRig).rig, hubs, wheelW * DRIVETRAIN.finalDrive, delta);
   });
 }

@@ -11,8 +11,9 @@ import {
 } from 'three/webgpu';
 import { CAR } from '../vehicle/config.js';
 import { wheelMount } from '../vehicle/physics.js';
+import { createAxleRig } from './axles.js';
 
-const paint = new MeshStandardMaterial({ color: '#d9683f', roughness: 0.55, metalness: 0.05 });
+export const paint = new MeshStandardMaterial({ color: '#d9683f', roughness: 0.55, metalness: 0.05 });
 const frame = new MeshStandardMaterial({ color: '#2d2f31', roughness: 0.7, metalness: 0.3 });
 const cage = new MeshStandardMaterial({ color: '#3a3c3e', roughness: 0.5, metalness: 0.5 });
 const seat = new MeshStandardMaterial({ color: '#4a4136', roughness: 0.9 });
@@ -113,7 +114,10 @@ export function createCarMesh() {
   spare.position.set(-hx - 0.22, tubBottom + 0.55, 0);
   car.add(spare);
 
-  return { object: car, steeringWheel };
+  const axles = createAxleRig();
+  car.add(axles.group);
+
+  return { object: car, steeringWheel, axles };
 }
 
 // The wheel rim with lug nuts; a spoke pair makes the spin visible when the tyre is soft.
