@@ -7,6 +7,13 @@ const DOWN = { x: 0, y: -1, z: 0 };
 const UP = { x: 0, y: 1, z: 0 };
 const AXLE = { x: 0, y: 0, z: 1 };
 const ORIGIN = { x: 0, y: 0, z: 0 };
+const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
+// Rotational inertia (kg·m²) of the strut and knuckle links. A point-like link is far lighter
+// than the hub and tyre it carries, and the joint solver then cannot pass the steering torque
+// through it: the knuckle slips and one front wheel barely steers. Realistic uprights fix that.
+const LINK_INERTIA = 1;
+const STEER_STIFFNESS = 4e5;
+const STEER_DAMPING = 8e3;
 
 // Quaternion helpers on plain {x, y, z, w} objects.
 function rotate(q, v) {
@@ -58,7 +65,9 @@ export class JointedVehicle {
           this.RAPIER.RigidBodyDesc.dynamic().setTranslation(at.x, at.y, at.z).setRotation(q).setCanSleep(false),
         );
         world.createCollider(
-          this.RAPIER.ColliderDesc.ball(0.05).setMass(mass).setCollisionGroups(noCollide),
+          this.RAPIER.ColliderDesc.ball(0.05)
+            .setMassProperties(mass, ORIGIN, { x: LINK_INERTIA, y: LINK_INERTIA, z: LINK_INERTIA }, IDENTITY)
+            .setCollisionGroups(noCollide),
           body,
         );
         this.bodies.push(body);
@@ -136,7 +145,7 @@ export class JointedVehicle {
     for (const w of this.wheels) {
       w.slider.setLimits(car.suspensionRestLength - car.maxSuspensionTravel, car.suspensionRestLength + 0.08);
       w.slider.configureMotorPosition(car.suspensionRestLength, k, car.suspensionCompression * car.mass);
-      w.steer?.configureMotorPosition(w.steering, 4e5, 8e3);
+      w.steer?.configureMotorPosition(w.steering, STEER_STIFFNESS, STEER_DAMPING);
     }
   }
 
@@ -156,10 +165,29 @@ export class JointedVehicle {
     const w = this.wheels[i];
     if (!w.steer || Math.abs(w.steering - angle) < 1e-5) return;
     w.steering = angle;
-    w.steer.configureMotorPosition(angle, 4e5, 8e3);
+    w.steer.configureMotorPosition(angle, STEER_STIFFNESS, STEER_DAMPING);
   }
+  // The measured steering angle of the knuckle on its strut, not the commanded one.
   wheelSteering(i) {
-    return this.wheels[i].steering;
+    const w = this.wheels[i];
+    if (!w.steer) return 0;
+    const rel = multiply(conjugate(w.strut.rotation()), w.knuckle.rotation());
+    return 2 * Math.atan2(rel.y, rel.w);
+  }
+  // The hub's pose in the chassis frame, read from the physics bodies, so the drawn rim always
+  // sits exactly where the soft tyre's bead is pinned: `position` of the hub, `steer` (the
+  // knuckle's rotation in the chassis frame), and `spin` (the hub's rotation on the knuckle).
+  wheelHubPose(i) {
+    const w = this.wheels[i];
+    const qcInv = conjugate(this.body.rotation());
+    const pc = this.body.translation();
+    const h = w.hub.translation();
+    const kq = w.knuckle.rotation();
+    return {
+      position: rotate(qcInv, { x: h.x - pc.x, y: h.y - pc.y, z: h.z - pc.z }),
+      steer: multiply(qcInv, kq),
+      spin: multiply(conjugate(kq), w.hub.rotation()),
+    };
   }
   setWheelEngineForce(i, force) {
     this.wheels[i].engineForce = force;

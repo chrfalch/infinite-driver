@@ -35,12 +35,22 @@ export function syncWheels(world) {
     const { rig } = entity.get(WheelRig);
     const { mount, side } = rig;
 
-    const suspension = controller.wheelSuspensionLength(index) ?? CAR.suspensionRestLength;
-    const hubY = mount.y - suspension;
-    rig.hub.position.set(mount.x, hubY, mount.z);
-    rig.steer.rotation.y = controller.wheelSteering(index) ?? 0;
-    // Spin around the axle (local z). Forward rolling is a negative rotation about +z.
-    rig.spin.rotation.z = -(controller.wheelRotation(index) ?? 0);
+    let hubY;
+    if (controller.wheelHubPose) {
+      // Jointed car: copy the physics hub's pose so the rim stays inside its soft tyre.
+      const { position: p, steer: s, spin: r } = controller.wheelHubPose(index);
+      hubY = p.y;
+      rig.hub.position.set(p.x, p.y, p.z);
+      rig.steer.quaternion.set(s.x, s.y, s.z, s.w);
+      rig.spin.quaternion.set(r.x, r.y, r.z, r.w);
+    } else {
+      const suspension = controller.wheelSuspensionLength(index) ?? CAR.suspensionRestLength;
+      hubY = mount.y - suspension;
+      rig.hub.position.set(mount.x, hubY, mount.z);
+      rig.steer.rotation.y = controller.wheelSteering(index) ?? 0;
+      // Spin around the axle (local z). Forward rolling is a negative rotation about +z.
+      rig.spin.rotation.z = -(controller.wheelRotation(index) ?? 0);
+    }
 
     // Control arms run from the frame to the inner face of the hub.
     const hubInnerZ = mount.z - side * (CAR.wheelWidth / 2 + 0.06);

@@ -91,7 +91,8 @@ async function main() {
       text: perfText,
       format: (v) => {
         const tyres = v.controller.wheels ? 'soft tyres' : 'rigid wheels';
-        return `${tyres}    physics ${world.get(Physics).stepMs.toFixed(1)} ms/step`;
+        const gpu = render.renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2 (no WebGPU)';
+        return `${tyres}    physics ${world.get(Physics).stepMs.toFixed(1)} ms/step    ${gpu}`;
       },
     }),
   );
