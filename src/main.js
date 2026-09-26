@@ -47,6 +47,9 @@ async function main() {
   const heightAt = createHeightField({ mode });
   const physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   physicsWorld.timestep = 1 / 120;
+  // The jointed car is a chain of light links under a heavy chassis; Rapier's default 4 solver
+  // iterations leave it leaning and trembling at rest. 8 settles it level and still.
+  physicsWorld.numSolverIterations = 8;
 
   world.add(Time, Input, TerrainStreaming);
   world.add(Physics({ rapier: RAPIER, world: physicsWorld, accumulator: 0, step: 1 / 120, stepMs: 0 }));

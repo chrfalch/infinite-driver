@@ -44,6 +44,14 @@ function multiply(a, b) {
 // A fully jointed car whose hubs carry soft-body tyres. It exposes the subset of Rapier's
 // DynamicRayCastVehicleController API that the rest of the game uses, so both cars are
 // driven, drawn, and tuned by the same systems.
+// Each axle's springs and dampers are rated for the load it carries. The centre of mass sits
+// forward of the middle, so equal springs would leave the nose low; scaled like this, both ends
+// compress the same and the car sits level. Returns the factor on the per-corner rate.
+function axleLoadFactor(front, car) {
+  const share = 0.5 + (car.centerOfMass?.x ?? 0) / car.wheelBase;
+  return 2 * (front ? share : 1 - share);
+}
+
 export class JointedVehicle {
   constructor(RAPIER, world, chassis, car = CAR, tire = TIRE, { gpuTires = null } = {}) {
     this.RAPIER = RAPIER;
@@ -195,7 +203,11 @@ export class JointedVehicle {
       this.bodies.push(b);
       return b;
     };
-    const carrier = make(10, { x: 2, y: 2, z: 2 });
+    // The carrier turns with the chassis (the slider locks its rotation), so its inertia only adds
+    // to the chassis'. A tiny value leaves a 1500:2 inertia ratio across the slider, and Rapier's
+    // solver then settles with the car leaning about 1.7° at rest; 200 is still small next to the
+    // chassis but lets the joints converge.
+    const carrier = make(10, { x: 200, y: 200, z: 200 });
     const track = Math.abs(ma.z - mb.z);
     const beamI = (60 * track * track) / 12;
     const beam = make(60, { x: beamI, y: beamI, z: 1.5 });
@@ -212,15 +224,16 @@ export class JointedVehicle {
     roll.setContactsEnabled(false);
     roll.configureMotorModel(RAPIER.MotorModel.ForceBased);
     this.joints.push(slider, roll);
-    return { beam, carrier, slider, roll, mid, springSpan: track * 0.8 * Math.sqrt(car.rollStiffness ?? 1), length: car.suspensionRestLength, rollAngle: 0 };
+    return { beam, carrier, slider, roll, mid, front: WHEELS[a].front, springSpan: track * 0.8 * Math.sqrt(car.rollStiffness ?? 1), length: car.suspensionRestLength, rollAngle: 0 };
   }
 
   applySpringSettings() {
     const { car } = this;
     const k = car.suspensionStiffness * car.mass; // N/m per corner, as Rapier's raycast car scales it
     for (const w of this.wheels) {
+      const load = axleLoadFactor(w.front, car);
       w.slider?.setLimits(car.suspensionRestLength - car.maxSuspensionTravel, car.suspensionRestLength + 0.08);
-      w.slider?.configureMotorPosition(car.suspensionRestLength, k, car.suspensionCompression * car.mass);
+      w.slider?.configureMotorPosition(car.suspensionRestLength, k * load, car.suspensionCompression * car.mass * load);
       w.steer?.configureMotorPosition(w.steering, STEER_STIFFNESS, STEER_DAMPING);
     }
     for (const axle of this.axles) {
@@ -234,10 +247,11 @@ export class JointedVehicle {
   // Two corner springs as one vertical spring plus a roll spring; damping picks bump or rebound.
   configureAxleSprings(axle, heaveSpeed, rollSpeed) {
     const { car } = this;
-    const k = car.suspensionStiffness * car.mass;
+    const load = axleLoadFactor(axle.front, car);
+    const k = car.suspensionStiffness * car.mass * load;
     const half = axle.springSpan / 2;
-    const heaveDamp = (heaveSpeed < 0 ? car.suspensionCompression : car.suspensionRelaxation) * car.mass;
-    const rollDamp = (Math.abs(rollSpeed) > 0 ? (car.suspensionCompression + car.suspensionRelaxation) / 2 : car.suspensionCompression) * car.mass;
+    const heaveDamp = (heaveSpeed < 0 ? car.suspensionCompression : car.suspensionRelaxation) * car.mass * load;
+    const rollDamp = (Math.abs(rollSpeed) > 0 ? (car.suspensionCompression + car.suspensionRelaxation) / 2 : car.suspensionCompression) * car.mass * load;
     axle.slider.configureMotorPosition(car.suspensionRestLength, 2 * k, 2 * heaveDamp);
     axle.roll.configureMotorPosition(0, 2 * k * half * half, 2 * rollDamp * half * half);
   }
@@ -370,8 +384,9 @@ export class JointedVehicle {
       const speed = (length - w.suspensionLength) / dt;
       w.suspensionLength = length;
       // Bump and rebound damping differ, so pick by direction of travel.
-      const damping = (speed < 0 ? car.suspensionCompression : car.suspensionRelaxation) * car.mass;
-      w.slider?.configureMotorPosition(car.suspensionRestLength, car.suspensionStiffness * car.mass, damping);
+      const load = axleLoadFactor(w.front, car);
+      const damping = (speed < 0 ? car.suspensionCompression : car.suspensionRelaxation) * car.mass * load;
+      w.slider?.configureMotorPosition(car.suspensionRestLength, car.suspensionStiffness * car.mass * load, damping);
 
       // Hub spin relative to its knuckle, about the axle.
       const rel = multiply(conjugate(w.knuckle.rotation()), w.hub.rotation());

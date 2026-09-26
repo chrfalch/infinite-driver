@@ -127,7 +127,8 @@ export function rebuildCar(world) {
 
 // How high to place a new car so it drops gently onto its wheels.
 export function startHeight() {
-  return CAR.softTires ? softCarRideHeight() + 0.15 : 1.5;
+  // Just above ride height, so the car settles instead of landing.
+  return CAR.softTires ? softCarRideHeight() + 0.03 : 1.5;
 }
 
 // Puts the car back on its wheels a little above the ground where it is.

@@ -217,12 +217,15 @@ export class GpuTireSolver {
       let depth = groundHeight(x.x, x.z) + params.radius - x.y;
       if (depth > 0.0) {
         var push = select(params.groundStiffness, params.soilStiffness, soft) * depth;
-        if (soft) {
+        if (soft && vTrial.y > 0.0) {
           // Soil pushes back fully while compressed, only partly as the tread lifts (it absorbs energy).
-          if (vTrial.y > 0.0) { push *= params.soilRebound; }
-        } else {
-          push -= params.groundDamping * vTrial.y;
+          push *= params.soilRebound;
         }
+        // Normal damping, integrated implicitly (stable at any strength): the tread settles on the
+        // ground instead of bouncing in and out of contact between substeps.
+        let c = params.groundDamping;
+        let vn = (vTrial.y + push * dt / m) / (1.0 + c * dt / m);
+        push = (vn - vTrial.y) * m / dt;
         // Ground friction is applied after the constraint passes (see the finish step), where the
         // whole substep's sliding is known.
         f.y += max(push, 0.0);
@@ -238,8 +241,10 @@ export class GpuTireSolver {
           if (dist > best) { best = dist; n = plane.xyz; }
         }
         if (best < params.radius) {
-          let vn = dot(vTrial + f * (dt / m), n);
-          let push = max(params.groundStiffness * (params.radius - best) - params.groundDamping * vn, 0.0);
+          let vn0 = dot(vTrial + f * (dt / m), n);
+          let spring = params.groundStiffness * (params.radius - best);
+          let vn = (vn0 + spring * dt / m) / (1.0 + params.groundDamping * dt / m);
+          let push = max((vn - vn0) * m / dt, 0.0);
           let vRel = vTrial + f * (dt / m);
           let vt = vRel - n * dot(vRel, n);
           let speed = length(vt);
@@ -477,7 +482,8 @@ export class GpuTireSolver {
       pressureLead: s.pressureLead ?? 1,
       // Hard ground and rocks: the stiffest contact spring the substep allows, lightly damped.
       groundStiffness: (3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2),
-      groundDamping: 0.6 * Math.sqrt(((3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)) * (s.rubberMass / this.perTire)),
+      // Critically damped contact (2·√(k·m)); the kernel integrates it implicitly.
+      groundDamping: 2 * Math.sqrt(((3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)) * (s.rubberMass / this.perTire)),
       maxSink: s.maxSink ?? 0.25,
       groundOriginX: this.groundOrigin.x,
       groundOriginZ: this.groundOrigin.z,
