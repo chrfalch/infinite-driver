@@ -60,8 +60,9 @@ export function updateSoil(world) {
     const slip = tread - ground;
     const rate = softness * (Math.max(0, Math.abs(slip) - 1.0) * 45 + Math.max(0, Math.abs(ground) - 3) * 1.2);
     soil.carry[i] += rate * delta;
-    // Soil flies opposite to the tread's motion at the contact patch.
-    const back = slip >= 0 ? -1 : 1;
+    // Soil leaves opposite to the way the wheel rolls: behind the car going forward, in front of
+    // it when reversing.
+    const back = tread > 0 ? -1 : 1;
     terrainColorAt(heightAt, contact.x, contact.z, tmp);
     while (soil.carry[i] >= 1) {
       soil.carry[i] -= 1;
