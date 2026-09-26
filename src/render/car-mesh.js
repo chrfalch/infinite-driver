@@ -15,6 +15,7 @@ import { createAxleRig } from './axles.js';
 import { createFrameMesh } from './frame-mesh.js';
 import { mergeByMaterial } from './merge-geometry.js';
 import { frameGeometry, suspensionMounts } from '../vehicle/frame-geometry.js';
+import { rimInnerFace } from './wheel-inset.js';
 
 const frame = new MeshStandardMaterial({ color: '#2d2f31', roughness: 0.7, metalness: 0.3 });
 const seat = new MeshStandardMaterial({ color: '#4a4136', roughness: 0.9 });
@@ -202,7 +203,6 @@ const springGeometry = createSpringGeometry();
 export function createWheelRig(index, { softTire = null } = {}) {
   const mount = wheelMount(index);
   const side = Math.sign(mount.z);
-  const w = CAR.wheelWidth;
 
   const root = new Group();
 
@@ -213,7 +213,7 @@ export function createWheelRig(index, { softTire = null } = {}) {
   const spin = mergeByMaterial(softTire ? createRim(softTire.rimRadius, softTire.width * 0.85, true) : createTyre());
   steer.add(spin);
   // Knuckle stays with the steering but not the spin.
-  steer.add(box(0.14, 0.26, 0.08, frame, 0, 0, -side * (w / 2 + 0.06)));
+  steer.add(box(0.14, 0.26, 0.08, frame, 0, 0, -side * (rimInnerFace() + 0.02)));
   hub.add(steer);
   root.add(hub);
 

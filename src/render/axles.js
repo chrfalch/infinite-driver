@@ -1,5 +1,6 @@
 import { BoxGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, SphereGeometry, Vector3 } from 'three/webgpu';
 import { CAR } from '../vehicle/config.js';
+import { rimInnerFace } from './wheel-inset.js';
 
 const housing = new MeshStandardMaterial({ color: '#34373a', roughness: 0.55, metalness: 0.5 });
 const shaftMat = new MeshStandardMaterial({ color: '#8d8f91', roughness: 0.35, metalness: 0.8 });
@@ -102,7 +103,7 @@ export function createAxleRig() {
 // steerQuats: chassis-local knuckle rotations of the front wheels; geometry: steeringGeometry().
 export function updateAxleRig(rig, hubs, shaftSpin, dt, steerQuats = null, geometry = null, steer = 0) {
   const { y: hy } = CAR.halfExtents;
-  const inset = CAR.wheelWidth / 2 + 0.08;
+  const inset = rimInnerFace() + 0.03;
   // Transfer case hangs under the frame, a little behind the middle.
   rig.transfer.position.set(-0.1, -hy - 0.08, 0.12);
   rig.angles ??= [0, 0];
@@ -155,7 +156,7 @@ function updateSteering(st, hubs, steerQuats, geo, steer) {
     const hub = hubs[i];
     const side = Math.sign(hub.z) || (i === 0 ? -1 : 1);
     const arm = new Vector3(-0.2, -0.04, -side * 0.12).applyQuaternion(steerQuats[k]);
-    const base = new Vector3(hub.x, hub.y - 0.02, hub.z - side * (CAR.wheelWidth / 2 + 0.06));
+    const base = new Vector3(hub.x, hub.y - 0.02, hub.z - side * (rimInnerFace() + 0.02));
     const tip = base.clone().add(arm);
     place(st.arms[k], base, tip);
     tips.push(tip);

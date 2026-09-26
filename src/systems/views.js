@@ -5,6 +5,7 @@ import { steeringGeometry } from '../render/car-mesh.js';
 import { DRIVETRAIN } from '../vehicle/config.js';
 import { updateGpuTireMesh, updateSoftTireMesh } from '../render/soft-tire-mesh.js';
 import { CAR } from '../vehicle/config.js';
+import { rimInnerFace } from '../render/wheel-inset.js';
 
 export function syncViews(world) {
   world.query(Transform, View).updateEach(([transform, view]) => {
@@ -65,7 +66,7 @@ export function syncWheels(world) {
       a.set(rig.shockTop.x, hubY + 0.06, rig.shockTop.z * 0.94);
     } else {
       // Independent: A-arms from the frame brackets to the inner face of the hub.
-      const hubInnerZ = mount.z - side * (CAR.wheelWidth / 2 + 0.06);
+      const hubInnerZ = mount.z - side * (rimInnerFace() + 0.03);
       a.set(mount.x, hubY + 0.12, hubInnerZ);
       span(rig.upperArm, rig.upperPivot, a, X);
       b.set(mount.x, hubY - 0.12, hubInnerZ);
