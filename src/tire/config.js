@@ -62,14 +62,15 @@ export const DEFAULT_GPU_TIRE = Object.freeze({
   substeps: 4,
   iterations: 8,
   cordStiffness: 1.0, // per Jacobi pass, 0..1
-  shearStiffness: 0.5,
-  bendStiffness: 0.15,
-  shapeStiffness: 0.05, // pull toward the moulded shape per pass
+  shearStiffness: 1.0,
+  bendStiffness: 0.6,
+  shapeStiffness: 0.3, // pull toward the moulded shape per pass (across the tread)
   beadPull: 0.5, // fraction of the gap to the rim seat closed per pass
-  damping: 6, // 1/s
+  damping: 2, // 1/s, relative to the wheel's rigid motion
   friction: 1.1,
   contactRadius: 0.02,
   relaxation: 1.0,
+  pressureLead: 1.0, // substeps of spin the pressure normal is turned ahead (cancels spin drag)
   rubberMass: 12,
 });
 

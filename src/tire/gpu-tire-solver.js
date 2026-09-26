@@ -34,6 +34,9 @@ const Params = d.struct({
   radius: d.f32,
   relaxation: d.f32,
   soilStiffness: d.f32, // N/m per particle; 0 = hard ground
+  pressureLead: d.f32, // substeps of wheel spin the pressure normal is turned ahead
+  groundStiffness: d.f32, // N/m per particle, hard ground and rocks
+  groundDamping: d.f32, // N·s/m per particle
   soilRebound: d.f32, // fraction of soil push kept while the tread lifts off
   maxSink: d.f32,
   groundOriginX: d.f32,
@@ -115,6 +118,8 @@ export class GpuTireSolver {
     const A = { x: wg(), y: wg(), z: wg() };
     const B = { x: wg(), y: wg(), z: wg() };
     const sets = { ax: A.x, ay: A.y, az: A.z, bx: B.x, by: B.y, bz: B.z };
+    const dbgA = tgpu.workgroupVar(d.arrayOf(d.f32, WG));
+    const dbgB = tgpu.workgroupVar(d.arrayOf(d.f32, WG));
     const getP = tgpu.fn([d.u32, d.u32], d.vec3f)/* wgsl */ `(which, k) {
       if (which == 0u) { return vec3f(ax[k], ay[k], az[k]); }
       return vec3f(bx[k], by[k], bz[k]);
@@ -168,8 +173,8 @@ export class GpuTireSolver {
       return h11 + (h01 - h11) * (1.0 - fx) + (h10 - h11) * (1.0 - fz);
     }`.$uses({ params: this.params, ground: this.ground });
 
-    // Distance constraints, shape memory, and contacts for particle k of tyre t (one Jacobi pass).
-    const relax = tgpu.fn([d.u32, d.u32, d.u32, d.u32, d.vec3f, d.f32], d.vec3f)/* wgsl */ `(t, k, src, substep, before, pen0) {
+    // Distance constraints for particle k of tyre t (one Jacobi pass).
+    const constrain = tgpu.fn([d.u32, d.u32, d.u32], d.vec3f)/* wgsl */ `(t, k, src) {
       let u = i32(k / params.nv);
       let v = i32(k % params.nv);
       let x = getP(src, k);
@@ -199,47 +204,61 @@ export class GpuTireSolver {
           weight += s;
         }
       }
-      var p = x + params.relaxation * delta / max(weight * 0.25, 1.0);
-      if (params.shapeStiffness > 0.0) {
-        p += params.shapeStiffness * (hubPoint(t, k, params.dt * f32(substep + 1u)) - p);
-      }
-      let surface = groundHeight(p.x, p.z) + params.radius;
-      // On soft ground the hard floor is maxSink below the surface; the soil spring does the rest.
-      var g = surface;
-      if (params.soilStiffness > 0.0) { g = surface - params.maxSink; }
-      // A particle that was pushed into the ground this substep keeps its grip even if a
-      // constraint lifts it slightly in a later pass; otherwise it could slide freely.
-      if (p.y < g || (pen0 > 0.0 && p.y < surface + params.radius)) {
-        let pen = max(0.0, g - p.y);
-        p.y = max(p.y, g);
-        let slide = vec2f(p.x - before.x, p.z - before.z);
-        let sl = length(slide);
-        let limit = params.friction * max(pen, pen0);
-        if (sl <= limit) { p.x = before.x; p.z = before.z; }
-        else { p.x -= slide.x * (limit / sl); p.z -= slide.y * (limit / sl); }
+      return x + params.relaxation * delta / max(weight * 0.25, 1.0);
+    }`.$uses({ params: this.params, getP, nb, restOf });
+
+    // Contact force on one particle: a stiff spring into the ground (or the softer soil spring)
+    // and into rocks, plus Coulomb friction that at most stops the sliding this substep. Explicit
+    // forces, so the ground's push on the tyre is known exactly for the hub's momentum balance.
+    // vTrial is the particle velocity after all other forces this substep.
+    const contactForce = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32], d.vec3f)/* wgsl */ `(x, vTrial, m, dt) {
+      var f = vec3f(0.0);
+      let soft = params.soilStiffness > 0.0;
+      let depth = groundHeight(x.x, x.z) + params.radius - x.y;
+      if (depth > 0.0) {
+        var push = select(params.groundStiffness, params.soilStiffness, soft) * depth;
+        if (soft) {
+          // Soil pushes back fully while compressed, only partly as the tread lifts (it absorbs energy).
+          if (vTrial.y > 0.0) { push *= params.soilRebound; }
+        } else {
+          push -= params.groundDamping * vTrial.y;
+        }
+        // Ground friction is applied after the constraint passes (see the finish step), where the
+        // whole substep's sliding is known.
+        f.y += max(push, 0.0);
       }
       for (var r = 0u; r < params.rocks; r++) {
         let sphere = rocks[r];
-        if (distance(p, sphere.xyz) > sphere.w + params.radius) { continue; }
+        if (distance(x, sphere.xyz) > sphere.w + params.radius) { continue; }
         var best = -1e9;
-        var bestN = vec3f(0.0, 1.0, 0.0);
-        for (var f = 0u; f < ${ROCK_FACES}u; f++) {
-          let plane = rocks[${MAX_ROCKS}u + r * ${ROCK_FACES}u + f];
-          let dist = dot(plane.xyz, p) - plane.w;
-          if (dist > best) { best = dist; bestN = plane.xyz; }
+        var n = vec3f(0.0, 1.0, 0.0);
+        for (var fc = 0u; fc < ${ROCK_FACES}u; fc++) {
+          let plane = rocks[${MAX_ROCKS}u + r * ${ROCK_FACES}u + fc];
+          let dist = dot(plane.xyz, x) - plane.w;
+          if (dist > best) { best = dist; n = plane.xyz; }
         }
         if (best < params.radius) {
-          let pen = params.radius - best;
-          p += bestN * pen;
-          let mv = p - before;
-          let tang = mv - bestN * dot(mv, bestN);
-          let tl = length(tang);
-          let limit = params.friction * max(pen, pen0);
-          if (tl <= limit) { p -= tang; } else { p -= tang * (limit / tl); }
+          let vn = dot(vTrial + f * (dt / m), n);
+          let push = max(params.groundStiffness * (params.radius - best) - params.groundDamping * vn, 0.0);
+          let vRel = vTrial + f * (dt / m);
+          let vt = vRel - n * dot(vRel, n);
+          let speed = length(vt);
+          if (speed > 1e-6) { f -= (vt / speed) * min(speed * m / dt, params.friction * push); }
+          f += n * push;
         }
       }
+      return f;
+    }`.$uses({ params: this.params, rocks: this.rocks, groundHeight });
+
+    // Safety floor: if a particle is ever driven deep into the ground, put it back (rare; the
+    // contact springs normally hold it).
+    const floorClamp = tgpu.fn([d.vec3f], d.vec3f)/* wgsl */ `(pIn) {
+      var p = pIn;
+      let floorDepth = select(0.06, params.maxSink, params.soilStiffness > 0.0);
+      let floor = groundHeight(p.x, p.z) + params.radius - floorDepth;
+      if (p.y < floor) { p.y = floor; }
       return p;
-    }`.$uses({ params: this.params, rocks: this.rocks, getP, nb, restOf, hubPoint, groundHeight });
+    }`.$uses({ params: this.params, groundHeight });
 
     // One workgroup per tyre runs the whole physics step, so a step is a single dispatch.
     const stepTyre = tgpu.computeFn({
@@ -256,91 +275,141 @@ export class GpuTireSolver {
       for (var k = lid; k < per; k += ${WG}u) { setP(0u, k, pos[base + k].xyz); }
       workgroupBarrier();
 
+      // The hub's force and torque on the tyre follow from momentum balance: the tyre's change
+      // of momentum minus the external forces (gravity, ground, rocks). That is exact however well
+      // the constraint passes converge; summing the passes' corrections overshoots when they fight.
       var hubForce = vec3f(0.0);
       var hubTorque = vec3f(0.0);
+      var dbgCount = 0.0;
+      var dbgFric = 0.0;
       for (var s = 0u; s < params.substeps; s++) {
-        // Predict: gravity, pressure, bead springs; A -> B, previous positions kept in storage.
+        let hs = hubs[t];
+        let s0 = dt * f32(s);
+        let c0 = hs.position.xyz + hs.linvel.xyz * s0;
+        var momentum = vec3f(0.0);
+        var angular = vec3f(0.0);
+        var extForce = vec3f(0.0);
+        var externalTorque = vec3f(0.0);
+        // Predict: gravity, pressure, damping, contact; A -> B, previous positions kept in storage.
         for (var k = lid; k < per; k += ${WG}u) {
           let u = i32(k / params.nv);
           let v = i32(k % params.nv);
           let x = getP(0u, k);
-          var vl = vel[base + k].xyz;
-          var force = vec3f(0.0, -params.gravity * m, 0.0);
+          let vOld = vel[base + k].xyz;
+          let pushMemory = vel[base + k].w;
+          momentum -= m * vOld;
+          angular -= m * cross(x - c0, vOld);
           let du = getP(0u, nb(u + 1, v)) - getP(0u, nb(u - 1, v));
           let dv = getP(0u, nb(u, v + 1)) - getP(0u, nb(u, v - 1));
-          force += params.pressure * 0.25 * cross(du, dv) * hubs[t].position.w;
-          // Soft ground: soil pushes back in proportion to depth, fully while it is being
-          // compressed and only partly as the tread lifts off (so it absorbs energy).
-          var soil = 0.0;
-          if (params.soilStiffness > 0.0) {
-            let depth = groundHeight(x.x, x.z) + params.radius - x.y;
-            if (depth > 0.0) {
-              soil = params.soilStiffness * depth;
-              if (vl.y > 0.0) { soil *= params.soilRebound; }
-              force.y += soil;
-            }
-          }
-          vl = (vl + dt * force / m) * max(0.0, 1.0 - params.damping * dt);
-          let predicted = x + vl * dt;
-          // How hard this substep presses into the ground, as a distance: the normal "impulse"
-          // that sets the friction budget for every pass of the substep.
-          var pen0 = max(0.0, groundHeight(predicted.x, predicted.z) + params.radius - predicted.y);
-          if (params.soilStiffness > 0.0) { pen0 = soil * dt * dt / m; }
-          prev[base + k] = vec4f(x, pen0);
-          setP(1u, k, predicted);
+          // Pressure on this particle's share of the surface. The explicit step applies the force
+          // to where the surface will be, so the area vector is advanced by its own rate of change
+          // (from the neighbours' velocities) over pressureLead substeps. Without this, a spinning
+          // tyre feels a drag torque proportional to spin (about 30 N·m per rad/s at 120 kPa).
+          let dvu = vel[base + nb(u + 1, v)].xyz - vel[base + nb(u - 1, v)].xyz;
+          let dvv = vel[base + nb(u, v + 1)].xyz - vel[base + nb(u, v - 1)].xyz;
+          let sign = hs.position.w;
+          var area = 0.25 * cross(du, dv) * sign;
+          area += 0.25 * (cross(dvu, dv) + cross(du, dvv)) * sign * (params.pressureLead * dt);
+          let gravity = vec3f(0.0, -params.gravity * m, 0.0);
+          var vl = vOld + dt * (gravity + params.pressure * area) / m;
+          // Damping of motion relative to the wheel's rigid motion (rolling itself is not damped).
+          let rigid = hs.linvel.xyz + cross(hs.angvel.xyz, x - c0);
+          vl -= (vl - rigid) * min(1.0, params.damping * dt);
+          // Ground push and rocks.
+          let fc = contactForce(x, vl, m, dt);
+          vl += fc * (dt / m);
+          let ext = gravity + fc;
+          extForce += ext;
+          externalTorque += cross(x - c0, ext);
+          // The ground's normal push sets the friction budget in the finish step. Stiff contact
+          // springs make a tread particle bounce in and out of contact between substeps, so the
+          // budget remembers recent contact (it fades over a few substeps) to keep the patch gripping.
+          let inContact = groundHeight(x.x, x.z) + params.radius > x.y;
+          let pushNow = max(fc.y, 0.0) * select(0.0, 1.0, inContact);
+          var pushed = max(pushNow, pushMemory * 0.6);
+          if (pushed < 1.0) { pushed = 0.0; }
+          prev[base + k] = vec4f(x, pushed);
+          setP(1u, k, x + vl * dt);
         }
         workgroupBarrier();
-        // Jacobi passes ping-pong B -> A -> B ... The bead is a position constraint to the rim
-        // seat; its total correction over the substep gives the force the hub feels.
+        // Jacobi passes ping-pong B -> A -> B ...: cords, shear, bending, shape memory, and the
+        // bead held on the rim seat.
         let st = dt * f32(s + 1u);
-        let h = hubs[t];
-        let center = h.position.xyz + h.linvel.xyz * st;
+        let center = hs.position.xyz + hs.linvel.xyz * st;
+        let axleDir = qrot(hs.rotation, vec3f(0.0, 0.0, 1.0));
         var src = 1u;
         for (var it = 0u; it < params.iterations; it++) {
           for (var k = lid; k < per; k += ${WG}u) {
-            let pr = prev[base + k];
-            var p = relax(t, k, src, s, pr.xyz, pr.w);
+            var p = constrain(t, k, src);
+            let seat = hubPoint(t, k, st);
+            // Shape memory only acts across the tread (radially and sideways), not around the
+            // axle: the wheel's torque goes through the bead and the cords, as on a real tyre.
+            let around = normalize(cross(axleDir, p - center) + vec3f(1e-6, 0.0, 0.0));
+            var shape = params.shapeStiffness * (seat - p);
+            shape -= around * dot(shape, around);
+            p += shape;
             let vv = k % params.nv;
-            if (vv >= params.beadLow && vv <= params.beadHigh) {
-              let corr = params.beadPull * (hubPoint(t, k, st) - p);
-              p += corr;
-              // Force on the particle is m * corr / dt²; the hub gets the opposite.
-              let f = -corr * (m / (dt * dt));
-              hubForce += f;
-              hubTorque += cross(p - center, f);
-            }
-            setP(1u - src, k, p);
+            if (vv >= params.beadLow && vv <= params.beadHigh) { p += params.beadPull * (seat - p); }
+            setP(1u - src, k, floorClamp(p));
           }
           workgroupBarrier();
           src = 1u - src;
         }
-        // Finish: velocities; the result must end up in A.
+        // Finish: ground friction, velocities, the result in A, and the momentum balance.
         for (var k = lid; k < per; k += ${WG}u) {
-          let p = getP(src, k);
-          vel[base + k] = vec4f((p - prev[base + k].xyz) / dt, 0.0);
-          if (src == 1u) { setP(0u, k, p); }
+          var p = getP(src, k);
+          let pr = prev[base + k];
+          // Coulomb friction for a tread particle on the ground: hold it where it was (static), or
+          // let it slide by what exceeds μ·N over the substep. Applied once, so its force is exact.
+          let push = pr.w;
+          if (push > 0.0) {
+            let slide = vec2f(p.x - pr.x, p.z - pr.z);
+            let len = length(slide);
+            let limit = params.friction * push * dt * dt / m;
+            var cut = slide;
+            if (len > limit) { cut = slide * (limit / len); }
+            p.x -= cut.x;
+            p.z -= cut.y;
+            let ff = vec3f(-cut.x, 0.0, -cut.y) * (m / (dt * dt));
+            dbgCount += 1.0;
+            dbgFric += ff.z;
+            extForce += ff;
+            externalTorque += cross(p - c0, ff);
+          }
+          let vNew = (p - pr.xyz) / dt;
+          vel[base + k] = vec4f(vNew, push);
+          setP(0u, k, p);
+          momentum += m * vNew;
+          angular += m * cross(p - c0, vNew);
         }
+        // Force and torque the hub put into the tyre this substep; the hub feels the opposite.
+        hubForce -= momentum / dt - extForce;
+        hubTorque -= angular / dt - externalTorque;
         workgroupBarrier();
       }
 
       for (var k = lid; k < per; k += ${WG}u) { pos[base + k] = vec4f(getP(0u, k), 1.0); }
       workgroupBarrier();
 
-      // Sum the bead reactions across the workgroup (reusing set B as scratch).
+      // Sum the hub force and torque across the workgroup (reusing set B as scratch).
       let scale = 1.0 / f32(params.substeps);
       setP(1u, lid, hubForce * scale);
       setP(0u, lid, hubTorque * scale);
+      dbgA[lid] = dbgCount * scale;
+      dbgB[lid] = dbgFric * scale;
       workgroupBarrier();
       for (var stride = ${WG / 2}u; stride > 0u; stride = stride / 2u) {
         if (lid < stride) {
           setP(1u, lid, getP(1u, lid) + getP(1u, lid + stride));
           setP(0u, lid, getP(0u, lid) + getP(0u, lid + stride));
+          dbgA[lid] += dbgA[lid + stride];
+          dbgB[lid] += dbgB[lid + stride];
         }
         workgroupBarrier();
       }
       if (lid == 0u) {
-        hubOut[t * 2u] = vec4f(getP(1u, 0u), 0.0);
-        hubOut[t * 2u + 1u] = vec4f(getP(0u, 0u), 0.0);
+        hubOut[t * 2u] = vec4f(getP(1u, 0u), dbgA[0]);
+        hubOut[t * 2u + 1u] = vec4f(getP(0u, 0u), dbgB[0]);
       }
     }`.$uses({
       params: this.params,
@@ -353,8 +422,13 @@ export class GpuTireSolver {
       getP,
       setP,
       nb,
+      qrot,
       hubPoint,
-      relax,
+      constrain,
+      contactForce,
+      floorClamp,
+      dbgA,
+      dbgB,
     });
 
     this.pipeline = root.createComputePipeline({ compute: stepTyre });
@@ -400,6 +474,10 @@ export class GpuTireSolver {
       // Soft ground is an explicit soil spring, capped below the stability limit for this substep.
       soilStiffness: s.soilStiffness > 0 ? Math.min(s.soilStiffness, (3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)) : 0,
       soilRebound: s.soilRebound ?? 0.35,
+      pressureLead: s.pressureLead ?? 1,
+      // Hard ground and rocks: the stiffest contact spring the substep allows, lightly damped.
+      groundStiffness: (3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2),
+      groundDamping: 0.6 * Math.sqrt(((3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)) * (s.rubberMass / this.perTire)),
       maxSink: s.maxSink ?? 0.25,
       groundOriginX: this.groundOrigin.x,
       groundOriginZ: this.groundOrigin.z,
