@@ -21,7 +21,12 @@ import {
   NearestFilter,
   RGBAFormat,
 } from 'three/webgpu';
-import { Fn, attribute, cross, float, int, ivec2, normalize, textureLoad, uniform, vec3, vec4 } from 'three/tsl';
+import { Fn, If, Loop, attribute, cross, float, int, ivec2, normalize, textureLoad, uniform, vec3, vec4 } from 'three/tsl';
+
+// Rocks near a tyre, for the vertex shader: up to DRAW_ROCKS rocks, each a bounding sphere and
+// DRAW_FACES face planes (the same convex hulls the tyre solver collides with).
+const DRAW_ROCKS = 3;
+const DRAW_FACES = 80;
 
 export const LUG_HEIGHT = 0.022; // m, matches the solver's contact radius (0.02) plus a little
 
@@ -220,6 +225,10 @@ function tyreMaterial(nu, nv, sign) {
   texture.magFilter = NearestFilter;
   texture.needsUpdate = true;
   const signU = uniform(sign);
+  const rockTexture = new DataTexture(new Float32Array((DRAW_FACES + 1) * DRAW_ROCKS * 4), DRAW_FACES + 1, DRAW_ROCKS, RGBAFormat, FloatType);
+  rockTexture.minFilter = NearestFilter;
+  rockTexture.magFilter = NearestFilter;
+  rockTexture.needsUpdate = true;
   const material = new MeshStandardNodeMaterial({ roughness: 0.93, metalness: 0, flatShading: true });
   const lattice = attribute('lattice', 'vec4');
   material.positionNode = Fn(() => {
@@ -266,10 +275,47 @@ function tyreMaterial(nu, nv, sign) {
       }
     }
     const n = normalize(cross(pu, pv)).mul(signU);
-    return p.add(n.mul(lattice.z));
+    // Where the carcass wraps tightly round something (a rock edge), the Catmull-Rom patch swings
+    // outward past the particles, i.e. into the rock. Keep it within 5 mm outside the plain
+    // bilinear surface through the four nearest particles (on the round tread the patch only
+    // bulges about 1 mm beyond it, so the smooth shape is kept).
+    const q = (a, b) => textureLoad(texture, ivec2(iv.add(b + nv * 4).mod(nv), iu.add(a + nu * 4).mod(nu)));
+    const x00 = q(0, 0);
+    const x10 = q(1, 0);
+    const x01 = q(0, 1);
+    const x11 = q(1, 1);
+    const lin = x00.mul(tu.oneMinus().mul(tv.oneMinus())).add(x10.mul(tu.mul(tv.oneMinus()))).add(x01.mul(tu.oneMinus().mul(tv))).add(x11.mul(tu.mul(tv)));
+    const bulge = p.sub(lin.xyz).dot(n);
+    const surface = p.sub(n.mul(bulge.sub(0.005).max(0)));
+    // Lugs are drawn no taller than the gap to the ground or rock under them (w, from the solver),
+    // so they squash flat where the tyre presses on a rock.
+    const height = lattice.z.min(lin.w.max(0));
+    const out = surface.add(n.mul(height)).toVar();
+    // The particles are about 7 cm apart, so the surface between them can cut through a sharp rock
+    // edge even when every particle is outside the rock. Push drawn points out of the rock hulls,
+    // so the tread visibly wraps the rock instead of the rock poking through it.
+    for (let r = 0; r < DRAW_ROCKS; r++) {
+      const sphere = textureLoad(rockTexture, ivec2(0, r));
+      If(sphere.w.greaterThan(0).and(out.sub(sphere.xyz).length().lessThan(sphere.w.add(0.05))), () => {
+        const best = float(-1e9).toVar();
+        const normal = vec3(0, 1, 0).toVar();
+        Loop({ start: int(1), end: int(DRAW_FACES + 1), type: 'int' }, ({ i }) => {
+          const plane = textureLoad(rockTexture, ivec2(i, r));
+          const dist = plane.xyz.dot(out).sub(plane.w);
+          If(dist.greaterThan(best), () => {
+            best.assign(dist);
+            normal.assign(plane.xyz);
+          });
+        });
+        If(best.lessThan(0.002), () => {
+          out.addAssign(normal.mul(float(0.002).sub(best)));
+        });
+      });
+    }
+    return out;
   })();
   material.colorNode = vec4(attribute('color', 'vec3'), float(1));
-  return { material, texture };
+  return { material, texture, rockTexture };
 }
 
 // A world-space tyre mesh for one soft tyre. `mesh` is the torusMesh description (nu, nv, mirror
@@ -278,12 +324,14 @@ export function createMtTyreMesh(mesh) {
   const { nu, nv } = mesh;
   // The first sidewall point (j = nv / 4) tells which way the cross-section runs.
   const mirror = mesh.vertices[Math.round(nv / 4) * 3 + 2] < 0;
-  const { material, texture } = tyreMaterial(nu, nv, mirror ? -1 : 1);
+  const { material, texture, rockTexture } = tyreMaterial(nu, nv, mirror ? -1 : 1);
   const object = new Mesh(treadGeometry(nu, nv, mirror), material);
   object.castShadow = true;
   object.receiveShadow = true;
   object.frustumCulled = false;
   object.userData.lattice = texture;
+  object.userData.rocks = rockTexture;
+  object.userData.rockKey = '';
   // Start from the rest shape so the first frame is sensible.
   setLattice(object, mesh.vertices, 3);
   return object;
@@ -299,7 +347,31 @@ export function setLattice(object, positions, stride = 3, offset = 0) {
     out[k * 4] = positions[offset + k * 3];
     out[k * 4 + 1] = positions[offset + k * 3 + 1];
     out[k * 4 + 2] = positions[offset + k * 3 + 2];
+    out[k * 4 + 3] = 1; // no clearance data: never flatten the lugs
   }
+  texture.needsUpdate = true;
+}
+
+// Chooses the rocks nearest to the tyre (from the solver's rock list) for the vertex shader.
+// Only re-uploads when the set changes.
+export function setNearbyRocks(object, rocks, centre) {
+  const near = (rocks ?? [])
+    .map((rock) => ({ rock, d: Math.hypot(rock.sphere[0] - centre[0], rock.sphere[1] - centre[1], rock.sphere[2] - centre[2]) - rock.sphere[3] }))
+    .filter((r) => r.d < 0.8)
+    .sort((a, b) => a.d - b.d)
+    .slice(0, DRAW_ROCKS)
+    .map((r) => r.rock);
+  const key = near.map((r) => r.sphere.join(',')).join('|');
+  if (key === object.userData.rockKey) return;
+  object.userData.rockKey = key;
+  const texture = object.userData.rocks;
+  const data = texture.image.data;
+  data.fill(0);
+  near.forEach((rock, r) => {
+    const row = r * (DRAW_FACES + 1) * 4;
+    data.set(rock.sphere, row);
+    data.set(rock.planes.subarray(0, DRAW_FACES * 4), row + 4);
+  });
   texture.needsUpdate = true;
 }
 
