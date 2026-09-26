@@ -1,9 +1,22 @@
 import { CameraTarget, Render, Time, Transform, Vehicle } from '../ecs/traits.js';
 
-// True isometric: the camera looks down the (-1, -1, -1) diagonal.
-// ?az=<degrees> turns the view around the car (default 45°, true isometric).
-const azimuth = ((Number(new URLSearchParams(globalThis.location?.search ?? '').get('az')) || 45) * Math.PI) / 180;
-const ISO_OFFSET = { x: Math.SQRT2 * 60 * Math.cos(azimuth), y: 60, z: Math.SQRT2 * 60 * Math.sin(azimuth) };
+// True isometric by default: the camera looks down the (-1, -1, -1) diagonal (azimuth 45°,
+// elevation 35.3°). ?az=<degrees> starts the view turned around the car. Dragging with the mouse
+// (or twisting two fingers) orbits; double-click resets.
+const DISTANCE = 60 * Math.sqrt(3);
+const ISO_AZIMUTH = ((Number(new URLSearchParams(globalThis.location?.search ?? '').get('az')) || 45) * Math.PI) / 180;
+const ISO_ELEVATION = Math.atan(1 / Math.SQRT2);
+const MIN_ELEVATION = (12 * Math.PI) / 180;
+const MAX_ELEVATION = (88 * Math.PI) / 180;
+const view = { azimuth: ISO_AZIMUTH, elevation: ISO_ELEVATION };
+const offset = { x: 0, y: 0, z: 0 };
+function updateOffset() {
+  const h = DISTANCE * Math.cos(view.elevation);
+  offset.x = h * Math.cos(view.azimuth);
+  offset.y = DISTANCE * Math.sin(view.elevation);
+  offset.z = h * Math.sin(view.azimuth);
+}
+updateOffset();
 const params = new URLSearchParams(location.search);
 // Short (phone) screens start closer so the car is not tiny.
 const defaultZoom = globalThis.innerHeight < 500 ? 1.7 : 1;
@@ -19,13 +32,14 @@ export function attachZoom(target = window) {
     },
     { passive: false },
   );
-  // Two-finger pinch zooms on touch screens.
+  // Two-finger pinch zooms on touch screens; twisting the fingers turns the view.
   let pinch = null;
   const spread = (touches) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+  const twist = (touches) => Math.atan2(touches[1].clientY - touches[0].clientY, touches[1].clientX - touches[0].clientX);
   target.addEventListener(
     'touchstart',
     (e) => {
-      if (e.touches.length === 2) pinch = { distance: spread(e.touches), zoom: state.userZoom };
+      if (e.touches.length === 2) pinch = { distance: spread(e.touches), zoom: state.userZoom, angle: twist(e.touches), azimuth: view.azimuth };
     },
     { passive: true },
   );
@@ -35,9 +49,37 @@ export function attachZoom(target = window) {
       if (!pinch || e.touches.length !== 2) return;
       e.preventDefault();
       state.userZoom = Math.min(4, Math.max(0.4, pinch.zoom * (spread(e.touches) / pinch.distance)));
+      view.azimuth = pinch.azimuth + (twist(e.touches) - pinch.angle);
+      updateOffset();
     },
     { passive: false },
   );
+  // Mouse: drag (any button) to orbit around the car, double-click to reset.
+  let drag = null;
+  target.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    drag = { x: e.clientX, y: e.clientY };
+    target.setPointerCapture?.(e.pointerId);
+  });
+  target.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    view.azimuth += (e.clientX - drag.x) * 0.006;
+    view.elevation = Math.min(MAX_ELEVATION, Math.max(MIN_ELEVATION, view.elevation + (e.clientY - drag.y) * 0.005));
+    drag = { x: e.clientX, y: e.clientY };
+    updateOffset();
+  });
+  const endDrag = (e) => {
+    drag = null;
+    target.releasePointerCapture?.(e.pointerId);
+  };
+  target.addEventListener('pointerup', endDrag);
+  target.addEventListener('pointercancel', endDrag);
+  target.addEventListener('contextmenu', (e) => e.preventDefault());
+  target.addEventListener('dblclick', () => {
+    view.azimuth = ISO_AZIMUTH;
+    view.elevation = ISO_ELEVATION;
+    updateOffset();
+  });
   target.addEventListener('touchend', (e) => {
     if (e.touches.length < 2) pinch = null;
   });
@@ -70,7 +112,7 @@ export function followCamera(world) {
     camera.updateProjectionMatrix();
   }
 
-  camera.position.set(state.x + ISO_OFFSET.x, state.y + ISO_OFFSET.y, state.z + ISO_OFFSET.z);
+  camera.position.set(state.x + offset.x, state.y + offset.y, state.z + offset.z);
   camera.lookAt(state.x, state.y, state.z);
 
   // The sun and its shadow box travel with the car.
