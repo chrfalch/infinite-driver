@@ -276,6 +276,45 @@ export class GpuTireSolver {
       return p;
     }`.$uses({ params: this.params, groundHeight });
 
+    // How far a particle must move to get out of any rock, back to 1 cm inside the contact skin
+    // (the contact spring's own working depth). The rock contact is a penalty force in the
+    // prediction; the constraint passes after it (cords, pressure, shape) can drive the tread back
+    // into a rock, which sank it up to 7 cm into a 21 cm rock. The finish step removes that.
+    const rockPushOut = tgpu.fn([d.vec3f], d.vec3f)/* wgsl */ `(p) {
+      var out = vec3f(0.0);
+      for (var r = 0u; r < params.rocks; r++) {
+        let sphere = rocks[r];
+        if (distance(p, sphere.xyz) > sphere.w + params.radius) { continue; }
+        var best = -1e9;
+        var n = vec3f(0.0, 1.0, 0.0);
+        for (var fc = 0u; fc < ${ROCK_FACES}u; fc++) {
+          let plane = rocks[${MAX_ROCKS}u + r * ${ROCK_FACES}u + fc];
+          let dist = dot(plane.xyz, p + out) - plane.w;
+          if (dist > best) { best = dist; n = plane.xyz; }
+        }
+        let allowed = params.radius - 0.01;
+        if (best < allowed) { out += n * (allowed - best); }
+      }
+      return out;
+    }`.$uses({ params: this.params, rocks: this.rocks });
+
+    // Distance from a particle to the nearest surface (ground or rock), for drawing: the tread lugs
+    // are drawn no taller than this, so they flatten where the tyre presses on something.
+    const clearance = tgpu.fn([d.vec3f], d.f32)/* wgsl */ `(p) {
+      var c = p.y - groundHeight(p.x, p.z);
+      for (var r = 0u; r < params.rocks; r++) {
+        let sphere = rocks[r];
+        if (distance(p, sphere.xyz) > sphere.w + 0.1) { continue; }
+        var best = -1e9;
+        for (var fc = 0u; fc < ${ROCK_FACES}u; fc++) {
+          let plane = rocks[${MAX_ROCKS}u + r * ${ROCK_FACES}u + fc];
+          best = max(best, dot(plane.xyz, p) - plane.w);
+        }
+        c = min(c, best);
+      }
+      return clamp(c, 0.0, 0.1);
+    }`.$uses({ params: this.params, rocks: this.rocks, groundHeight });
+
     // One workgroup per tyre runs the whole physics step, so a step is a single dispatch.
     const stepTyre = tgpu.computeFn({
       in: { groupId: d.builtin.workgroupId, localIndex: d.builtin.localInvocationIndex },
@@ -400,6 +439,15 @@ export class GpuTireSolver {
             extForce += ff;
             externalTorque += cross(p - c0, ff);
           }
+          // Rocks: push a tread particle that the passes drove into a rock back out, and count the
+          // push as an external force (the rock's), so the hub force stays a true momentum balance.
+          let outOfRock = rockPushOut(p);
+          if (dot(outOfRock, outOfRock) > 0.0) {
+            p += outOfRock;
+            let fr = outOfRock * (m / (dt * dt));
+            extForce += fr;
+            externalTorque += cross(p - c0, fr);
+          }
           let vNew = (p - pr.xyz) / dt;
           vel[base + k] = vec4f(vNew, push);
           setP(0u, k, p);
@@ -412,7 +460,10 @@ export class GpuTireSolver {
         workgroupBarrier();
       }
 
-      for (var k = lid; k < per; k += ${WG}u) { pos[base + k] = vec4f(getP(0u, k), 1.0); }
+      for (var k = lid; k < per; k += ${WG}u) {
+        let p = getP(0u, k);
+        pos[base + k] = vec4f(p, clearance(p));
+      }
       workgroupBarrier();
 
       // Sum the hub force and torque across the workgroup (reusing set B as scratch).
@@ -436,6 +487,8 @@ export class GpuTireSolver {
         hubOut[t * 2u + 1u] = vec4f(getP(0u, 0u), dbgB[0]);
       }
     }`.$uses({
+      clearance,
+      rockPushOut,
       params: this.params,
       hubs: this.hubs,
       groundHeight,
@@ -549,6 +602,7 @@ export class GpuTireSolver {
     }
     this.rocks.write(data);
     this.rockCount = n;
+    this.rockList = rocks.slice(0, n); // for drawing (the tyre mesh keeps its tread out of rocks)
     if (this.settings) this.setParams(this.settings, this.dt);
   }
 

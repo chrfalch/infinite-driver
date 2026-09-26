@@ -13,6 +13,10 @@ import {
 import { CAR } from '../vehicle/config.js';
 import { wheelMount } from '../vehicle/physics.js';
 import { createAxleRig } from './axles.js';
+import { createBeadlockWheel } from './beadlock-wheel.js';
+import { LUG_HEIGHT, createStaticMtTyre } from './mt-tyre.js';
+import { TIRE } from '../tire/config.js';
+import { torusMesh } from '../tire/soft-tire.js';
 import { createTubeChassis } from './tube-chassis.js';
 import { mergeByMaterial } from './merge-geometry.js';
 import { IFS_RACK, frameGeometry, suspensionMounts } from '../vehicle/frame-geometry.js';
@@ -20,8 +24,6 @@ import { rimInnerFace } from './wheel-inset.js';
 
 const frame = new MeshStandardMaterial({ color: '#2d2f31', roughness: 0.7, metalness: 0.3 });
 const seat = new MeshStandardMaterial({ color: '#4a4136', roughness: 0.9 });
-const tyre = new MeshStandardMaterial({ color: '#232221', roughness: 0.95 });
-const rim = new MeshStandardMaterial({ color: '#c9c6bd', roughness: 0.4, metalness: 0.6 });
 const springMat = new MeshStandardMaterial({ color: '#e8c547', roughness: 0.4, metalness: 0.4 });
 const damperMat = new MeshStandardMaterial({ color: '#1d1d1d', roughness: 0.4, metalness: 0.6 });
 const chrome = new MeshStandardMaterial({ color: '#d7d7d7', roughness: 0.2, metalness: 0.9 });
@@ -142,65 +144,13 @@ export function createCarMesh() {
   return { object: car, steeringWheel, axles };
 }
 
-// The wheel rim, seen from either side: a beadlock ring at the lip, spokes from a centre cap
-// out to the lip, and lug nuts on the cap between the spokes. Everything is laid out on the
-// wheel's own axis (z) and centred on it, so nothing wobbles as the wheel spins.
-const LUGS = 6;
-function createRim(rimRadius, w, spokes) {
+// Rigid-wheel mode: a static mud-terrain tyre (the same tread as the soft tyres, built from the
+// rest shape) on a beadlock wheel. `side` is the outboard direction.
+function createTyre(side = 1) {
   const group = new Group();
-  const barrel = shadowed(new Mesh(new CylinderGeometry(rimRadius, rimRadius, w, 24), rim));
-  barrel.rotation.x = Math.PI / 2;
-  group.add(barrel);
-  const capRadius = rimRadius * 0.34;
-  for (const face of [-1, 1]) {
-    const z = (face * w) / 2;
-    // Beadlock ring at the lip.
-    const ring = shadowed(new Mesh(new TorusGeometry(rimRadius * 0.95, 0.02, 6, 32), chrome));
-    ring.position.z = z;
-    group.add(ring);
-    // Centre cap, standing a little proud of the face.
-    const cap = shadowed(new Mesh(new CylinderGeometry(capRadius, capRadius, 0.04, 20), damperMat));
-    cap.rotation.x = Math.PI / 2;
-    cap.position.z = z + face * 0.02;
-    group.add(cap);
-    for (let i = 0; i < LUGS; i++) {
-      const a = (i / LUGS) * Math.PI * 2;
-      // Lug nut on the cap's bolt circle.
-      const lug = shadowed(new Mesh(new CylinderGeometry(0.014, 0.014, 0.03, 6), chrome));
-      lug.rotation.x = Math.PI / 2;
-      lug.position.set(Math.cos(a) * capRadius * 0.62, Math.sin(a) * capRadius * 0.62, z + face * 0.045);
-      group.add(lug);
-      if (!spokes) continue;
-      // Spoke between two lugs, from the cap to the beadlock ring, flat on the face.
-      const b = a + Math.PI / LUGS;
-      const inner = capRadius * 0.9;
-      const outer = rimRadius * 0.93;
-      const spoke = box(outer - inner, 0.04, 0.03, damperMat, 0, 0, z + face * 0.012);
-      spoke.position.x = Math.cos(b) * (inner + outer) / 2;
-      spoke.position.y = Math.sin(b) * (inner + outer) / 2;
-      spoke.rotation.z = b;
-      group.add(spoke);
-    }
-  }
-  return group;
-}
-
-function createTyre() {
-  const group = new Group();
-  const r = CAR.wheelRadius;
-  const w = CAR.wheelWidth;
-  const body = shadowed(new Mesh(new CylinderGeometry(r, r, w, 28), tyre));
-  body.rotation.x = Math.PI / 2;
-  group.add(body);
-  // Chunky tread blocks so wheel rotation is easy to see.
-  const blocks = 16;
-  for (let i = 0; i < blocks; i++) {
-    const a = (i / blocks) * Math.PI * 2;
-    const b = box(0.11, 0.05, w * 0.92, tyre, Math.cos(a) * r, Math.sin(a) * r, (i % 2 ? 0.03 : -0.03));
-    b.rotation.z = a + Math.PI / 2;
-    group.add(b);
-  }
-  group.add(createRim(r * 0.58, w, false));
+  const shape = { ...TIRE, outerRadius: CAR.wheelRadius - LUG_HEIGHT, width: CAR.wheelWidth * 0.94, segmentsAround: 40, segmentsAcross: 10 };
+  group.add(createStaticMtTyre(torusMesh(shape, { mirror: side > 0 })));
+  group.add(createBeadlockWheel(shape.rimRadius, shape.width * 0.85, side));
   return group;
 }
 
@@ -229,7 +179,7 @@ export function createWheelRig(index, { softTire = null } = {}) {
   const hub = new Group();
   const steer = new Group();
   // The spinning wheel's parts never move relative to each other: one mesh per material.
-  const spin = mergeByMaterial(softTire ? createRim(softTire.rimRadius, softTire.width * 0.85, true) : createTyre());
+  const spin = mergeByMaterial(softTire ? createBeadlockWheel(softTire.rimRadius, softTire.width * 0.85, side) : createTyre(side));
   steer.add(spin);
   // Knuckle stays with the steering but not the spin.
   steer.add(box(0.14, 0.26, 0.08, frame, 0, 0, -side * (rimInnerFace() + 0.02)));

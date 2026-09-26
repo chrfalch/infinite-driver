@@ -4,8 +4,8 @@ const p = new Vector3();
 const n = new Vector3();
 const normalMatrix = new Matrix3();
 
-// Merges geometries into one indexed BufferGeometry with positions and normals only, each with its
-// transform baked in. parts: [{ geometry, matrix }].
+// Merges geometries into one indexed BufferGeometry with positions and normals (and vertex colours
+// when every part has them), each with its transform baked in. parts: [{ geometry, matrix }].
 export function mergeGeometries(parts) {
   let vertexCount = 0;
   let indexCount = 0;
@@ -16,6 +16,8 @@ export function mergeGeometries(parts) {
   }
   const positions = new Float32Array(vertexCount * 3);
   const normals = new Float32Array(vertexCount * 3);
+  const withColor = parts.every(({ geometry }) => geometry.getAttribute('color'));
+  const colors = withColor ? new Float32Array(vertexCount * 3) : null;
   const indices = vertexCount > 65535 ? new Uint32Array(indexCount) : new Uint16Array(indexCount);
   let vo = 0;
   let io = 0;
@@ -35,6 +37,10 @@ export function mergeGeometries(parts) {
       normals[o + 1] = n.y;
       normals[o + 2] = n.z;
     }
+    if (colors) {
+      const col = geometry.getAttribute('color');
+      for (let i = 0; i < pos.count; i++) colors.set([col.getX(i), col.getY(i), col.getZ(i)], (vo + i) * 3);
+    }
     // A mirroring transform turns triangles inside out; swap two corners to keep them facing out.
     const flip = matrix.determinant() < 0;
     const index = geometry.index;
@@ -53,6 +59,7 @@ export function mergeGeometries(parts) {
   const merged = new BufferGeometry();
   merged.setAttribute('position', new BufferAttribute(positions, 3));
   merged.setAttribute('normal', new BufferAttribute(normals, 3));
+  if (colors) merged.setAttribute('color', new BufferAttribute(colors, 3));
   merged.setIndex(new BufferAttribute(indices, 1));
   merged.computeBoundingSphere();
   return merged;
