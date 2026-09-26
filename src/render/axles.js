@@ -68,6 +68,19 @@ function createShaft() {
 export function createAxleRig() {
   const group = new Group();
   group.name = 'axles';
+  // Steering: shaft from the column through two universal joints to the steering box, pitman arm,
+  // drag link to the left knuckle, tie rod between the knuckles.
+  const steering = {
+    upperShaft: unitCylinder(0.016, shaftMat, 8),
+    lowerShaft: unitCylinder(0.016, shaftMat, 8),
+    joints: [0, 1].map(() => shadowed(new Mesh(new BoxGeometry(0.045, 0.045, 0.045), jointMat))),
+    box: shadowed(new Mesh(new BoxGeometry(0.16, 0.12, 0.12), housing)),
+    pitman: unitCylinder(0.018, jointMat, 8),
+    dragLink: unitCylinder(0.02, shaftMat, 8),
+    tieRod: unitCylinder(0.02, shaftMat, 8),
+    arms: [0, 1].map(() => unitCylinder(0.02, jointMat, 8)),
+  };
+  group.add(steering.upperShaft, steering.lowerShaft, steering.box, steering.pitman, steering.dragLink, steering.tieRod, ...steering.joints, ...steering.arms);
   const front = createAxle();
   const rear = createAxle();
   const transfer = shadowed(new Mesh(new BoxGeometry(0.34, 0.2, 0.26), housing));
@@ -75,11 +88,12 @@ export function createAxleRig() {
   const rearShaft = createShaft();
   group.add(front.group, rear.group, transfer, frontShaft.pivot, rearShaft.pivot);
   group.add(frontShaft.jointA, frontShaft.jointB, rearShaft.jointA, rearShaft.jointB);
-  return { group, front, rear, transfer, frontShaft, rearShaft, angle: 0 };
+  return { group, front, rear, transfer, frontShaft, rearShaft, steering, angle: 0 };
 }
 
 // hubs: chassis-local hub centres in wheel order FL, FR, RL, RR. shaftSpin: propshaft rad/s.
-export function updateAxleRig(rig, hubs, shaftSpin, dt) {
+// steerQuats: chassis-local knuckle rotations of the front wheels; geometry: steeringGeometry().
+export function updateAxleRig(rig, hubs, shaftSpin, dt, steerQuats = null, geometry = null, steer = 0) {
   const { y: hy } = CAR.halfExtents;
   const inset = CAR.wheelWidth / 2 + 0.08;
   // Transfer case hangs under the frame, a little behind the middle.
@@ -116,4 +130,40 @@ export function updateAxleRig(rig, hubs, shaftSpin, dt) {
     shaft.jointA.rotation.x = rig.angle;
     shaft.jointB.rotation.x = rig.angle;
   }
+
+  if (steerQuats && geometry) updateSteering(rig.steering, hubs, steerQuats, geometry, steer);
+}
+
+const tipA = new Vector3();
+const tipB = new Vector3();
+
+// Knuckle steering arms point back and inward from each front hub; they turn with the knuckle.
+function updateSteering(st, hubs, steerQuats, geo, steer) {
+  const tips = [];
+  for (const [k, i] of [
+    [0, 0],
+    [1, 1],
+  ]) {
+    const hub = hubs[i];
+    const side = Math.sign(hub.z) || (i === 0 ? -1 : 1);
+    const arm = new Vector3(-0.2, -0.04, -side * 0.12).applyQuaternion(steerQuats[k]);
+    const base = new Vector3(hub.x, hub.y - 0.02, hub.z - side * (CAR.wheelWidth / 2 + 0.06));
+    const tip = base.clone().add(arm);
+    place(st.arms[k], base, tip);
+    tips.push(tip);
+  }
+  place(st.tieRod, tips[0], tips[1]);
+
+  // Steering box on the frame; the pitman arm swings fore and aft with the steering.
+  st.box.position.copy(geo.box);
+  const pitmanTip = tipA.set(geo.box.x + Math.sin(steer * 1.6) * 0.16, geo.box.y - 0.17, geo.box.z);
+  place(st.pitman, geo.box, pitmanTip);
+  place(st.dragLink, pitmanTip, tips[0]);
+
+  // Shaft: column end → joint above the box → box input.
+  const mid = tipB.set(geo.box.x + 0.18, geo.box.y + 0.42, geo.box.z + 0.08);
+  place(st.upperShaft, geo.columnEnd, mid);
+  place(st.lowerShaft, mid, geo.box);
+  st.joints[0].position.copy(geo.columnEnd);
+  st.joints[1].position.copy(mid);
 }

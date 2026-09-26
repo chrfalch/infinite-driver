@@ -1,7 +1,9 @@
 import { CameraTarget, Render, Time, Transform, Vehicle } from '../ecs/traits.js';
 
 // True isometric: the camera looks down the (-1, -1, -1) diagonal.
-const ISO_OFFSET = { x: 60, y: 60, z: 60 };
+// ?az=<degrees> turns the view around the car (default 45°, true isometric).
+const azimuth = ((Number(new URLSearchParams(globalThis.location?.search ?? '').get('az')) || 45) * Math.PI) / 180;
+const ISO_OFFSET = { x: Math.SQRT2 * 60 * Math.cos(azimuth), y: 60, z: Math.SQRT2 * 60 * Math.sin(azimuth) };
 const params = new URLSearchParams(location.search);
 // Short (phone) screens start closer so the car is not tiny.
 const defaultZoom = globalThis.innerHeight < 500 ? 1.7 : 1;

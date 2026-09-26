@@ -13,7 +13,7 @@ import {
   WheelOf,
   WheelRig,
 } from '../ecs/traits.js';
-import { createCarMesh, createWheelRig, paint } from '../render/car-mesh.js';
+import { createCarMesh, createWheelRig } from '../render/car-mesh.js';
 import { createSoftTireMesh } from '../render/soft-tire-mesh.js';
 import { CONTROLS } from '../controls.js';
 import { effectiveGpuTire, effectiveTire, GPU_TIRE, TIRE } from '../tire/config.js';
@@ -49,9 +49,6 @@ export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, 
   body.setAngvel(angvel, true);
 
   const { object, steeringWheel, axles } = createCarMesh();
-  object.traverse((o) => {
-    if (o.isMesh && o.material === paint) o.visible = CONTROLS.showBody;
-  });
   scene.add(object);
   const car = world.spawn(
     IsPlayer,

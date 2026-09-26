@@ -12,18 +12,16 @@ import {
 import { CAR } from '../vehicle/config.js';
 import { wheelMount } from '../vehicle/physics.js';
 import { createAxleRig } from './axles.js';
+import { createFrameMesh } from './frame-mesh.js';
+import { frameGeometry, suspensionMounts } from '../vehicle/frame-geometry.js';
 
-export const paint = new MeshStandardMaterial({ color: '#d9683f', roughness: 0.55, metalness: 0.05 });
 const frame = new MeshStandardMaterial({ color: '#2d2f31', roughness: 0.7, metalness: 0.3 });
-const cage = new MeshStandardMaterial({ color: '#3a3c3e', roughness: 0.5, metalness: 0.5 });
 const seat = new MeshStandardMaterial({ color: '#4a4136', roughness: 0.9 });
 const tyre = new MeshStandardMaterial({ color: '#232221', roughness: 0.95 });
 const rim = new MeshStandardMaterial({ color: '#c9c6bd', roughness: 0.4, metalness: 0.6 });
 const springMat = new MeshStandardMaterial({ color: '#e8c547', roughness: 0.4, metalness: 0.4 });
 const damperMat = new MeshStandardMaterial({ color: '#1d1d1d', roughness: 0.4, metalness: 0.6 });
 const chrome = new MeshStandardMaterial({ color: '#d7d7d7', roughness: 0.2, metalness: 0.9 });
-const lamp = new MeshStandardMaterial({ color: '#fff4d6', emissive: '#fff1c2', emissiveIntensity: 0.7 });
-const tail = new MeshStandardMaterial({ color: '#9e1c1c', emissive: '#7a0f0f', emissiveIntensity: 0.5 });
 
 function shadowed(mesh) {
   mesh.castShadow = true;
@@ -46,73 +44,54 @@ function bar(a, b, radius, material) {
   return m;
 }
 
+// Where the steering parts sit (chassis-local), shared with the axle rig.
+export function steeringGeometry(g = frameGeometry()) {
+  const dashX = g.frontHoopX - 0.12;
+  const faceNormal = new Vector3(-0.72, 0.69, 0).normalize();
+  const wheelCenter = new Vector3(dashX - 0.34, g.dashY + 0.08, -0.3);
+  const columnEnd = wheelCenter.clone().addScaledVector(faceNormal, -0.36);
+  const front = suspensionMounts(0);
+  // Steering box on the outside of the left frame rail, just behind the front axle.
+  const box = new Vector3(front.mount.x - 0.32, g.railY + 0.02, -(g.railZ + 0.1));
+  return { wheelCenter, faceNormal, columnEnd, box };
+}
+
 // Chassis-local: +x forward, +y up, +z right. Origin is the physics body origin.
+// A buggy with no body panels: ladder frame, roll cage, seats, steering, and running gear.
 export function createCarMesh() {
-  const { x: hx, y: hy, z: hz } = CAR.halfExtents;
+  const g = frameGeometry();
   const car = new Group();
+  car.add(createFrameMesh());
 
-  // Ladder frame rails, visible between the wheels.
-  car.add(box(hx * 2.05, 0.12, 0.1, frame, 0, -hy + 0.02, -0.45));
-  car.add(box(hx * 2.05, 0.12, 0.1, frame, 0, -hy + 0.02, 0.45));
-
-  // Body tub, lifted off the frame.
-  const tubBottom = -hy + 0.12;
-  car.add(box(hx * 1.9, 0.5, hz * 2, paint, -0.05, tubBottom + 0.25, 0));
-  // Bonnet sloping a touch lower at the front.
-  car.add(box(1.05, 0.14, hz * 1.9, paint, hx - 0.62, tubBottom + 0.55, 0));
-  // Shock towers on the tub sides, where the coil-overs mount.
-  for (let i = 0; i < 4; i++) {
-    const m = wheelMount(i);
-    const tx = m.x + (m.x > 0 ? -0.12 : 0.12);
-    car.add(box(0.16, 0.34, 0.14, frame, tx, m.y + 0.36, Math.sign(m.z) * (hz + 0.05)));
-  }
-  // Windscreen frame.
-  const wsX = hx - 1.2;
-  car.add(bar(new Vector3(wsX, tubBottom + 0.5, -hz + 0.05), new Vector3(wsX - 0.12, tubBottom + 1.05, -hz + 0.05), 0.035, cage));
-  car.add(bar(new Vector3(wsX, tubBottom + 0.5, hz - 0.05), new Vector3(wsX - 0.12, tubBottom + 1.05, hz - 0.05), 0.035, cage));
-  car.add(bar(new Vector3(wsX - 0.12, tubBottom + 1.05, -hz + 0.05), new Vector3(wsX - 0.12, tubBottom + 1.05, hz - 0.05), 0.035, cage));
-
-  // Roll cage over the open cab.
-  const hoopX = -0.75;
-  const top = tubBottom + 1.25;
-  for (const z of [-hz + 0.08, hz - 0.08]) {
-    car.add(bar(new Vector3(hoopX, tubBottom + 0.5, z), new Vector3(hoopX, top, z), 0.04, cage));
-    car.add(bar(new Vector3(hoopX, top, z), new Vector3(wsX - 0.12, tubBottom + 1.05, z), 0.035, cage));
-    car.add(bar(new Vector3(hoopX, top, z), new Vector3(-hx + 0.2, tubBottom + 0.5, z), 0.035, cage));
-  }
-  car.add(bar(new Vector3(hoopX, top, -hz + 0.08), new Vector3(hoopX, top, hz - 0.08), 0.04, cage));
-
-  // Seats.
+  // Seats on the floor pan between the hoops, driver on the left (-z).
+  const seatX = (g.frontHoopX + g.mainHoopX) / 2 - 0.12;
   for (const z of [-0.3, 0.3]) {
-    car.add(box(0.45, 0.12, 0.42, seat, -0.35, tubBottom + 0.56, z));
-    car.add(box(0.12, 0.5, 0.42, seat, -0.6, tubBottom + 0.8, z));
+    car.add(box(0.46, 0.1, 0.44, seat, seatX, g.railTop + 0.13, z));
+    car.add(box(0.1, 0.55, 0.44, seat, seatX - 0.25, g.railTop + 0.42, z));
+    // Seat mounts to the floor.
+    car.add(box(0.36, 0.08, 0.05, frame, seatX, g.railTop + 0.05, z - 0.17));
+    car.add(box(0.36, 0.08, 0.05, frame, seatX, g.railTop + 0.05, z + 0.17));
   }
 
-  // Steering wheel on a column, driver on the left (-z).
+  // Steering: the wheel faces the driver, tilted up and back; its column runs forward and down
+  // through a bracket on the dash bar. The shaft to the steering box and the linkage to the front
+  // axle are in the axle rig, which moves them with the steering.
   const steeringWheel = new Group();
   const ring = shadowed(new Mesh(new TorusGeometry(0.17, 0.022, 8, 24), frame));
   const spoke = box(0.3, 0.03, 0.03, frame, 0, 0, 0);
   const spoke2 = box(0.03, 0.3, 0.03, frame, 0, 0, 0);
   steeringWheel.add(ring, spoke, spoke2);
+  const steer = steeringGeometry(g);
   const column = new Group();
-  column.position.set(wsX - 0.35, tubBottom + 0.82, -0.3);
-  // Tilt the wheel so it faces the driver.
-  column.rotation.set(0, Math.PI / 2, 0);
-  column.rotateX(-0.45);
+  column.position.copy(steer.wheelCenter);
+  // Face normal points up and back at the driver.
+  column.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), steer.faceNormal);
   column.add(steeringWheel);
   car.add(column);
-
-  // Lights, bumpers, spare tyre.
-  car.add(box(0.14, 0.14, hz * 2.4, frame, hx + 0.02, -0.1, 0));
-  car.add(box(0.14, 0.14, hz * 2.4, frame, -hx - 0.02, -0.1, 0));
-  car.add(box(0.05, 0.14, 0.2, lamp, hx - 0.08, tubBottom + 0.44, -hz + 0.22));
-  car.add(box(0.05, 0.14, 0.2, lamp, hx - 0.08, tubBottom + 0.44, hz - 0.22));
-  car.add(box(0.05, 0.1, 0.18, tail, -hx - 0.03, tubBottom + 0.38, -hz + 0.2));
-  car.add(box(0.05, 0.1, 0.18, tail, -hx - 0.03, tubBottom + 0.38, hz - 0.2));
-  const spare = createTyre();
-  spare.rotation.y = Math.PI / 2;
-  spare.position.set(-hx - 0.22, tubBottom + 0.55, 0);
-  car.add(spare);
+  car.add(bar(steer.wheelCenter, steer.columnEnd, 0.022, frame));
+  // Column bracket clamped to the dash bar.
+  car.add(bar(steer.columnEnd, new Vector3(steer.columnEnd.x, g.dashY, steer.columnEnd.z), 0.018, frame));
+  car.add(box(0.06, 0.06, 0.08, frame, steer.columnEnd.x, g.dashY, steer.columnEnd.z));
 
   const axles = createAxleRig();
   car.add(axles.group);
@@ -192,10 +171,12 @@ export function createWheelRig(index, { softTire = null } = {}) {
   root.add(hub);
 
   // Chassis-side pick-up points (fixed).
-  const inboardZ = side * (CAR.halfExtents.z - 0.05);
-  const shockTop = new Vector3(mount.x + (mount.x > 0 ? -0.12 : 0.12), mount.y + 0.46, side * (CAR.halfExtents.z + 0.12));
-  const upperPivot = new Vector3(mount.x, mount.y + 0.12, inboardZ);
-  const lowerPivot = new Vector3(mount.x, mount.y - 0.16, inboardZ);
+  // Mounting points on the frame and cage (shared with the cage builder).
+  const mounts = suspensionMounts(index);
+  const P = (p) => new Vector3(p.x, p.y, p.z);
+  const shockTop = P(mounts.shockTop);
+  const upperPivot = P(CAR.solidAxles ? mounts.upperLinkFrame : mounts.upperArmFrame);
+  const lowerPivot = P(CAR.solidAxles ? mounts.lowerLinkFrame : mounts.lowerArmFrame);
 
   const shock = new Group();
   const damperBody = shadowed(new Mesh(new CylinderGeometry(0.045, 0.045, 1, 10), damperMat));
@@ -228,6 +209,7 @@ export function createWheelRig(index, { softTire = null } = {}) {
     shockTop,
     upperPivot,
     lowerPivot,
+    solid: CAR.solidAxles,
     side,
     mount,
   };

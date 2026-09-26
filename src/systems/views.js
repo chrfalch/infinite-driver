@@ -1,6 +1,7 @@
 import { Vector3 } from 'three/webgpu';
 import { AxleRig, SoftTireView, SteeringWheel, Time, Transform, Vehicle, View, WheelOf, WheelRig } from '../ecs/traits.js';
 import { updateAxleRig } from '../render/axles.js';
+import { steeringGeometry } from '../render/car-mesh.js';
 import { DRIVETRAIN } from '../vehicle/config.js';
 import { updateGpuTireMesh, updateSoftTireMesh } from '../render/soft-tire-mesh.js';
 import { CAR } from '../vehicle/config.js';
@@ -54,16 +55,25 @@ export function syncWheels(world) {
       rig.spin.rotation.z = -(controller.wheelRotation(index) ?? 0);
     }
 
-    // Control arms run from the frame to the inner face of the hub.
-    const hubInnerZ = mount.z - side * (CAR.wheelWidth / 2 + 0.06);
-    a.set(mount.x, hubY + 0.12, hubInnerZ);
-    span(rig.upperArm, rig.upperPivot, a, X);
-    b.set(mount.x, hubY - 0.12, hubInnerZ);
-    span(rig.lowerArm, rig.lowerPivot, b, X);
-
-    // The shock sits on the lower arm, near the hub.
-    a.lerpVectors(rig.lowerPivot, b, 0.72);
-    a.y += 0.04;
+    if (rig.solid) {
+      // 4-link: links run lengthwise from the frame brackets to the axle beam beside the hub, and
+      // the coil-over stands on the axle under its top mount.
+      a.set(mount.x, hubY + 0.13, rig.upperPivot.z);
+      span(rig.upperArm, rig.upperPivot, a, X);
+      b.set(mount.x, hubY - 0.1, rig.lowerPivot.z);
+      span(rig.lowerArm, rig.lowerPivot, b, X);
+      a.set(rig.shockTop.x, hubY + 0.06, rig.shockTop.z * 0.94);
+    } else {
+      // Independent: A-arms from the frame brackets to the inner face of the hub.
+      const hubInnerZ = mount.z - side * (CAR.wheelWidth / 2 + 0.06);
+      a.set(mount.x, hubY + 0.12, hubInnerZ);
+      span(rig.upperArm, rig.upperPivot, a, X);
+      b.set(mount.x, hubY - 0.12, hubInnerZ);
+      span(rig.lowerArm, rig.lowerPivot, b, X);
+      // The shock sits on the lower arm, near the hub.
+      a.lerpVectors(rig.lowerPivot, b, 0.72);
+      a.y += 0.04;
+    }
     dir.subVectors(rig.shockTop, a);
     const length = dir.length();
     rig.shock.position.copy(a);
@@ -77,8 +87,8 @@ export function syncWheels(world) {
   });
 
   world.query(Vehicle, SteeringWheel).updateEach(([vehicle, wheel]) => {
-    // The column faces forward, so a left turn (positive steer) is a negative roll about its z.
-    wheel.object.rotation.z = -vehicle.steer * CAR.steeringWheelRatio;
+    // The wheel faces the driver (its +z points at them), so a left turn is a positive roll.
+    wheel.object.rotation.z = vehicle.steer * CAR.steeringWheelRatio;
   });
 }
 
@@ -94,15 +104,18 @@ export function syncAxles(world) {
   const { delta } = world.get(Time);
   world.query(Vehicle, AxleRig).forEach((car) => {
     const hubs = [];
+    const steerQuats = [];
     world.query(WheelOf(car), WheelRig).forEach((wheel) => {
       const { index } = wheel.get(WheelOf(car));
-      hubs[index] = wheel.get(WheelRig).rig.hub.position;
+      const rig = wheel.get(WheelRig).rig;
+      hubs[index] = rig.hub.position;
+      if (index < 2) steerQuats[index] = rig.steer.quaternion;
     });
     if (hubs.length < 4 || hubs.includes(undefined)) return;
-    const { controller, speed } = car.get(Vehicle);
+    const { controller, speed, steer } = car.get(Vehicle);
     // Propshafts turn at wheel speed times the final drive.
     const radius = controller.tire?.outerRadius ?? CAR.wheelRadius;
     const wheelW = controller.wheelSpin ? [0, 1, 2, 3].reduce((s, i) => s + controller.wheelSpin(i), 0) / 4 : speed / radius;
-    updateAxleRig(car.get(AxleRig).rig, hubs, wheelW * DRIVETRAIN.finalDrive, delta);
+    updateAxleRig(car.get(AxleRig).rig, hubs, wheelW * DRIVETRAIN.finalDrive, delta, steerQuats, steeringGeometry(), steer);
   });
 }
