@@ -1,5 +1,5 @@
 import { Vector3 } from 'three/webgpu';
-import { AxleRig, SoftTireView, SteeringWheel, Time, Transform, Vehicle, View, WheelOf, WheelRig } from '../ecs/traits.js';
+import { AxleRig, IsPlayer, SoftTireView, SteeringWheel, Time, Transform, Vehicle, View, WheelOf, WheelRig } from '../ecs/traits.js';
 import { updateAxleRig } from '../render/axles.js';
 import { steeringGeometry } from '../render/car-mesh.js';
 import { DRIVETRAIN } from '../vehicle/config.js';
@@ -109,7 +109,10 @@ export function syncWheels(world) {
 
 export function syncSoftTires(world) {
   world.query(SoftTireView).updateEach(([view]) => {
-    if (view.gpu) updateGpuTireMesh(view.object, view.gpu, view.index);
+    if (view.gpu) {
+      const hub = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.wheels?.[view.index]?.hub;
+      updateGpuTireMesh(view.object, view.gpu, view.index, hub);
+    }
     else updateSoftTireMesh(view.object, view.soft);
   });
 }

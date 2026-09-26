@@ -50,6 +50,14 @@ export async function stepPhysics(world, frameDelta = null) {
       vehicle.speed = vehicle.controller.currentVehicleSpeed();
     }
     physics.world.step();
+    // Remember where each hub was when the drawn tyre shape was read back: drawing moves the
+    // shape with the hub from there, so tyres never lag the car while physics catches up.
+    if (last) {
+      for (const vehicle of vehicles) {
+        const solver = vehicle.controller.gpu?.solver;
+        if (solver) solver.readbackHubs = vehicle.controller.wheels.map((w) => ({ p: { ...w.hub.translation() }, q: { ...w.hub.rotation() } }));
+      }
+    }
   }
   if (steps) physics.stepMs = physics.stepMs * 0.95 + ((performance.now() - t0) / steps) * 0.05;
 }
