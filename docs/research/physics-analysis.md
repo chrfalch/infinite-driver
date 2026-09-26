@@ -101,3 +101,32 @@ Unless noted, the tests use solid axles, hard ground, and a 120 Hz step. The ref
 14. **GPU ground grid:** resample only after about 1 m of movement, upload only the changed area, and use numeric tile keys (about −0.6 ms).
 15. **Rapier soft mode:** cap the steps per frame at about 4, or switch on the performance preset automatically when the step cost is too high (8 → about 25 fps).
 16. **Minor:** compute the tyre normals less often or on the GPU, skip bounding spheres, and avoid per-step allocations.
+
+## 5. Status after the fixes (2026-09-26)
+
+Commits `4418db3` to `7a8bb4f`, plus the performance commit `6b8c27a`. All 40 tests pass.
+
+| Item | Before | After |
+|---|---|---|
+| Rigid braking in gear | 0.30 g | 0.94–0.96 g |
+| GPU tyre free-spin drag | up to 580 N·m | 0 |
+| GPU tyre rolling resistance (rig) | 0.14–0.57, rising with speed | 0.008–0.04 |
+| GPU tyre peak longitudinal force | 1.35 W (above μ) | 1.15 W |
+| GPU braking in the car | 1.25 g (above the brake limit) | 0.73 g |
+| GPU cornering stiffness (rig) | 0.007 W/deg | 0.04 W/deg |
+| GPU car at rest: hub forces vs weight | 20 310 vs 20 052 N | 17 188 vs 17 187 N |
+| GPU car at rest: pitch / roll | −3.6° / 1.4° | −2.5° / 1.65° |
+| GPU car at rest: jitter / creep in 30 s | 4.8 mm/s / 2 mm | 22 mm/s / 1.7 mm |
+| Solid-axle roll gradient | 13–18 deg/g | about 5 deg/g |
+| Rigid roll gradient | 0.8 deg/g | 3.4 deg/g |
+| Total mass of the soft car | 2 092 kg | 1 800 kg |
+| Render | 2.85–3.2 ms | 1.6 ms |
+| Tracks at 6 000 segments | 3.3 ms | 0.03 ms |
+| Terrain chunk-crossing spike | 16–17 ms | 1.75 ms |
+| Rapier soft mode | 7.9 fps | 54 fps |
+
+**Still open:**
+- **GPU cornering stiffness:** 0.04 W/deg, against 0.1–0.2 for a real tyre. The contact patch does not yet hold the side deflection across substeps.
+- **Pipelined GPU readback:** it is implemented but off. With one step of force latency, the wheel-spin coupling goes unstable.
+- **GPU car at rest:** small lean and jitter. The tyres make a torque of about ±50 N·m about the forward axis at rest.
+- **Rapier soft tyres:** too much grip (up to 1.6 g) after the retune.
