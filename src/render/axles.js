@@ -73,7 +73,7 @@ export function createAxleRig() {
   const steering = {
     upperShaft: unitCylinder(0.016, shaftMat, 8),
     lowerShaft: unitCylinder(0.016, shaftMat, 8),
-    joints: [0, 1].map(() => shadowed(new Mesh(new BoxGeometry(0.045, 0.045, 0.045), jointMat))),
+    joints: [0, 1].map(() => shadowed(new Mesh(new SphereGeometry(0.032, 12, 8), jointMat))),
     box: shadowed(new Mesh(new BoxGeometry(0.16, 0.12, 0.12), housing)),
     pitman: unitCylinder(0.018, jointMat, 8),
     dragLink: unitCylinder(0.02, shaftMat, 8),
@@ -135,7 +135,6 @@ export function updateAxleRig(rig, hubs, shaftSpin, dt, steerQuats = null, geome
 }
 
 const tipA = new Vector3();
-const tipB = new Vector3();
 
 // Knuckle steering arms point back and inward from each front hub; they turn with the knuckle.
 function updateSteering(st, hubs, steerQuats, geo, steer) {
@@ -160,10 +159,9 @@ function updateSteering(st, hubs, steerQuats, geo, steer) {
   place(st.pitman, geo.box, pitmanTip);
   place(st.dragLink, pitmanTip, tips[0]);
 
-  // Shaft: column end → joint above the box → box input.
-  const mid = tipB.set(geo.box.x + 0.18, geo.box.y + 0.42, geo.box.z + 0.08);
-  place(st.upperShaft, geo.columnEnd, mid);
-  place(st.lowerShaft, mid, geo.box);
-  st.joints[0].position.copy(geo.columnEnd);
-  st.joints[1].position.copy(mid);
+  // Intermediate shaft between the two universal joints, then the box's short input shaft.
+  place(st.upperShaft, geo.joint1, geo.joint2);
+  place(st.lowerShaft, geo.joint2, geo.box);
+  st.joints[0].position.copy(geo.joint1);
+  st.joints[1].position.copy(geo.joint2);
 }

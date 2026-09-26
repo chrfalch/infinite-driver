@@ -44,16 +44,32 @@ function bar(a, b, radius, material) {
   return m;
 }
 
-// Where the steering parts sit (chassis-local), shared with the axle rig.
+// Where the steering parts sit (chassis-local), shared with the axle rig and the tests.
+// Wheel → short column stub → universal joint → intermediate shaft → universal joint → short
+// input shaft → steering box on the frame rail. Each joint only takes a moderate angle.
 export function steeringGeometry(g = frameGeometry()) {
   const dashX = g.frontHoopX - 0.12;
   const faceNormal = new Vector3(-0.72, 0.69, 0).normalize();
   const wheelCenter = new Vector3(dashX - 0.34, g.dashY + 0.08, -0.3);
-  const columnEnd = wheelCenter.clone().addScaledVector(faceNormal, -0.36);
+  const columnAxis = faceNormal.clone().negate(); // from the wheel toward the dash
+  const joint1 = wheelCenter.clone().addScaledVector(columnAxis, 0.16);
   const front = suspensionMounts(0);
   // Steering box on the outside of the left frame rail, just behind the front axle.
   const box = new Vector3(front.mount.x - 0.32, g.railY + 0.02, -(g.railZ + 0.1));
-  return { wheelCenter, faceNormal, columnEnd, box };
+  // The box's input shaft points up and back toward the driver, a little steeper than the
+  // intermediate shaft, so both joints share the bend.
+  const toJoint1 = joint1.clone().sub(box).normalize();
+  const boxInput = toJoint1.clone().lerp(new Vector3(-0.2, 1, 0).normalize(), 0.3).normalize();
+  const joint2 = box.clone().addScaledVector(boxInput, 0.14);
+  return { wheelCenter, faceNormal, columnAxis, joint1, joint2, box, boxInput };
+}
+
+// Bend (degrees) at each steering universal joint.
+export function steeringJointAngles(geo = steeringGeometry()) {
+  const shaft = geo.joint2.clone().sub(geo.joint1).normalize();
+  const input = geo.boxInput.clone().negate(); // from joint 2 into the box
+  const deg = (a, b) => (Math.acos(Math.min(1, Math.max(-1, a.dot(b)))) * 180) / Math.PI;
+  return { upper: deg(geo.columnAxis, shaft), lower: deg(shaft, input) };
 }
 
 // Chassis-local: +x forward, +y up, +z right. Origin is the physics body origin.
@@ -88,10 +104,11 @@ export function createCarMesh() {
   column.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), steer.faceNormal);
   column.add(steeringWheel);
   car.add(column);
-  car.add(bar(steer.wheelCenter, steer.columnEnd, 0.022, frame));
-  // Column bracket clamped to the dash bar.
-  car.add(bar(steer.columnEnd, new Vector3(steer.columnEnd.x, g.dashY, steer.columnEnd.z), 0.018, frame));
-  car.add(box(0.06, 0.06, 0.08, frame, steer.columnEnd.x, g.dashY, steer.columnEnd.z));
+  // Column stub from the wheel to the first universal joint, held by a bracket on the dash bar.
+  car.add(bar(steer.wheelCenter, steer.joint1, 0.022, frame));
+  const clamp = steer.wheelCenter.clone().lerp(steer.joint1, 0.6);
+  car.add(bar(clamp, new Vector3(clamp.x + 0.08, g.dashY, clamp.z), 0.016, frame));
+  car.add(box(0.05, 0.05, 0.07, frame, clamp.x + 0.08, g.dashY, clamp.z));
 
   const axles = createAxleRig();
   car.add(axles.group);
