@@ -19,7 +19,7 @@ export const Transform = trait(() => ({
 }));
 export const View = trait(() => ({ object: null }));
 export const RigidBody = trait(() => ({ body: null }));
-export const Vehicle = trait(() => ({ controller: null, body: null, steer: 0, speed: 0 }));
+export const Vehicle = trait(() => ({ controller: null, body: null, drivetrain: null, steer: 0, speed: 0 }));
 export const IsPlayer = trait();
 export const CameraTarget = trait();
 export const TerrainChunk = trait(() => ({ cx: 0, cz: 0, collider: null, heights: null }));

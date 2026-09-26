@@ -82,31 +82,50 @@ export function applyDriverInput(state, input, dt, car = CAR) {
   controller.setWheelSteering(0, state.steer);
   controller.setWheelSteering(1, state.steer);
 
-  let drive = 0;
+  // Pedals: in a forward gear ▲ drives and ▼ brakes; at a standstill ▼ asks for reverse, and in
+  // reverse the roles swap (▼ backs up, ▲ brakes).
+  const drivetrain = state.drivetrain;
+  const inReverse = drivetrain.gear < 0 || drivetrain.pendingGear === -1;
   let brake = 0;
-  if (input.throttle > 0) {
-    if (speed < -0.5) brake = input.throttle * car.maxBrakeForce;
-    else drive = input.throttle * Math.min(car.maxEngineForce, car.enginePower / Math.max(absSpeed, 1));
-  }
-  if (input.brake > 0) {
-    if (speed > 0.5) brake = Math.max(brake, input.brake * car.maxBrakeForce);
-    else drive = -input.brake * car.reverseForce;
+  let throttle = 0;
+  let reverseRequest = false;
+  if (!inReverse) {
+    if (input.brake > 0) {
+      if (speed > 0.5) brake = input.brake * car.maxBrakeForce;
+      else reverseRequest = true;
+    }
+    if (input.throttle > 0) {
+      if (speed < -0.5) brake = Math.max(brake, input.throttle * car.maxBrakeForce);
+      else throttle = input.throttle;
+    }
+  } else {
+    if (input.throttle > 0) {
+      if (speed < -0.5) brake = input.throttle * car.maxBrakeForce;
+      else drivetrain.shiftTo(1);
+    }
+    if (input.brake > 0) {
+      if (speed > 0.5) brake = Math.max(brake, input.brake * car.maxBrakeForce);
+      else {
+        throttle = input.brake;
+        reverseRequest = true;
+      }
+    }
   }
 
-  const front = drive * car.frontDriveShare * 0.5;
-  const rear = drive * (1 - car.frontDriveShare) * 0.5;
-  controller.setWheelEngineForce(0, front);
-  controller.setWheelEngineForce(1, front);
-  controller.setWheelEngineForce(2, rear);
-  controller.setWheelEngineForce(3, rear);
+  // Engine, clutch, gearbox, and differentials turn pedal input into torque per wheel.
+  const radius = controller.tire?.outerRadius ?? car.wheelRadius;
+  const spins = [0, 1, 2, 3].map((i) => (controller.wheelSpin ? controller.wheelSpin(i) : speed / radius));
+  const torques = drivetrain.update(dt, { throttle, reverseRequest }, spins, speed, radius);
+  for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, torques[i] / radius);
 
-  // Off the accelerator the engine holds the car back through the 4WD driveline.
-  const engineBrake = input.throttle === 0 && input.brake === 0 ? car.engineBrakeForce : 0;
+  // With nothing pressed at walking pace, the clutch is out and there is no engine braking left, so
+  // roll gently to a stop and hold there (like a light touch on the brake).
+  const idleInput = input.throttle === 0 && input.brake === 0;
+  const hold = idleInput && absSpeed < 2 ? car.mass * (absSpeed < 0.4 ? 3 : 1.2) : 0;
 
   // Rapier applies brake as an impulse per step, so convert from force.
-  const frontBrake = (brake * 0.35 + engineBrake * car.frontDriveShare * 0.5) * dt;
-  const rearBrake =
-    (brake * 0.15 + engineBrake * (1 - car.frontDriveShare) * 0.5 + (input.handbrake ? car.handbrakeForce * 0.5 : 0)) * dt;
+  const frontBrake = (brake * 0.35 + hold * 0.25) * dt;
+  const rearBrake = (brake * 0.15 + hold * 0.25 + (input.handbrake ? car.handbrakeForce * 0.5 : 0)) * dt;
   controller.setWheelBrake(0, frontBrake);
   controller.setWheelBrake(1, frontBrake);
   controller.setWheelBrake(2, rearBrake);

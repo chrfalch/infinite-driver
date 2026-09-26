@@ -216,6 +216,10 @@ export class JointedVehicle {
   wheelSuspensionLength(i) {
     return this.wheels[i].suspensionLength;
   }
+  // Wheel spin rate relative to its knuckle, rad/s, positive when rolling forward.
+  wheelSpin(i) {
+    return this.wheels[i].spinRate ?? 0;
+  }
   wheelRotation(i) {
     return this.wheels[i].rotation;
   }
@@ -270,6 +274,7 @@ export class JointedVehicle {
       const spin =
         (wHub.x - wKnuckle.x) * spinAxis.x + (wHub.y - wKnuckle.y) * spinAxis.y + (wHub.z - wKnuckle.z) * spinAxis.z;
       w.rotation = -2 * Math.atan2(rel.z, rel.w);
+      w.spinRate = -spin; // forward rolling is a negative spin about the axle
 
       // Engine: forward drive rolls the wheel about -axle. Brakes oppose the spin.
       const radius = this.tire.outerRadius;

@@ -85,10 +85,11 @@ async function main() {
   world.spawn(
     HudLabel({
       text: engineText,
-      format: (v, input) => {
-        if (input.engineOn) return 'engine on';
-        if (input.brake) return 'braking';
-        return Math.abs(v.speed) < 0.3 ? 'idle' : 'engine braking';
+      format: (v) => {
+        const d = v.drivetrain;
+        if (!d) return '';
+        const mode = d.params.automatic ? 'auto' : 'manual';
+        return `gear ${d.label} · ${Math.round(d.rpm / 50) * 50} rpm · ${mode}`;
       },
     }),
   );
@@ -118,7 +119,8 @@ async function main() {
   });
   hintText.position.set(28, -78, 0);
   render.hudScene.add(hintText);
-  const KEY_HINT = 'W / Up  accelerate (hold)    S / Down  brake    A D / Left Right  steer    Space  handbrake    R  respawn    Scroll  zoom';
+  const KEY_HINT =
+    'W / Up  accelerate (hold)    S / Down  brake, reverse    A D  steer    Q E  shift    L  low range    Space  handbrake    R  respawn';
   const TOUCH_HINT = 'Hold the up button to drive, down to brake    Pinch to zoom';
   world.spawn(HudLabel({ text: hintText, format: () => (touch.isVisible() ? TOUCH_HINT : KEY_HINT) }));
 

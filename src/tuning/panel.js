@@ -16,20 +16,16 @@ import {
 } from '../tire/config.js';
 import { TIRE_REBUILD_KEYS, updateSoftTire } from '../tire/soft-tire.js';
 import { applyWheelSettings } from '../vehicle/physics.js';
+import { DRIVETRAIN, resetDrivetrain, saveDrivetrain } from '../vehicle/config.js';
 import { rebuildCar, respawnCar } from '../vehicle/spawn.js';
 
 // [path, label, min, max, step, apply] — apply is 'live' (read every step), 'wheels' (pushed to
 // the Rapier controller), or 'rebuild' (shape or mass: the car is rebuilt in place).
 const GROUPS = [
   [
-    'Engine & brakes',
+    'Brakes & resistance',
     [
-      ['maxEngineForce', 'Max drive force (N)', 1000, 20000, 100, 'live'],
-      ['enginePower', 'Engine power (W)', 20000, 400000, 1000, 'live'],
-      ['frontDriveShare', 'Front drive share', 0, 1, 0.05, 'live'],
-      ['reverseForce', 'Reverse force (N)', 500, 10000, 100, 'live'],
       ['maxBrakeForce', 'Brake force (N)', 2000, 40000, 250, 'live'],
-      ['engineBrakeForce', 'Engine braking (N)', 0, 12000, 100, 'live'],
       ['handbrakeForce', 'Handbrake force (N)', 0, 20000, 250, 'live'],
       ['dragCoefficient', 'Air drag (½ρCdA)', 0, 3, 0.01, 'live'],
       ['rollingResistance', 'Rolling resistance', 0, 0.1, 0.001, 'live'],
@@ -138,7 +134,7 @@ export function createTuningPanel(world, { heightAt }) {
 
   const actions = {
     copy: async () => {
-      const text = JSON.stringify({ changed: changedSettings(), controls: CONTROLS, ground: GROUND, car: CAR, tire: TIRE, gpuTire: GPU_TIRE }, null, 2);
+      const text = JSON.stringify({ changed: changedSettings(), controls: CONTROLS, ground: GROUND, drivetrain: DRIVETRAIN, car: CAR, tire: TIRE, gpuTire: GPU_TIRE }, null, 2);
       const ok = await copyText(text);
       copyButton.name(ok ? 'Copied ✓' : 'Copy failed, see console');
       if (!ok) console.log(text);
@@ -149,6 +145,7 @@ export function createTuningPanel(world, { heightAt }) {
       resetTire();
       resetGpuTire();
       resetGround();
+      resetDrivetrain();
       Object.assign(CONTROLS, DEFAULT_CONTROLS);
       saveControls();
       gui.controllersRecursive().forEach((c) => c.updateDisplay());
@@ -208,7 +205,7 @@ export function createTuningPanel(world, { heightAt }) {
           if (mode === 'rebuild') scheduleRebuild();
         });
     }
-    if (title !== 'Engine & brakes') folder.close();
+    folder.close();
   }
 
   // Soft tyre settings: most apply live to the four tyres, size and mesh rebuild the car.
@@ -245,6 +242,40 @@ export function createTuningPanel(world, { heightAt }) {
     softFolder.add(TIRE, key, min, max, step).name(label).onChange(onTire(key));
   }
   softFolder.close();
+
+  // Drivetrain: read live every step.
+  const dt = gui.addFolder('Drivetrain');
+  dt.add(DRIVETRAIN, 'automatic').name('Automatic gearbox (Q/E = manual)').onChange(saveDrivetrain);
+  dt.add(DRIVETRAIN, 'low').name('Low range (L)').onChange(saveDrivetrain);
+  dt.add(DRIVETRAIN, 'centerLock').name('Lock centre diff').onChange(saveDrivetrain);
+  dt.add(DRIVETRAIN, 'frontLock').name('Lock front diff').onChange(saveDrivetrain);
+  dt.add(DRIVETRAIN, 'rearLock').name('Lock rear diff').onChange(saveDrivetrain);
+  const torqueScale = { value: 1 };
+  const baseCurve = DRIVETRAIN.torqueCurve.map(([r, t]) => [r, t]);
+  dt.add(torqueScale, 'value', 0.3, 3, 0.05)
+    .name('Engine torque ×')
+    .onChange(() => {
+      DRIVETRAIN.torqueCurve.forEach((pt, i) => (pt[1] = baseCurve[i][1] * torqueScale.value));
+      saveDrivetrain();
+    });
+  for (const [key, label, min, max, step] of [
+    ['finalDrive', 'Final drive ratio', 2.5, 8, 0.05],
+    ['lowRange', 'Low range ratio', 1.5, 4, 0.05],
+    ['frontShare', 'Front torque share', 0, 1, 0.05],
+    ['upshiftRpm', 'Upshift rpm', 2000, 5200, 50],
+    ['downshiftRpm', 'Downshift rpm', 900, 3000, 50],
+    ['coastDownshiftRpm', 'Coasting downshift rpm', 900, 3500, 50],
+    ['idleRpm', 'Idle rpm', 600, 1200, 10],
+    ['limiterRpm', 'Rev limiter rpm', 3500, 7000, 50],
+    ['frictionPerRpm', 'Engine friction per rpm', 0, 0.05, 0.001],
+    ['exhaustBrake', 'Exhaust brake (N·m)', 0, 250, 5],
+    ['engineInertia', 'Engine inertia (kg·m²)', 0.05, 1, 0.01],
+    ['clutchTorque', 'Clutch capacity (N·m)', 200, 2000, 10],
+    ['shiftTime', 'Shift time (s)', 0.05, 1, 0.05],
+  ]) {
+    dt.add(DRIVETRAIN, key, min, max, step).name(label).onChange(saveDrivetrain);
+  }
+  dt.close();
 
   // Ground: softness sinks the GPU tyres into the soil; tracks are drawn in every tyre mode.
   const ground = gui.addFolder('Ground');

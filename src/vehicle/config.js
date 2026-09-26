@@ -1,3 +1,5 @@
+import { DEFAULT_DRIVETRAIN } from './drivetrain.js';
+
 // A short-wheelbase 4x4, roughly 1.8 t. Chassis-local axes: +x forward, +y up, +z right.
 export const DEFAULT_CAR = Object.freeze({
   // Soft-body tyres on a fully jointed car; false uses Rapier's raycast vehicle with rigid wheels.
@@ -24,12 +26,7 @@ export const DEFAULT_CAR = Object.freeze({
   frictionSlip: 1.25,
   sideFrictionStiffness: 1.0,
 
-  frontDriveShare: 0.4, // permanent 4WD, rear biased
-  maxEngineForce: 8200, // N at the wheels, before the power limit
-  enginePower: 130000, // W
-  reverseForce: 3600,
   maxBrakeForce: 16500, // N across all wheels
-  engineBrakeForce: 4200, // N off throttle, about 0.26 g with drag and rolling resistance
   handbrakeForce: 8000, // N on the rear axle
   maxSteer: 0.62, // rad at walking pace
   steerRate: 2.0, // rad/s
@@ -87,4 +84,25 @@ export function resetCar() {
 export function importCar(settings) {
   merge(CAR, settings);
   saveCar();
+}
+
+// Drivetrain settings (see drivetrain.js), persisted like the car settings.
+const DRIVETRAIN_KEY = 'drift.drivetrain.v1';
+export const DRIVETRAIN = merge(clone(DEFAULT_DRIVETRAIN), (() => {
+  try {
+    return JSON.parse(globalThis.localStorage?.getItem(DRIVETRAIN_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+})());
+export function saveDrivetrain() {
+  try {
+    globalThis.localStorage?.setItem(DRIVETRAIN_KEY, JSON.stringify(DRIVETRAIN));
+  } catch {
+    // Storage can be unavailable; settings still work for this session.
+  }
+}
+export function resetDrivetrain() {
+  merge(DRIVETRAIN, clone(DEFAULT_DRIVETRAIN));
+  saveDrivetrain();
 }

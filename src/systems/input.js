@@ -1,5 +1,6 @@
 import { CONTROLS } from '../controls.js';
-import { Input } from '../ecs/traits.js';
+import { Input, IsPlayer, Vehicle } from '../ecs/traits.js';
+import { DRIVETRAIN, saveDrivetrain } from '../vehicle/config.js';
 import { isTyping } from '../tuning/panel.js';
 
 const keys = new Set();
@@ -66,5 +67,23 @@ export function readInput(world) {
   // Positive steer turns left.
   input.steer = (pressed('KeyA', 'ArrowLeft') ? 1 : 0) - (pressed('KeyD', 'ArrowRight') ? 1 : 0);
   input.handbrake = pressed('Space');
+
+  // Gearbox keys: Q / E shift down / up (and switch to manual), L toggles low range when slow.
+  const car = world.queryFirst(IsPlayer, Vehicle);
+  const vehicle = car?.get(Vehicle);
+  if (vehicle?.drivetrain) {
+    if (tapped('KeyE', 'KeyQ')) {
+      if (DRIVETRAIN.automatic) {
+        DRIVETRAIN.automatic = false;
+        saveDrivetrain();
+      }
+      if (tapped('KeyE')) vehicle.drivetrain.shiftUp();
+      else vehicle.drivetrain.shiftDown();
+    }
+    if (tapped('KeyL') && Math.abs(vehicle.speed) < 3) {
+      DRIVETRAIN.low = !DRIVETRAIN.low;
+      saveDrivetrain();
+    }
+  }
   taps.clear();
 }

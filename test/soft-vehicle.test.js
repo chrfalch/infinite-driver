@@ -1,6 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { GROUP, groups } from '../src/tire/soft-tire.js';
+import { Drivetrain, DEFAULT_DRIVETRAIN } from '../src/vehicle/drivetrain.js';
 import { applyDriverInput } from '../src/vehicle/physics.js';
 import { createSoftCarBody, softCarRideHeight } from '../src/vehicle/soft-vehicle.js';
 
@@ -18,7 +19,7 @@ describe('jointed car on soft tyres', () => {
     world.createCollider(
       RAPIER.ColliderDesc.cuboid(500, 1, 500).setTranslation(0, -1, 0).setFriction(1).setCollisionGroups(groups(GROUP.WORLD, 0xffff)),
     );
-    const state = { ...createSoftCarBody(RAPIER, world, { x: 0, y: softCarRideHeight(), z: 0 }), steer: 0 };
+    const state = { ...createSoftCarBody(RAPIER, world, { x: 0, y: softCarRideHeight(), z: 0 }), steer: 0, drivetrain: new Drivetrain({ ...DEFAULT_DRIVETRAIN }) };
     const run = (seconds, input) => {
       for (let t = 0; t < seconds; t += DT) {
         applyDriverInput(state, input, DT);

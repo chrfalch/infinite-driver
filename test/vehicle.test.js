@@ -1,6 +1,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { CAR } from '../src/vehicle/config.js';
+import { Drivetrain, DEFAULT_DRIVETRAIN } from '../src/vehicle/drivetrain.js';
 import { applyDriverInput, createCarBody } from '../src/vehicle/physics.js';
 import { generateRocks } from '../src/terrain/rocks.js';
 
@@ -14,7 +15,7 @@ function setup() {
   world.timestep = DT;
   world.createCollider(RAPIER.ColliderDesc.cuboid(5000, 1, 5000).setTranslation(0, -1, 0));
   const car = createCarBody(RAPIER, world, { x: 0, y: 1.2, z: 0 });
-  const state = { ...car, steer: 0 };
+  const state = { ...car, steer: 0, drivetrain: new Drivetrain({ ...DEFAULT_DRIVETRAIN }) };
   const run = (seconds, input, onStep) => {
     for (let t = 0; t < seconds; t += DT) {
       applyDriverInput(state, input, DT);
@@ -73,19 +74,21 @@ describe('car physics', () => {
     expect(decel).toBeLessThan(1.2);
   });
 
-  it('slows to a stop off the accelerator, more gently than braking', () => {
+  it('slows to a stop off the accelerator in gear, more gently than braking', () => {
     const { state, run } = setup();
     run(2, idle);
-    state.body.setLinvel({ x: 13.9, y: 0, z: 0 }, true); // 50 km/h
+    // Drive up to about 50 km/h, then lift off and let engine braking work.
+    for (let i = 0; i < 20 * 120 && state.body.linvel().x < 13.9; i++) run(1 / 120, { ...idle, throttle: 1 });
+    const v0 = state.body.linvel().x;
     let t = 0;
-    run(15, idle, () => {
+    run(20, idle, () => {
       if (state.body.linvel().x > 0.3) t += 1 / 120;
     });
-    const decel = (13.9 - 0.3) / t / 9.81;
-    console.log('coast 50 km/h to stop (s)', t.toFixed(2), 'decel (g)', decel.toFixed(2));
+    const decel = (v0 - 0.3) / t / 9.81;
+    console.log('coast', (v0 * 3.6).toFixed(0), 'km/h to stop (s)', t.toFixed(2), 'decel (g)', decel.toFixed(2), 'gear', state.drivetrain.label);
     expect(t).toBeGreaterThan(3);
-    expect(t).toBeLessThan(8);
-    expect(state.body.linvel().x).toBeLessThan(0.05);
+    expect(t).toBeLessThan(10);
+    expect(Math.abs(state.body.linvel().x)).toBeLessThan(0.05);
   });
 
   it('turns and holds plausible lateral grip', () => {
@@ -124,11 +127,14 @@ describe('car physics', () => {
     const rest = state.controller.wheelSuspensionLength(0);
     let minLen = rest;
     let minUp = 1;
-    run(6, { ...idle, throttle: 0.25 }, () => {
+    const track = () => {
       minLen = Math.min(minLen, state.controller.wheelSuspensionLength(0));
       const r = state.body.rotation();
       minUp = Math.min(minUp, 1 - 2 * (r.x * r.x + r.z * r.z));
-    });
+    };
+    // Pull away in first gear, then roll over the rock off throttle.
+    run(2, { ...idle, throttle: 1 }, track);
+    run(5, idle, track);
     console.log('FL rest', rest.toFixed(3), 'min', minLen.toFixed(3), 'x', state.body.translation().x.toFixed(1), 'min up', minUp.toFixed(3));
     expect(rest - minLen).toBeGreaterThan(0.12);
     expect(minUp).toBeGreaterThan(0.9);

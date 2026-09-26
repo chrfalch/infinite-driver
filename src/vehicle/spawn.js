@@ -17,7 +17,8 @@ import { createSoftTireMesh } from '../render/soft-tire-mesh.js';
 import { CONTROLS } from '../controls.js';
 import { effectiveGpuTire, effectiveTire, GPU_TIRE, TIRE } from '../tire/config.js';
 import { createGpuTires } from '../tire/gpu-tires.js';
-import { CAR } from './config.js';
+import { CAR, DRIVETRAIN } from './config.js';
+import { Drivetrain } from './drivetrain.js';
 import { createCarBody, WHEELS } from './physics.js';
 import { createSoftCarBody, softCarRideHeight } from './soft-vehicle.js';
 
@@ -25,7 +26,7 @@ const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
 const ZERO = { x: 0, y: 0, z: 0 };
 
 // Builds the player car (physics body, controller, meshes, wheel entities) from the current CAR settings.
-export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, angvel = ZERO, steer = 0 }) {
+export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, angvel = ZERO, steer = 0, drivetrain = null }) {
   const { rapier, world: physicsWorld } = world.get(Physics);
   const { scene } = world.get(Render);
 
@@ -53,7 +54,8 @@ export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, 
     CameraTarget,
     Transform({ position: { ...position }, quaternion: { ...rotation } }),
     RigidBody({ body }),
-    Vehicle({ controller, body, steer, speed: 0 }),
+    // The drivetrain reads DRIVETRAIN live, so panel changes apply without a rebuild.
+    Vehicle({ controller, body, drivetrain: drivetrain ?? new Drivetrain(DRIVETRAIN), steer, speed: 0 }),
     View({ object }),
     SteeringWheel({ object: steeringWheel }),
   );
@@ -107,8 +109,9 @@ export function despawnCar(world, car) {
 export function rebuildCar(world) {
   const car = world.queryFirst(IsPlayer, Vehicle);
   if (!car) return null;
-  const { body, steer } = car.get(Vehicle);
+  const { body, steer, drivetrain } = car.get(Vehicle);
   const state = {
+    drivetrain,
     position: { ...body.translation() },
     rotation: { ...body.rotation() },
     linvel: { ...body.linvel() },
