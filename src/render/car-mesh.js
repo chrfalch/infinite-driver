@@ -12,7 +12,7 @@ import {
 import { CAR } from '../vehicle/config.js';
 import { wheelMount } from '../vehicle/physics.js';
 import { createAxleRig } from './axles.js';
-import { createFrameMesh } from './frame-mesh.js';
+import { createTubeChassis } from './tube-chassis.js';
 import { mergeByMaterial } from './merge-geometry.js';
 import { frameGeometry, suspensionMounts } from '../vehicle/frame-geometry.js';
 import { rimInnerFace } from './wheel-inset.js';
@@ -47,17 +47,16 @@ function bar(a, b, radius, material) {
 }
 
 // Where the steering parts sit (chassis-local), shared with the axle rig and the tests.
-// Wheel → short column stub → universal joint → intermediate shaft → universal joint → short
-// input shaft → steering box on the frame rail. Each joint only takes a moderate angle.
-export function steeringGeometry(g = frameGeometry()) {
-  const dashX = g.frontHoopX - 0.12;
-  const faceNormal = new Vector3(-0.72, 0.69, 0).normalize();
-  const wheelCenter = new Vector3(dashX - 0.34, g.dashY + 0.08, -0.3);
+// Wheel → column (rising toward the driver at 25°, the wheel square to it) → universal joint under
+// the dash → intermediate shaft → universal joint → short input shaft → steering box inside the
+// nose box, just behind the front axle. Each joint only takes a moderate angle.
+export function steeringGeometry() {
+  const tilt = (25 * Math.PI) / 180;
+  const faceNormal = new Vector3(-Math.cos(tilt), Math.sin(tilt), 0); // up and back at the driver
+  const wheelCenter = new Vector3(0.24, 0.24, -0.3);
   const columnAxis = faceNormal.clone().negate(); // from the wheel toward the dash
-  const joint1 = wheelCenter.clone().addScaledVector(columnAxis, 0.16);
-  const front = suspensionMounts(0);
-  // Steering box on the outside of the left frame rail, just behind the front axle.
-  const box = new Vector3(front.mount.x - 0.32, g.railY + 0.02, -(g.railZ + 0.1));
+  const joint1 = wheelCenter.clone().addScaledVector(columnAxis, 0.5);
+  const box = new Vector3(1.0, -0.28, -0.4);
   // The box's input shaft points up and back toward the driver, a little steeper than the
   // intermediate shaft, so both joints share the bend.
   const toJoint1 = joint1.clone().sub(box).normalize();
@@ -75,46 +74,63 @@ export function steeringJointAngles(geo = steeringGeometry()) {
 }
 
 // Chassis-local: +x forward, +y up, +z right. Origin is the physics body origin.
-// A buggy with no body panels: ladder frame, roll cage, seats, steering, and running gear.
+// A sand buggy with no body panels: one welded tube chassis (see tube-chassis.js), bucket seats,
+// steering, and running gear.
 export function createCarMesh() {
   const g = frameGeometry();
   const car = new Group();
   // Parts fixed to the chassis go into `body`, merged into one mesh per material at the end.
   const body = new Group();
-  body.name = 'frame and cage';
-  body.add(createFrameMesh());
+  body.name = 'tube chassis';
+  body.add(createTubeChassis(0).group);
 
-  // Seats on the floor pan between the hoops, driver on the left (-z).
-  const seatX = (g.frontHoopX + g.mainHoopX) / 2 - 0.12;
+  // Bucket seats on the floor, driver on the left (-z): cushion, back, and side bolsters.
   for (const z of [-0.3, 0.3]) {
-    body.add(box(0.46, 0.1, 0.44, seat, seatX, g.railTop + 0.13, z));
-    body.add(box(0.1, 0.55, 0.44, seat, seatX - 0.25, g.railTop + 0.42, z));
-    // Seat mounts to the floor.
-    body.add(box(0.36, 0.08, 0.05, frame, seatX, g.railTop + 0.05, z - 0.17));
-    body.add(box(0.36, 0.08, 0.05, frame, seatX, g.railTop + 0.05, z + 0.17));
+    body.add(box(0.46, 0.08, 0.4, seat, g.seatX, g.floorTop + 0.08, z));
+    for (const side of [1, -1]) {
+      const bolster = box(0.44, 0.1, 0.07, seat, g.seatX, g.floorTop + 0.14, z + side * 0.2);
+      bolster.rotation.x = side * 0.25;
+      body.add(bolster);
+    }
+    const back = box(0.08, 0.7, 0.4, seat, g.seatX - 0.27, g.floorTop + 0.43, z);
+    back.rotation.z = 0.22;
+    body.add(back);
+    for (const side of [1, -1]) {
+      const wing = box(0.1, 0.62, 0.06, seat, g.seatX - 0.24, g.floorTop + 0.4, z + side * 0.21);
+      wing.rotation.z = 0.22;
+      wing.rotation.x = side * 0.3;
+      body.add(wing);
+    }
+    // Seat rails on the floor.
+    for (const side of [1, -1]) body.add(box(0.4, 0.04, 0.04, frame, g.seatX, g.floorTop + 0.02, z + side * 0.15));
   }
 
   // Steering: the wheel faces the driver, tilted up and back; its column runs forward and down
   // through a bracket on the dash bar. The shaft to the steering box and the linkage to the front
   // axle are in the axle rig, which moves them with the steering.
   const steeringWheel = new Group();
-  const ring = shadowed(new Mesh(new TorusGeometry(0.17, 0.022, 8, 24), frame));
-  const spoke = box(0.3, 0.03, 0.03, frame, 0, 0, 0);
-  const spoke2 = box(0.03, 0.3, 0.03, frame, 0, 0, 0);
-  steeringWheel.add(ring, spoke, spoke2);
+  const ring = shadowed(new Mesh(new TorusGeometry(0.17, 0.018, 10, 36), frame));
+  const hubCap = shadowed(new Mesh(new CylinderGeometry(0.035, 0.035, 0.05, 16), frame));
+  hubCap.rotation.x = Math.PI / 2;
+  steeringWheel.add(ring, hubCap);
+  for (const a of [-Math.PI / 2, -Math.PI / 2 + (2 * Math.PI) / 3, -Math.PI / 2 - (2 * Math.PI) / 3]) {
+    const spoke = box(0.15, 0.025, 0.012, frame, Math.cos(a) * 0.09, Math.sin(a) * 0.09, -0.01);
+    spoke.rotation.z = a;
+    steeringWheel.add(spoke);
+  }
   mergeByMaterial(steeringWheel);
-  const steer = steeringGeometry(g);
+  const steer = steeringGeometry();
   const column = new Group();
   column.position.copy(steer.wheelCenter);
   // Face normal points up and back at the driver.
   column.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), steer.faceNormal);
   column.add(steeringWheel);
   car.add(column);
-  // Column stub from the wheel to the first universal joint, held by a bracket on the dash bar.
-  body.add(bar(steer.wheelCenter, steer.joint1, 0.022, frame));
-  const clamp = steer.wheelCenter.clone().lerp(steer.joint1, 0.6);
-  body.add(bar(clamp, new Vector3(clamp.x + 0.08, g.dashY, clamp.z), 0.016, frame));
-  body.add(box(0.05, 0.05, 0.07, frame, clamp.x + 0.08, g.dashY, clamp.z));
+  // Column from the wheel to the first universal joint, held by a strap from the dash bar.
+  body.add(bar(steer.wheelCenter, steer.joint1, 0.02, frame));
+  const clamp = steer.wheelCenter.clone().lerp(steer.joint1, 0.76);
+  body.add(bar(clamp, new Vector3(g.dash.x, g.dash.y, clamp.z), 0.012, frame));
+  body.add(box(0.05, 0.05, 0.06, frame, clamp.x, clamp.y, clamp.z));
   car.add(mergeByMaterial(body));
 
   const axles = createAxleRig();

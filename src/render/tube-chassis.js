@@ -17,6 +17,7 @@ import {
   TubeGeometry,
   Vector3,
 } from 'three/webgpu';
+import { PICKUPS as SAND_BUGGY_PICKUPS } from '../vehicle/frame-geometry.js';
 
 const MAIN = 0.024; // 48 mm OD main hoops and rails
 const SEC = 0.019; // 38 mm OD bracing
@@ -193,7 +194,7 @@ function shockTower(b, f, from, { railZ = 0.43, kickY = -0.08 } = {}) {
 
 const T = 0.031; // 62 mm OD: the chunky tube of the sand buggy
 const T2 = 0.025;
-const plateMat = new MeshStandardMaterial({ color: '#c9ccce', roughness: 0.45, metalness: 0.5 });
+const plateMat = new MeshStandardMaterial({ color: '#8f9498', roughness: 0.5, metalness: 0.55 });
 const lampMat = new MeshStandardMaterial({ color: '#fff4d6', emissive: '#fff1c2', emissiveIntensity: 0.6, roughness: 0.2 });
 const lampBody = new MeshStandardMaterial({ color: '#1d1e20', roughness: 0.4, metalness: 0.6 });
 
@@ -204,11 +205,7 @@ const sandBuggy = {
   name: 'Sand buggy',
   note: 'After your reference: chunky tube in long bends, a low nose box with a hoop bumper, A-pillars that run into a long roof and down to the rear hoop.',
   paint: '#f0643c',
-  pickups: {
-    shockTop: (front) => (front ? [1.22, 0.12, 0.51] : [-1.2, 0.2, 0.6]),
-    lowerLink: (front) => [front ? 0.4 : -0.4, -0.43, 0.42],
-    upperLink: (front) => [front ? 0.7 : -0.7, -0.26, 0.25],
-  },
+  pickups: SAND_BUGGY_PICKUPS,
   build(b) {
     const F = -0.4; // floor tube centre
     // Nose box corners (right side): rear-bottom, rear-top, front-bottom, front-top.
