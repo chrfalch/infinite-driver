@@ -48,7 +48,7 @@ export function resetTire() {
 
 // GPU tyre solver settings (see gpu-tire-solver.js). Geometry comes from TIRE.
 export const DEFAULT_GPU_TIRE = Object.freeze({
-  pressureKpa: 60, // gauge air pressure (about 9 psi, a trail pressure that lets the tyre wrap rocks)
+  pressureKpa: 45, // gauge air pressure (about 6.5 psi, a rock-crawling pressure that lets the tyre wrap rocks)
   segmentsAround: 40,
   segmentsAcross: 10,
   beadRings: 1,
@@ -58,6 +58,7 @@ export const DEFAULT_GPU_TIRE = Object.freeze({
   shearStiffness: 1.0,
   bendStiffness: 0.3,
   shapeStiffness: 0.1, // pull toward the moulded shape per pass (across the tread)
+  treadShapeRadial: 0, // share of that pull kept radially on the tread (0 lets rocks dent it)
   beadPull: 0.5, // fraction of the gap to the rim seat closed per pass
   damping: 2, // 1/s, relative to the wheel's rigid motion
   friction: 1.1,

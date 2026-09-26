@@ -29,6 +29,8 @@ const Params = d.struct({
   shearStiffness: d.f32,
   bendStiffness: d.f32,
   shapeStiffness: d.f32,
+  treadShapeRadial: d.f32, // 0..1: share of shape memory kept radially on the tread (0 lets it dent)
+  treadRadius: d.f32, // rest radius (in the wheel plane) above which a particle counts as tread
   beadPull: d.f32,
   damping: d.f32,
   friction: d.f32,
@@ -74,6 +76,10 @@ export class GpuTireSolver {
     this.beadLow = beadLow;
     this.beadHigh = beadHigh;
     this.restLocal = restLocal;
+    // Tread: particles whose rest radius (in the wheel plane) is within 6 cm of the outermost.
+    let maxR = 0;
+    for (let i = 0; i < this.perTire; i++) maxR = Math.max(maxR, Math.hypot(restLocal[i * 3], restLocal[i * 3 + 1]));
+    this.treadRadius = maxR - 0.06;
 
     const root = this.root;
     this.pos = root.createMutable(d.arrayOf(d.vec4f, this.count));
@@ -357,6 +363,14 @@ export class GpuTireSolver {
             let around = normalize(cross(axleDir, p - center) + vec3f(1e-6, 0.0, 0.0));
             var shape = params.shapeStiffness * (seat - p);
             shape -= around * dot(shape, around);
+            // On the tread, shape memory holds the cross-section sideways but mostly lets the tread
+            // move in radially: pressure and the cords carry the load, so a rock dents the tread
+            // locally (and the sidewalls bulge) instead of lifting the whole tyre like a rigid ring.
+            let r0 = restOf(t, k);
+            let treadW = clamp((length(r0.xy) - params.treadRadius) / 0.04, 0.0, 1.0);
+            let rel = p - center;
+            let radial = normalize(rel - axleDir * dot(rel, axleDir) + vec3f(0.0, 1e-6, 0.0));
+            shape -= radial * dot(shape, radial) * treadW * (1.0 - params.treadShapeRadial);
             p += shape;
             let vv = k % params.nv;
             if (vv >= params.beadLow && vv <= params.beadHigh) { p += params.beadPull * (seat - p); }
@@ -434,6 +448,7 @@ export class GpuTireSolver {
       nb,
       qrot,
       hubPoint,
+      restOf,
       constrain,
       contactForce,
       floorClamp,
@@ -482,6 +497,8 @@ export class GpuTireSolver {
       shearStiffness: s.shearStiffness,
       bendStiffness: s.bendStiffness,
       shapeStiffness: s.shapeStiffness,
+      treadShapeRadial: s.treadShapeRadial ?? 1,
+      treadRadius: this.treadRadius,
       beadPull: s.beadPull,
       damping: s.damping,
       friction: s.friction,
