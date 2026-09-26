@@ -118,10 +118,43 @@ for (const s of [1, -1]) {
     wing.rotation.x = side * 0.3;
   }
 }
-const wheel = add(new Mesh(new TorusGeometry(0.17, 0.02, 8, 28), dark), 0.28, 0.28, -0.3);
-wheel.rotation.y = Math.PI / 2;
-wheel.rotation.x = 0.45;
-between([0.69, 0.46, -0.3], [0.3, 0.29, -0.3], 0.018, dark);
+// Steering: the column rises toward the driver at 25° from horizontal, so the wheel's top leans
+// forward. Column -> upper U-joint under the dash -> intermediate shaft -> lower U-joint ->
+// steering box on the front axle.
+{
+  const tilt = (25 * Math.PI) / 180;
+  const z = -0.3; // driver's side
+  const W = new Vector3(0.24, 0.24, z); // wheel centre
+  const toDash = new Vector3(Math.cos(tilt), -Math.sin(tilt), 0); // along the column, away from the driver
+  const rimGroup = new (await import('three/webgpu')).Group();
+  rimGroup.position.copy(W);
+  // Wheel plane: its normal points back up the column toward the driver.
+  rimGroup.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), toDash.clone().negate());
+  const rimRing = new Mesh(new TorusGeometry(0.17, 0.018, 10, 36), dark);
+  const hubCap = new Mesh(new CylinderGeometry(0.035, 0.035, 0.05, 16), dark);
+  hubCap.rotation.x = Math.PI / 2;
+  rimGroup.add(rimRing, hubCap);
+  for (const a of [Math.PI / 2, Math.PI / 2 + (2 * Math.PI) / 3, Math.PI / 2 - (2 * Math.PI) / 3]) {
+    const spoke = new Mesh(new BoxGeometry(0.15, 0.025, 0.012), dark);
+    spoke.position.set(Math.cos(-a) * 0.09, Math.sin(-a) * 0.09, -0.01);
+    spoke.rotation.z = -a;
+    rimGroup.add(spoke);
+  }
+  rimGroup.traverse((m) => (m.castShadow = true));
+  car.add(rimGroup);
+  const J1 = W.clone().addScaledVector(toDash, 0.5); // upper U-joint, below the dash bar
+  const J2 = new Vector3(1.05, -0.12, z * 0.8); // lower U-joint at the nose box
+  const box = [1.3, -0.3, -0.2]; // steering box on the axle side of the nose box
+  between(W.toArray(), J1.toArray(), 0.02, dark);
+  between(J1.toArray(), J2.toArray(), 0.016, dark);
+  between(J2.toArray(), box, 0.016, dark);
+  for (const j of [J1, J2]) add(new Mesh(new SphereGeometry(0.03, 12, 8), dark), j.x, j.y, j.z);
+  add(new Mesh(new BoxGeometry(0.12, 0.1, 0.12), dark), ...box);
+  // Column support: a strap from the dash bar down to the column.
+  const dash = [0.69, 0.46, z];
+  const mid = W.clone().addScaledVector(toDash, 0.38);
+  between(dash, mid.toArray(), 0.012, dark);
+}
 
 const camera = new PerspectiveCamera(32, innerWidth / innerHeight, 0.1, 100);
 const views = { ref: [4.6, 1.5, -5.4], '3q': [5.2, 2.6, 5.2], '3qr': [-5.2, 2.6, 5.4], side: [0, 1.2, 8.2], front: [8.2, 1.4, 0], top: [0.01, 9, 0] };
