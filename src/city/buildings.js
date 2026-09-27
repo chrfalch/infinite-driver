@@ -59,6 +59,9 @@ export function buildBuildings(buildings, heightAt) {
   const tint = new Buffer(Float32Array);
   const seed = new Buffer(Float32Array);
   const solids = [];
+  // Every wall quad, for the facade photo bake (render/facade-bake.js): its 6 vertices from
+  // `first`, its base line a-b, bottom and top heights, and its outward normal.
+  const walls = [];
 
   for (const b of buildings) {
     const first = position.length / 3;
@@ -100,7 +103,7 @@ export function buildBuildings(buildings, heightAt) {
 
     // Walls: one quad per footprint edge, facing away from the building.
     const rings = [[b.outer, b.outerWalls, true], ...b.holes.map((h, i) => [h, b.holeWalls[i], false])];
-    for (const [ring, walls, isOuter] of rings) {
+    for (const [ring, hasWall, isOuter] of rings) {
       // Outer rings with positive area (and holes with negative area) have the building on
       // the right of each edge; the others run the other way round.
       const side = area(ring) > 0 === isOuter ? 1 : -1;
@@ -112,7 +115,7 @@ export function buildBuildings(buildings, heightAt) {
         const dz = q.z - p.z;
         const len = Math.hypot(dx, dz);
         if (len < 1e-3) continue;
-        if (walls[i]) {
+        if (hasWall[i]) {
           const nx = (side * dz) / len;
           const nz = (-side * dx) / len;
           const v0 = bottom - ground;
@@ -123,6 +126,7 @@ export function buildBuildings(buildings, heightAt) {
           const b1 = [q.x, top, q.z, nx, 0, nz, u + len, v1, 0];
           // Counter-clockwise seen from outside: (a1 - a0) x (b0 - a0) = h * (dz, 0, -dx),
           // which is along the normal when side is 1.
+          walls.push({ first: position.length / 3, ax: p.x, az: p.z, bx: q.x, bz: q.z, bottom, top, nx, nz, length: len });
           for (const v of side > 0 ? [a0, a1, b0, b0, a1, b1] : [a0, b0, a1, b0, b1, a1]) vertex(...v);
         }
         u += len;
@@ -172,5 +176,6 @@ export function buildBuildings(buildings, heightAt) {
     tint: tint.array(),
     seed: seed.array(),
     solids,
+    walls,
   };
 }

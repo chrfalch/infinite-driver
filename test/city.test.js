@@ -42,8 +42,10 @@ describe('buildings', () => {
   });
 
   it('builds walls facing out and a roof facing up', () => {
-    const { positions, normals, solids } = buildBuildings([building()], flat);
+    const { positions, normals, solids, walls } = buildBuildings([building()], flat);
     expect(solids).toHaveLength(1);
+    expect(walls).toHaveLength(4);
+    expect(walls[0].length).toBeCloseTo(20, 5);
     const count = positions.length / 3;
     // 4 walls x 2 triangles + 2 roof triangles.
     expect(count).toBe(4 * 6 + 2 * 3);

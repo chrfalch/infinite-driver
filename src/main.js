@@ -41,6 +41,7 @@ import { resolvePlace } from './geo/place.js';
 import { createWater } from './render/water.js';
 import { createPhotoTiles } from './render/photo-tiles.js';
 import { createCity } from './city/city.js';
+import { createFacadeBaker, facadeTarget } from './render/facade-bake.js';
 import { setFacadeFocus } from './render/facade.js';
 import { applyPendingCarAction, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
@@ -65,7 +66,13 @@ async function main() {
   const googleKey = import.meta.env.VITE_GOOGLE_MAPS_KEY;
   const tilesMode = params.get('tiles') ?? 'city';
   if (place && googleKey && tilesMode === 'google') heightAt.real.photoTiles = true;
-  const city = place && tilesMode === 'city' ? createCity({ projection: heightAt.real.projection, heightAt, scene: render.scene }) : null;
+  // ?facades=google: real facade photos from Google's 3D tiles baked onto the buildings near the car.
+  const facades =
+    place && tilesMode === 'city' && googleKey && params.get('facades') === 'google'
+      ? createFacadeBaker({ key: googleKey, place, renderer: render.renderer, heightAt })
+      : null;
+  const city =
+    place && tilesMode === 'city' ? createCity({ projection: heightAt.real.projection, heightAt, scene: render.scene, facades }) : null;
   if (city) {
     heightAt.real.city = city;
     // ?ground=photo: satellite imagery under the OSM city instead of the procedural ground.
@@ -242,6 +249,8 @@ async function main() {
     heightAt,
     photoTiles,
     city,
+    facades,
+    facadeTarget,
     traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig, RockField },
   };
 }

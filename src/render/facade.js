@@ -8,6 +8,7 @@
 import { MeshStandardNodeMaterial, Vector3 } from 'three/webgpu';
 import { hash2, valueNoise } from './noise.js';
 import { roofArray } from './roof-imagery.js';
+import { facadeTarget } from './facade-bake.js';
 import {
   attribute,
   bool,
@@ -109,10 +110,16 @@ const dither = hash(screenCoordinate.xy.floor());
 const radius = float(6.5).add(dither.mul(1.5));
 const blocked = t.lessThan(0.985).and(off.lessThan(radius)).and(positionWorld.y.greaterThan(focus.y.sub(1.5)));
 
+// Near the car with ?facades=google: the real wall from the baked photos (render/facade-bake.js).
+const wallMap = attribute('wallMap', 'vec3');
+const hasPhoto = wallMap.z.greaterThan(-0.5).and(roof.lessThan(0.5));
+const photo = texture(facadeTarget.texture, wallMap.xy).depth(int(max(wallMap.z, float(0)).add(0.5)));
+const wallColor = hasPhoto.select(photo.rgb.mul(0.85), mix(far, glassColor, windowMask));
+
 export const facadeMaterial = new MeshStandardNodeMaterial({ metalness: 0 });
-facadeMaterial.colorNode = mix(mix(far, glassColor, windowMask), roofColor, roof);
+facadeMaterial.colorNode = mix(wallColor, roofColor, roof);
 facadeMaterial.roughnessNode = mix(mix(float(0.88), float(0.18), windowMask), float(0.8), roof);
 // Glass catches some sky; lit rooms glow a little.
-facadeMaterial.emissiveNode = vec3(0.35, 0.42, 0.5).mul(windowMask).mul(0.12).add(vec3(0.9, 0.7, 0.4).mul(lit).mul(windowMask).mul(0.25));
+facadeMaterial.emissiveNode = hasPhoto.select(vec3(0), vec3(0.35, 0.42, 0.5).mul(windowMask).mul(0.12).add(vec3(0.9, 0.7, 0.4).mul(lit).mul(windowMask).mul(0.25)));
 facadeMaterial.maskNode = blocked.not();
 facadeMaterial.maskShadowNode = bool(true);
