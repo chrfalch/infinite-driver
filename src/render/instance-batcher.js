@@ -9,6 +9,10 @@ import { InstancedMesh, Matrix4 } from 'three/webgpu';
 
 const HIDDEN_LAYER = 31;
 const active = new Set();
+// Instanced meshes of disposed batchers, kept (hidden, in the scene) by shape, material, and count:
+// a rebuilt car has the same parts, and reusing the meshes spares the renderer setting up new ones
+// (about 120 ms on an M4 for a whole car).
+const pool = new Map();
 const NOTHING = new Matrix4().makeScale(0, 0, 0);
 
 // A part hidden by its posing code (itself or a parent invisible) must not show as an instance.
@@ -39,18 +43,25 @@ export function createInstanceBatcher(root, scene, { minCount = 2 } = {}) {
   });
 
   const batches = [];
-  for (const meshes of groups.values()) {
+  for (const [key, meshes] of groups) {
     if (meshes.length < minCount) continue;
-    const first = meshes[0];
-    const mesh = new InstancedMesh(first.geometry, first.material, meshes.length);
+    const poolKey = `${key}|${meshes.length}`;
+    let mesh = pool.get(poolKey)?.pop();
+    if (mesh) mesh.visible = true;
+    else {
+      const first = meshes[0];
+      // Its own copy of the geometry: the originals' geometries are disposed with the car.
+      mesh = new InstancedMesh(first.geometry.clone(), first.material, meshes.length);
+      // Instance matrices are world matrices; the parts are always near the car, so no culling.
+      mesh.matrixAutoUpdate = false;
+      mesh.frustumCulled = false;
+      mesh.name = `instanced ${first.geometry.type}`;
+      mesh.userData.poolKey = poolKey;
+      scene.add(mesh);
+    }
     mesh.castShadow = meshes.some((m) => m.castShadow);
     mesh.receiveShadow = meshes.some((m) => m.receiveShadow);
-    // Instance matrices are world matrices; the parts are always near the car, so no culling.
-    mesh.matrixAutoUpdate = false;
-    mesh.frustumCulled = false;
-    mesh.name = `instanced ${first.geometry.type}`;
     for (const m of meshes) m.layers.set(HIDDEN_LAYER);
-    scene.add(mesh);
     batches.push({ mesh, meshes });
   }
 
@@ -64,11 +75,13 @@ export function createInstanceBatcher(root, scene, { minCount = 2 } = {}) {
         mesh.instanceMatrix.needsUpdate = true;
       }
     },
-    // Removes the instanced meshes (the geometries belong to the originals).
+    // Hides the instanced meshes and keeps them for the next batcher with the same parts.
     dispose() {
       for (const { mesh, meshes } of batches) {
-        scene.remove(mesh);
-        mesh.dispose();
+        mesh.visible = false;
+        const key = mesh.userData.poolKey;
+        if (!pool.has(key)) pool.set(key, []);
+        pool.get(key).push(mesh);
         for (const m of meshes) m.layers.set(0);
       }
       batches.length = 0;

@@ -133,7 +133,12 @@ describe('instanced moving parts', () => {
     expect(m.elements[0]).toBe(0);
 
     batcher.dispose();
-    expect(scene.children.includes(mesh)).toBe(false);
+    expect(mesh.visible).toBe(false);
     expect(arms.every((a) => a.layers.test({ mask: 1 }))).toBe(true);
+    // A new batcher with the same parts reuses the kept mesh.
+    const again = createInstanceBatcher(root, scene);
+    expect(again.batches[0].mesh).toBe(mesh);
+    expect(mesh.visible).toBe(true);
+    again.dispose();
   });
 });
