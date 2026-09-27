@@ -16,6 +16,7 @@ import {
 } from '../ecs/traits.js';
 import { createCarMesh, createWheelRig } from '../render/car-mesh.js';
 import { createSoftTireMesh } from '../render/soft-tire-mesh.js';
+import { createInstanceBatcher } from '../render/instance-batcher.js';
 import { CONTROLS } from '../controls.js';
 import { effectiveGpuTire, effectiveTire, GPU_TIRE, TIRE } from '../tire/config.js';
 import { createGpuTires, gpuTireMeshes } from '../tire/gpu-tires.js';
@@ -29,10 +30,17 @@ const ZERO = { x: 0, y: 0, z: 0 };
 
 // Builds the player car (physics body, controller, meshes, wheel entities) from the current CAR settings.
 export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, angvel = ZERO, steer = 0, drivetrain = null }) {
-  const { rapier, world: physicsWorld, remote } = world.get(Physics);
+  const { remote } = world.get(Physics);
   // Physics in the worker: it simulates the car; here it is only drawn (see physics/client.js).
   if (remote) return spawnRemoteCar(world, remote, { position, rotation, linvel, angvel, steer, keepDrivetrain: !!drivetrain });
 
+  const { body, controller, gpuTires, soft } = createCarPhysics(world, { position, rotation, linvel, angvel });
+  return addCarViews(world, { body, controller, gpuTires, soft, drivetrain: drivetrain ?? new Drivetrain(DRIVETRAIN), position, rotation, steer });
+}
+
+// The car's physics (body, controller, and GPU tyres) on this thread, from the current settings.
+function createCarPhysics(world, { position, rotation = IDENTITY, linvel = ZERO, angvel = ZERO }) {
+  const { rapier, world: physicsWorld } = world.get(Physics);
   const soft = CAR.softTires;
   const device = world.get(Render).renderer?.backend?.device;
   const useGpu = soft && CAR.gpuTires && !!device;
@@ -52,9 +60,11 @@ export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, 
     body.setLinvel(linvel, true);
     body.setAngvel(angvel, true);
   }
-
-  return addCarViews(world, { body, controller, gpuTires, soft, drivetrain: drivetrain ?? new Drivetrain(DRIVETRAIN), position, rotation, steer });
+  return { body, controller, gpuTires, soft };
 }
+
+// Which kind of car the views were built for; a respawn keeps them only for the same kind.
+const viewsKind = (remote) => `${CAR.softTires}|${CAR.gpuTires}|${remote ? 'worker' : 'local'}`;
 
 function spawnRemoteCar(world, remote, { keepDrivetrain, ...pose }) {
   const { body, controller, drivetrain } = remote.spawn(pose, { keepDrivetrain });
@@ -98,6 +108,9 @@ function addCarViews(world, { body, controller, gpuTires, soft, drivetrain, posi
       wheel.add(SoftTireView({ soft: softBody, object: tireObject }));
     }
   });
+  // The moving parts (arms, shocks, joints, shafts) repeat per wheel: draw each shape once, instanced.
+  object.userData.batcher = createInstanceBatcher(object, scene);
+  object.userData.kind = viewsKind(world.get(Physics).remote);
   return car;
 }
 
@@ -127,6 +140,7 @@ export function despawnCar(world, car) {
   if (controller.dispose) controller.dispose();
   else physicsWorld.removeVehicleController(controller);
   physicsWorld?.removeRigidBody(body);
+  object.userData.batcher?.dispose();
   scene.remove(object);
   disposeObject(object);
   car.destroy();
@@ -255,13 +269,51 @@ export function findSpawnSpot(world, heightAt, x0, z0, yaw0) {
 // Puts the car on its wheels at (x, z), facing `yaw` (radians about +y; 0 faces +x).
 export function respawnCarAt(world, heightAt, x, z, yaw = 0) {
   const car = world.queryFirst(IsPlayer, Vehicle);
-  if (car) despawnCar(world, car);
   // Drop from just above the highest ground under the car, so no wheel starts inside a slope.
   const ground = footprint(heightAt, x, z, yaw).max;
-  return spawnCar(world, {
+  const pose = {
     position: { x, y: ground + startHeight(), z },
     rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
+    linvel: ZERO,
+    angvel: ZERO,
+  };
+  // The same car again: keep its meshes and replace only the physics. New meshes and materials
+  // cost a long first frame (about 50-160 ms on an M4) while the renderer sets them up.
+  if (car && car.get(View).object.userData.kind === viewsKind(world.get(Physics).remote)) return replaceCarPhysics(world, car, pose);
+  if (car) despawnCar(world, car);
+  return spawnCar(world, pose);
+}
+
+// Gives the car new physics at `pose` (a fresh start: new drivetrain, no steering), keeping its
+// entity and meshes.
+function replaceCarPhysics(world, car, pose) {
+  const { remote, world: physicsWorld } = world.get(Physics);
+  const vehicle = car.get(Vehicle);
+  let body;
+  let controller;
+  let drivetrain;
+  if (remote) {
+    ({ body, controller, drivetrain } = remote.spawn(pose));
+  } else {
+    if (vehicle.controller.dispose) vehicle.controller.dispose();
+    else physicsWorld.removeVehicleController(vehicle.controller);
+    physicsWorld.removeRigidBody(vehicle.body);
+    ({ body, controller } = createCarPhysics(world, pose));
+    drivetrain = new Drivetrain(DRIVETRAIN);
+  }
+  Object.assign(vehicle, { body, controller, drivetrain, steer: 0, speed: 0, braking: false });
+  if (remote) remote.attach(vehicle);
+  car.get(RigidBody).body = body;
+  const transform = car.get(Transform);
+  Object.assign(transform.position, pose.position);
+  Object.assign(transform.quaternion, pose.rotation);
+  world.query(WheelOf(car), SoftTireView).forEach((wheel) => {
+    const view = wheel.get(SoftTireView);
+    const { index } = wheel.get(WheelOf(car));
+    if (view.gpu) view.gpu = controller.gpu.solver;
+    else if (view.soft) view.soft = controller.wheels[index].soft;
   });
+  return car;
 }
 
 // Rebuilds and respawns destroy physics bodies and GPU buffers, so they must not run while a

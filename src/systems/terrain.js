@@ -10,12 +10,13 @@ import {
   Transform,
   View,
 } from '../ecs/traits.js';
-import { createRocksMesh } from '../render/rock-mesh.js';
-import { createChunkMesh } from '../render/terrain-mesh.js';
+import { createRocksMesh, createRocksMeshFromData } from '../render/rock-mesh.js';
+import { createChunkMesh, createChunkMeshFromData } from '../render/terrain-mesh.js';
 import { CHUNK_RES, CHUNK_SIZE, chunkKey, sampleChunk } from '../terrain/chunk.js';
 import { generateRocks } from '../terrain/rocks.js';
 import { generatePlants } from '../terrain/vegetation.js';
 import { createVegetationMesh } from '../render/vegetation-mesh.js';
+import { timed } from '../perf.js';
 
 // ?rocks=<count per chunk> (default 70); ?rocks=0 gives an empty test ground.
 export const ROCK_COUNT = Number(new URLSearchParams(globalThis.location?.search ?? '').get('rocks') ?? 70);
@@ -24,6 +25,36 @@ export const ROCK_COUNT = Number(new URLSearchParams(globalThis.location?.search
 // job per frame (a new chunk's ground mesh, a rock mesh, a ground trimesh collider, or one chunk's
 // rock hulls). Colliders are created once per chunk and then only enabled or disabled as the chunk
 // leaves and re-enters the collider radius; they are removed when the chunk is unloaded.
+
+// New chunks are built by a worker (terrain/chunk-worker.js): heights, ground mesh data, rocks, and
+// plants, about 5-6 ms per chunk on an M4. Here each finished chunk only becomes meshes. The chunk
+// under the car after a respawn or teleport cannot wait, so it is still built here; so is the
+// initial load, and everything when workers are unavailable.
+const AHEAD = 3; // chunks requested from the worker at a time
+let chunkWorker = null;
+
+export function startChunkWorker({ mode, rockCount = ROCK_COUNT }) {
+  try {
+    const worker = new Worker(new URL('../terrain/chunk-worker.js', import.meta.url), { type: 'module' });
+    const state = { worker, requested: new Set(), ready: new Map() };
+    worker.onmessage = (e) => {
+      const msg = e.data;
+      const key = chunkKey(msg.cx, msg.cz);
+      state.requested.delete(key);
+      if (msg.type === 'chunk') state.ready.set(key, msg);
+      else console.error('[chunk worker]', msg.message);
+    };
+    worker.onerror = (e) => {
+      console.error('[chunk worker]', e.message);
+      worker.terminate();
+      chunkWorker = null;
+    };
+    worker.postMessage({ type: 'init', mode, rockCount });
+    chunkWorker = state;
+  } catch (error) {
+    console.warn('Chunk worker unavailable, building terrain on the main thread:', error);
+  }
+}
 
 // Triangle indices are the same for every chunk.
 let trimeshIndices = null;
@@ -200,29 +231,49 @@ export function streamTerrain(world, { force = false } = {}) {
   // One job per frame (each takes about 1-2.5 ms), in order of urgency: the ground collider the
   // car drives on, a new chunk, rock colliders, then rock meshes. A chunk border crossing is
   // done in about 16 frames; everything that changes is at least one chunk (64 m) away.
-  if (groundJob) addGroundCollider(physics, groundJob);
-  else if (missing.length) {
-    const [cx, cz] = missing[0];
+  // With the chunk worker: keep the nearest missing chunks requested, forget finished ones that
+  // went out of range, and take the nearest finished one (or the one under the car, built here).
+  let next = null;
+  if (chunkWorker) {
+    const wanted = new Set(missing.map(([cx, cz]) => chunkKey(cx, cz)));
+    for (const key of chunkWorker.ready.keys()) if (!wanted.has(key)) chunkWorker.ready.delete(key);
+    for (const [cx, cz] of missing.slice(0, AHEAD)) {
+      const key = chunkKey(cx, cz);
+      if (!chunkWorker.requested.has(key) && !chunkWorker.ready.has(key)) {
+        chunkWorker.requested.add(key);
+        chunkWorker.worker.postMessage({ type: 'chunk', cx, cz });
+      }
+    }
+    next = missing.find(([cx, cz]) => chunkWorker.ready.has(chunkKey(cx, cz)) || (cx === ccx && cz === ccz));
+  } else next = missing[0];
+
+  if (groundJob) timed('terrain.groundCollider', () => addGroundCollider(physics, groundJob));
+  else if (next) {
+    const [cx, cz] = next;
+    const key = chunkKey(cx, cz);
+    const data = chunkWorker?.ready.get(key) ?? null;
+    chunkWorker?.ready.delete(key);
     // A chunk that appears under the car (respawn, teleport) needs its ground and rocks right away.
     const here = cx === ccx && cz === ccz;
-    spawnChunk(world, physics, scene, heightAt, cx, cz, { ground: here, rocks: here, near: isNear(cx, cz) });
-  } else if (hullJob) addRockColliders(physics, hullJob);
-  else if (rockJob) buildRocksMesh(rockJob.entity, rockJob.field);
+    timed('terrain.spawnChunk', () => spawnChunk(world, physics, scene, heightAt, cx, cz, { ground: here, rocks: here, near: isNear(cx, cz) }, data));
+  } else if (hullJob) timed('terrain.rockColliders', () => addRockColliders(physics, hullJob));
+  else if (rockJob) timed('terrain.rockMesh', () => buildRocksMesh(rockJob.entity, rockJob.field));
 
   function isNear(cx, cz) {
     return Math.abs(cx - ccx) <= colliderRadius && Math.abs(cz - ccz) <= colliderRadius;
   }
 }
 
-function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, near }) {
-  const heights = sampleChunk(heightAt, cx, cz);
+// `data`: the chunk as built by the chunk worker, or null to build it here.
+function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, near }, data = null) {
+  const heights = data?.heights ?? timed('terrain.heights', () => sampleChunk(heightAt, cx, cz));
   const chunk = { cx, cz, heights, collider: null, collidersEnabled: true };
   const field = {
-    rocks: generateRocks(heightAt, cx, cz, { count: ROCK_COUNT }),
+    rocks: data?.rocks ?? timed('terrain.genRocks', () => generateRocks(heightAt, cx, cz, { count: ROCK_COUNT })),
     colliders: [],
     collidersBuilt: false,
     meshBuilt: false,
-    plants: null,
+    plants: data?.plants ?? null,
     heightAt,
     cx,
     cz,
@@ -231,17 +282,19 @@ function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, ne
   if (physics.world && near && rocks) addRockColliders(physics, field);
   const object = new Group();
   object.name = `chunk ${cx},${cz}`;
-  object.add(createChunkMesh(heightAt, heights, cx, cz));
+  object.add(data ? createChunkMeshFromData(data.mesh, cx, cz) : timed('terrain.chunkMesh', () => createChunkMesh(heightAt, heights, cx, cz)));
   scene.add(object);
   const entity = world.spawn(TerrainChunk(chunk), RockField(field), View({ object }));
-  if (rocks) buildRocksMesh(entity, field);
+  // The worker's chunk comes with its rock mesh data and plants, so it is finished right away.
+  if (data) buildRocksMesh(entity, field, data.rocksMesh);
+  else if (rocks) buildRocksMesh(entity, field);
 }
 
-function buildRocksMesh(entity, field) {
+function buildRocksMesh(entity, field, rocksMeshData) {
   field.meshBuilt = true;
-  const rocksMesh = createRocksMesh(field.rocks);
+  const rocksMesh = rocksMeshData !== undefined ? createRocksMeshFromData(rocksMeshData) : timed('terrain.rockMeshGeo', () => createRocksMesh(field.rocks));
   if (rocksMesh) entity.get(View).object.add(rocksMesh);
-  const plants = createVegetationMesh(plantsOf(field));
+  const plants = timed('terrain.plants', () => createVegetationMesh(plantsOf(field)));
   if (plants) {
     entity.get(View).object.add(plants);
     field.bushes = plants.userData.bushes ?? null;

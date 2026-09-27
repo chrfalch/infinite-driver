@@ -114,6 +114,11 @@ export function terrainColorAt(heightAt, x, z, out = new Color()) {
 }
 
 export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, res = CHUNK_RES) {
+  return createChunkMeshFromData(chunkMeshData(heightAt, heights, cx, cz, size, res), cx, cz, res);
+}
+
+// The ground mesh's vertex data for a chunk (plain arrays, so a worker can build it).
+export function chunkMeshData(heightAt, heights, cx, cz, size = CHUNK_SIZE, res = CHUNK_RES) {
   const n = res + 1;
   const step = size / res;
   const x0 = cx * size;
@@ -159,7 +164,16 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
     }
   }
 
-  const indices = new Uint32Array(res * res * 6);
+  return { positions, normals, colors, gravel, roadDist, steep };
+}
+
+// Triangle indices, the same for every chunk.
+const chunkIndices = new Map();
+function indicesFor(res) {
+  let indices = chunkIndices.get(res);
+  if (indices) return indices;
+  const n = res + 1;
+  indices = new Uint32Array(res * res * 6);
   let k = 0;
   for (let iz = 0; iz < res; iz++) {
     for (let ix = 0; ix < res; ix++) {
@@ -171,7 +185,12 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
       k += 6;
     }
   }
+  chunkIndices.set(res, indices);
+  return indices;
+}
 
+export function createChunkMeshFromData({ positions, normals, colors, gravel, roadDist, steep }, cx, cz, res = CHUNK_RES) {
+  const indices = indicesFor(res);
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new BufferAttribute(normals, 3));

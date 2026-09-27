@@ -86,3 +86,59 @@ describe('tyre tracks', () => {
     expect(Math.max(...tr.positions)).toBe(0);
   });
 });
+
+describe('instanced moving parts', () => {
+  it('draws parts that share shape and material as one instanced mesh that follows them', async () => {
+    const { Scene } = await import('three/webgpu');
+    const { createInstanceBatcher } = await import('../src/render/instance-batcher.js');
+    const scene = new Scene();
+    const root = new Group();
+    scene.add(root);
+    const steel = new MeshStandardMaterial();
+    const paint = new MeshStandardMaterial();
+    // Four arms built separately with the same parameters, one of another material, one unique.
+    const arms = [0, 1, 2, 3].map((i) => {
+      const pivot = new Group();
+      pivot.position.set(i, 0, 0);
+      root.add(pivot);
+      const arm = new Mesh(new CylinderGeometry(0.02, 0.02, 1, 8), steel);
+      arm.castShadow = true;
+      pivot.add(arm);
+      return arm;
+    });
+    const painted = new Mesh(new CylinderGeometry(0.02, 0.02, 1, 8), paint);
+    root.add(painted);
+    const unique = new Mesh(new BoxGeometry(1, 2, 3), steel);
+    root.add(unique);
+
+    const batcher = createInstanceBatcher(root, scene);
+    expect(batcher.batches.length).toBe(1);
+    const { mesh } = batcher.batches[0];
+    expect(mesh.count).toBe(4);
+    expect(mesh.castShadow).toBe(true);
+    // The originals are no longer drawn; the others are untouched.
+    expect(arms.every((a) => !a.layers.test({ mask: 1 }))).toBe(true);
+    expect(painted.layers.test({ mask: 1 })).toBe(true);
+    expect(unique.layers.test({ mask: 1 })).toBe(true);
+
+    // The instances follow the parts as they move, and a hidden part disappears.
+    arms[2].parent.position.y = 5;
+    arms[3].visible = false;
+    scene.updateMatrixWorld();
+    batcher.update();
+    const m = new (await import('three/webgpu')).Matrix4();
+    mesh.getMatrixAt(2, m);
+    expect(m.elements[13]).toBeCloseTo(5);
+    mesh.getMatrixAt(3, m);
+    expect(m.elements[0]).toBe(0);
+
+    batcher.dispose();
+    expect(mesh.visible).toBe(false);
+    expect(arms.every((a) => a.layers.test({ mask: 1 }))).toBe(true);
+    // A new batcher with the same parts reuses the kept mesh.
+    const again = createInstanceBatcher(root, scene);
+    expect(again.batches[0].mesh).toBe(mesh);
+    expect(mesh.visible).toBe(true);
+    again.dispose();
+  });
+});
