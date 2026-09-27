@@ -77,7 +77,11 @@ function addGroundCollider(physics, chunk) {
 // Bushes and trees are generated on first need (with the rock mesh or the rock colliders), so a new
 // chunk's work is spread over separate frames.
 function plantsOf(field) {
-  field.plants ??= generatePlants(field.heightAt, field.cx, field.cz);
+  // Real places with OSM data: trees in forests and parks (city/ground.js).
+  const city = field.heightAt.real?.city;
+  field.plants ??= city
+    ? city.treesFor(field.cx * CHUNK_SIZE, field.cz * CHUNK_SIZE, CHUNK_SIZE, (field.cx * 73856093) ^ (field.cz * 19349663))
+    : generatePlants(field.heightAt, field.cx, field.cz);
   return field.plants;
 }
 
@@ -121,6 +125,7 @@ function disposeView(object) {
     else child.geometry?.dispose();
     // Real-world chunks have their own satellite imagery material.
     if (child.material?.userData.imagery) disposeImageryMaterial(child.material);
+    child.material?.userData.release?.();
   });
 }
 

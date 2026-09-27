@@ -1,16 +1,19 @@
-// OSM city around a real place: buildings and roads from vector tiles (city/vector-tiles.js),
-// streamed around the car.
+// OSM city around a real place: buildings, roads and ground areas from vector tiles
+// (city/vector-tiles.js), streamed around the car.
 //
 // - Road segments are indexed as tiles arrive; terrain chunks paint them (city/roads.js) and wait
 //   for them with city.ensure, like they wait for the elevation tiles.
+// - Ground: each terrain chunk gets a ground map (city/ground.js) from the areas, buildings and
+//   roads under it, which also places its trees.
 // - Buildings: one merged mesh per tile with the facade material (render/facade.js), built once
 //   the tile's elevation is loaded. Tiles far from the car are dropped.
 // - Colliders: each building gets its own fixed trimesh (the same triangles that are drawn) when
 //   the car comes within COLLIDER_NEAR metres, and loses it past COLLIDER_FAR.
-import { BufferAttribute, BufferGeometry, Mesh } from 'three/webgpu';
+import { BufferAttribute, BufferGeometry, DataTexture, DataUtils, HalfFloatType, LinearFilter, LinearMipmapLinearFilter, Mesh, RGBAFormat } from 'three/webgpu';
 import { TILE_SIZE } from '../geo/projection.js';
 import { buildBuildings } from './buildings.js';
-import { BUCKET, indexRoads } from './roads.js';
+import { GROUND_RES, placeTrees, rasterizeGround } from './ground.js';
+import { BUCKET, indexRoads, roadAt } from './roads.js';
 import { CITY_ZOOM, loadCityTile } from './vector-tiles.js';
 import { facadeMaterial } from '../render/facade.js';
 
@@ -23,6 +26,9 @@ const COLLIDERS_PER_FRAME = 24;
 export function createCity({ projection, heightAt, scene }) {
   const tiles = new Map(); // "tx,ty" -> { tx, ty, state: 'loading' | 'ready', data, mesh }
   const buckets = new Map(); // road segments (city/roads.js)
+  const shapes = new Map(); // "i,j" bucket -> ground areas, buildings and roads near it
+  const grounds = new Map(); // chunk "x0,z0" -> { pixels, texture }
+  let groundCtx = null;
   const solids = new Set(); // buildings of built tiles
   let physics = null;
   let frame = 0;
@@ -46,11 +52,12 @@ export function createCity({ projection, heightAt, scene }) {
     tile.promise = loadCityTile(projection, tx, ty)
       .catch((error) => {
         console.warn('city tile failed', tx, ty, error);
-        return { buildings: [], roads: [] };
+        return { buildings: [], roads: [], areas: [] };
       })
       .then(async (data) => {
         tile.data = data;
         indexRoads(data.roads, buckets);
+        indexShapes(data);
         tile.state = 'roads';
         // Buildings stand on the terrain, so its heights must be loaded first.
         await heightAt.load(...tileBounds(tx, ty));
@@ -59,6 +66,46 @@ export function createCity({ projection, heightAt, scene }) {
         tile.state = 'ready';
       });
     return tile;
+  }
+
+  // Buckets every ground area, building and road by its bounding box.
+  function indexShapes({ areas, buildings, roads }) {
+    const add = (kind, item, points) => {
+      let x0 = Infinity;
+      let z0 = Infinity;
+      let x1 = -Infinity;
+      let z1 = -Infinity;
+      for (const p of points) {
+        x0 = Math.min(x0, p.x);
+        x1 = Math.max(x1, p.x);
+        z0 = Math.min(z0, p.z);
+        z1 = Math.max(z1, p.z);
+      }
+      const pad = kind === 'roads' ? item.half + 1 : 0;
+      for (let j = Math.floor((z0 - pad) / BUCKET); j <= Math.floor((z1 + pad) / BUCKET); j++) {
+        for (let i = Math.floor((x0 - pad) / BUCKET); i <= Math.floor((x1 + pad) / BUCKET); i++) {
+          const key = `${i},${j}`;
+          let cell = shapes.get(key);
+          if (!cell) shapes.set(key, (cell = { areas: [], buildings: [], roads: [] }));
+          cell[kind].push(item);
+        }
+      }
+    };
+    for (const a of areas) add('areas', a, a.rings.flat());
+    for (const b of buildings) add('buildings', b, b.outer);
+    for (const r of roads) add('roads', r, r.points);
+  }
+
+  function shapesIn(x0, z0, x1, z1) {
+    const out = { areas: new Set(), buildings: new Set(), roads: new Set() };
+    for (let j = Math.floor(z0 / BUCKET); j <= Math.floor(z1 / BUCKET); j++) {
+      for (let i = Math.floor(x0 / BUCKET); i <= Math.floor(x1 / BUCKET); i++) {
+        const cell = shapes.get(`${i},${j}`);
+        if (!cell) continue;
+        for (const kind of ['areas', 'buildings', 'roads']) for (const item of cell[kind]) out[kind].add(item);
+      }
+    }
+    return { areas: [...out.areas], buildings: [...out.buildings], roads: [...out.roads] };
   }
 
   function buildTile(tile) {
@@ -126,6 +173,54 @@ export function createCity({ projection, heightAt, scene }) {
         }
       }
       return [...out];
+    },
+    // Ground map of a terrain chunk (the square [x0, x0 + size]^2): its RGBA bytes and a texture
+    // (see city/ground.js), and the road field on the same grid (city/roads.js). Kept until the
+    // chunk is unloaded (releaseGround).
+    groundFor(x0, z0, size) {
+      const key = `${x0},${z0}`;
+      let ground = grounds.get(key);
+      if (!ground) {
+        groundCtx ??= new OffscreenCanvas(GROUND_RES, GROUND_RES).getContext('2d', { willReadFrequently: true });
+        const pixels = rasterizeGround(groundCtx, shapesIn(x0, z0, x0 + size, z0 + size), x0, z0, size);
+        const texture = new DataTexture(new Uint8Array(pixels.buffer.slice(0)), GROUND_RES, GROUND_RES);
+        // (Data textures default to nearest filtering, which shows every texel as a block.)
+        texture.magFilter = LinearFilter;
+        texture.minFilter = LinearMipmapLinearFilter;
+        texture.generateMipmaps = true;
+        texture.anisotropy = 4;
+        texture.needsUpdate = true;
+        const segments = this.segmentsIn(x0, z0, x0 + size, z0 + size);
+        const field = new Float32Array(4);
+        const half = new Uint16Array(GROUND_RES * GROUND_RES * 4);
+        const step = size / GROUND_RES;
+        for (let j = 0; j < GROUND_RES; j++) {
+          for (let i = 0; i < GROUND_RES; i++) {
+            roadAt(segments, x0 + (i + 0.5) * step, z0 + (j + 0.5) * step, field);
+            const o = (j * GROUND_RES + i) * 4;
+            for (let c = 0; c < 4; c++) half[o + c] = DataUtils.toHalfFloat(field[c]);
+          }
+        }
+        const roadMap = new DataTexture(half, GROUND_RES, GROUND_RES, RGBAFormat, HalfFloatType);
+        roadMap.magFilter = LinearFilter;
+        roadMap.minFilter = LinearMipmapLinearFilter;
+        roadMap.generateMipmaps = true;
+        roadMap.needsUpdate = true;
+        ground = { pixels, texture, roadMap, x0, z0, size };
+        grounds.set(key, ground);
+      }
+      return ground;
+    },
+    releaseGround(x0, z0) {
+      const key = `${x0},${z0}`;
+      grounds.get(key)?.texture.dispose();
+      grounds.get(key)?.roadMap.dispose();
+      grounds.delete(key);
+    },
+    // Trees of a terrain chunk, from its ground map.
+    treesFor(x0, z0, size, seed) {
+      const ground = this.groundFor(x0, z0, size);
+      return placeTrees(ground.pixels, heightAt, x0, z0, size, seed);
     },
     // Loads tiles around the car, drops far ones, and keeps colliders on the buildings near it.
     update(world, target) {

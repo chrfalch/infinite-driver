@@ -6,6 +6,7 @@ import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
 import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
 import { createImageryMaterial } from './imagery.js';
+import { createCityGroundMaterial } from './city-ground.js';
 import { roadAt } from '../city/roads.js';
 
 // Ground colour from the vertex colours, with the gravel stones drawn on top (the same stones the
@@ -119,6 +120,24 @@ export function terrainColorAt(heightAt, x, z, out = new Color()) {
   return colorFor(heightAt(x, z), slope, x, z, out);
 }
 
+// Real places: an invisible shadow catcher under Google's 3D tiles, the procedural OSM ground in
+// the city (or satellite imagery with ?ground=photo), or bare satellite imagery.
+function realGroundMaterial(heightAt, city, x0, z0, size) {
+  if (!heightAt.real) return terrainMaterial;
+  if (heightAt.real.photoTiles) return shadowCatcher;
+  if (city && !heightAt.real.groundPhoto) {
+    const ground = city.groundFor(x0, z0, size);
+    const material = createCityGroundMaterial(ground.texture, ground.roadMap);
+    // Chunk meshes are disposed by the terrain streaming (systems/terrain.js).
+    material.userData.release = () => {
+      material.dispose();
+      city.releaseGround(x0, z0);
+    };
+    return material;
+  }
+  return createImageryMaterial(heightAt.real.projection, x0, z0, size, { roads: Boolean(city) });
+}
+
 export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, res = CHUNK_RES) {
   const n = res + 1;
   const step = size / res;
@@ -132,10 +151,12 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
   const steep = new Float32Array(n * n);
   // Real-world terrain is drawn with satellite imagery: uv (0, 0) at the north-west corner.
   const uvs = heightAt.real ? new Float32Array(n * n * 2) : null;
-  // With OSM data (city/city.js): the roads under each vertex (city/roads.js).
+  // With OSM data (city/city.js) on satellite imagery: the roads under each vertex (city/roads.js).
+  // The procedural city ground has a finer road map of its own (city/city.js groundFor).
   const city = heightAt.real?.city;
-  const roads = city ? new Float32Array(n * n * 4) : null;
-  const segments = city ? city.segmentsIn(x0, z0, x0 + size, z0 + size) : null;
+  const roadsPerVertex = city && heightAt.real.groundPhoto;
+  const roads = roadsPerVertex ? new Float32Array(n * n * 4) : null;
+  const segments = roadsPerVertex ? city.segmentsIn(x0, z0, x0 + size, z0 + size) : null;
   // Heights on the grid plus a one-sample border, so normals come from the grid (central
   // differences) and still match the neighbouring chunks.
   const m = n + 2;
@@ -198,11 +219,7 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
   geometry.setIndex(new BufferAttribute(indices, 1));
   geometry.computeBoundingSphere();
 
-  const material = !heightAt.real
-    ? terrainMaterial
-    : heightAt.real.photoTiles
-      ? shadowCatcher
-      : createImageryMaterial(heightAt.real.projection, x0, z0, size, { roads: Boolean(city) });
+  const material = realGroundMaterial(heightAt, city, x0, z0, size);
   const mesh = new Mesh(geometry, material);
   mesh.receiveShadow = true;
   mesh.name = `chunk ${cx},${cz}`;

@@ -90,11 +90,24 @@ const ringArea = (ring) => {
   return a / 2;
 };
 
-// Buildings and roads of one tile in world metres ({ x, z }), from a decoded VectorTile.
-// toWorld(u, v) maps tile units to world metres.
+// Buildings, roads and ground areas of one tile in world metres ({ x, z }), from a decoded
+// VectorTile. toWorld(u, v) maps tile units to world metres.
 export function readCityTile(tile, toWorld) {
   const buildings = [];
   const roads = [];
+  // Ground areas (landuse, landcover, water): every ring of a polygon feature, unclipped; they
+  // are only filled (city/ground.js), so the overlap between neighbouring tiles does no harm.
+  const areas = [];
+  for (const layer of ['landuse', 'landcover', 'water']) {
+    const l = tile.layers[layer];
+    if (!l) continue;
+    for (let i = 0; i < l.length; i++) {
+      const f = l.feature(i);
+      if (f.type !== 3) continue;
+      const rings = f.loadGeometry().map((ring) => ring.map((p) => toWorld(p.x, p.y)));
+      areas.push({ layer, cls: f.properties.class, subclass: f.properties.subclass ?? null, rings });
+    }
+  }
   const layer = tile.layers.building;
   if (layer) {
     const size = layer.extent;
@@ -146,13 +159,13 @@ export function readCityTile(tile, toWorld) {
       }
     }
   }
-  return { buildings, roads };
+  return { buildings, roads, areas };
 }
 
 // Downloads and reads the city tile (tx, ty) for a projection (geo/projection.js).
 export async function loadCityTile(projection, tx, ty) {
   const response = await fetch(await urlFor(tx, ty), { mode: 'cors' });
-  if (!response.ok) return { buildings: [], roads: [] };
+  if (!response.ok) return { buildings: [], roads: [], areas: [] };
   const tile = new VectorTile(new PbfReader(new Uint8Array(await response.arrayBuffer())));
   const extent = tile.layers.building?.extent ?? tile.layers.transportation?.extent ?? 4096;
   const scale = TILE_SIZE / extent;

@@ -43,8 +43,9 @@ async function stitch(projection, x0, z0, size) {
 // yellow centre line on two-lane roads (as in Norway), a kerb and a sidewalk on streets, and light
 // paving on footpaths. The imagery's parked cars and shadows are covered on the road.
 const hash = (p) => fract(sin(dot(p, vec2(12.9898, 78.233))).mul(43758.5453));
-function roadOverlay(ground) {
-  const road = attribute('road', 'vec4');
+// `road` is the road field (city/roads.js): the chunk mesh's 'road' attribute by default, or a
+// sample of a finer road map texture.
+export function roadOverlay(ground, road = attribute('road', 'vec4')) {
   const edge = road.x;
   const centre = road.y;
   const pathEdge = road.z;

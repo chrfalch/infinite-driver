@@ -68,6 +68,8 @@ async function main() {
   const city = place && tilesMode === 'city' ? createCity({ projection: heightAt.real.projection, heightAt, scene: render.scene }) : null;
   if (city) {
     heightAt.real.city = city;
+    // ?ground=photo: satellite imagery under the OSM city instead of the procedural ground.
+    heightAt.real.groundPhoto = params.get('ground') === 'photo';
     await city.load(-200, -200, 200, 200);
   }
   const physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
