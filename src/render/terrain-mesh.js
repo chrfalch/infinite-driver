@@ -5,6 +5,7 @@ import { gravelShade } from '../terrain/gravel.js';
 import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
 import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
+import { createImageryMaterial } from './imagery.js';
 
 // Ground colour from the vertex colours, with the gravel stones drawn on top (the same stones the
 // GPU tyres roll over; see terrain/gravel.js).
@@ -124,6 +125,8 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
   const gravel = new Float32Array(n * n);
   const roadDist = new Float32Array(n * n).fill(99);
   const steep = new Float32Array(n * n);
+  // Real-world terrain is drawn with satellite imagery: uv (0, 0) at the north-west corner.
+  const uvs = heightAt.real ? new Float32Array(n * n * 2) : null;
   // Heights on the grid plus a one-sample border, so normals come from the grid (central
   // differences) and still match the neighbouring chunks.
   const m = n + 2;
@@ -143,6 +146,7 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
       const z = z0 + iz * step;
       const h = heights[i];
       positions.set([x, h, z], i * 3);
+      uvs?.set([ix / res, iz / res], i * 2);
       const dx = (at(ix + 1, iz) - at(ix - 1, iz)) / (2 * step);
       const dz = (at(ix, iz + 1) - at(ix, iz - 1)) / (2 * step);
       const len = Math.hypot(dx, 1, dz);
@@ -179,10 +183,12 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
   geometry.setAttribute('gravel', new BufferAttribute(gravel, 1));
   geometry.setAttribute('roadDist', new BufferAttribute(roadDist, 1));
   geometry.setAttribute('steep', new BufferAttribute(steep, 1));
+  if (uvs) geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
   geometry.setIndex(new BufferAttribute(indices, 1));
   geometry.computeBoundingSphere();
 
-  const mesh = new Mesh(geometry, terrainMaterial);
+  const material = heightAt.real ? createImageryMaterial(heightAt.real.projection, x0, z0, size) : terrainMaterial;
+  const mesh = new Mesh(geometry, material);
   mesh.receiveShadow = true;
   mesh.name = `chunk ${cx},${cz}`;
   return mesh;

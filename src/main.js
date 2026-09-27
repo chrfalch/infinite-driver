@@ -36,6 +36,9 @@ import { TireTracks } from './render/tracks.js';
 import { GROUND } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
+import { createRealHeightField } from './terrain/real.js';
+import { resolvePlace } from './geo/place.js';
+import { createWater } from './render/water.js';
 import { applyPendingCarAction, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
 import { createTouchControls } from './ui/touch-controls.js';
@@ -46,8 +49,13 @@ async function main() {
 
   const world = createWorld();
   // Red-rock canyon with gravel roads by default; ?terrain=flat (tests) or ?terrain=hills.
-  const mode = new URLSearchParams(location.search).get('terrain') ?? 'canyon';
-  const heightAt = createHeightField({ mode });
+  // ?place=oslo (or latitude,longitude, or an address) drives on real terrain with satellite imagery.
+  const params = new URLSearchParams(location.search);
+  const mode = params.get('terrain') ?? 'canyon';
+  const place = params.get('place') ? await resolvePlace(params.get('place')) : null;
+  const heightAt = place ? createRealHeightField(place) : createHeightField({ mode });
+  // The elevation tiles under the start must be there before the car and the first chunks.
+  if (place) await heightAt.load(-200, -200, 200, 200);
   const physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   physicsWorld.timestep = 1 / 120;
   // The jointed car is a chain of light links under a heavy chassis; Rapier's default 4 solver
@@ -81,6 +89,7 @@ async function main() {
   if (window.innerWidth < 700 || touch.isVisible()) panel.close();
 
   streamTerrain(world, { force: true });
+  const water = place ? createWater(render.scene) : null;
 
   // HUD text through Glyph.
   const hud = glyph.handle('hud', ThreeConfig);
@@ -117,7 +126,19 @@ async function main() {
   const KEY_HINT =
     'W / Up  accelerate (hold)    S / Down  brake, reverse    A D  steer    Q E  shift    L  low range    Space  handbrake    R  respawn    C  follow camera';
   const TOUCH_HINT = 'Hold the up button to drive, down to brake    Pinch to zoom';
-  world.spawn(HudLabel({ text: hintText, format: () => (touch.isVisible() ? TOUCH_HINT : KEY_HINT) + (isFollowCamera() ? '    [follow camera on]' : '') }));
+  // On real terrain: where the car is (latitude, longitude).
+  const whereText = (vehicle) => {
+    if (!place) return '';
+    const p = vehicle.body.translation();
+    const { lat, lon } = heightAt.real.projection.toLonLat(p.x, p.z);
+    return `    ${place.name.split(',')[0]}  ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  };
+  world.spawn(
+    HudLabel({
+      text: hintText,
+      format: (v) => (touch.isVisible() ? TOUCH_HINT : KEY_HINT) + (isFollowCamera() ? '    [follow camera on]' : '') + whereText(v),
+    }),
+  );
 
   attachKeyboard();
   attachZoom(render.renderer.domElement);
@@ -172,6 +193,7 @@ async function main() {
     updateSoil(world);
     updateBushes(world);
     followCamera(world);
+    if (water) water.follow(render.activeCamera);
     updateHud(world);
     const player = world.queryFirst(IsPlayer, Vehicle);
     if (player) {

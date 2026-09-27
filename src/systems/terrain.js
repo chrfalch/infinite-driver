@@ -15,6 +15,7 @@ import { createChunkMesh } from '../render/terrain-mesh.js';
 import { CHUNK_RES, CHUNK_SIZE, chunkKey, sampleChunk } from '../terrain/chunk.js';
 import { generateRocks } from '../terrain/rocks.js';
 import { generatePlants } from '../terrain/vegetation.js';
+import { disposeImageryMaterial } from '../render/imagery.js';
 import { createVegetationMesh } from '../render/vegetation-mesh.js';
 
 // ?rocks=<count per chunk> (default 70); ?rocks=0 gives an empty test ground.
@@ -118,6 +119,8 @@ function disposeView(object) {
     // Plant geometries are shared by every chunk; only their instance buffers belong to it.
     if (child.isInstancedMesh) child.dispose();
     else child.geometry?.dispose();
+    // Real-world chunks have their own satellite imagery material.
+    if (child.material?.userData.imagery) disposeImageryMaterial(child.material);
   });
 }
 
@@ -182,10 +185,15 @@ export function streamTerrain(world, { force = false } = {}) {
   });
 
   // Build missing chunks nearest first.
+  // Real-world terrain first needs the elevation tiles under a chunk (downloads start here).
   const missing = [];
   for (let dz = -radius; dz <= radius; dz++) {
     for (let dx = -radius; dx <= radius; dx++) {
-      if (!loaded.has(chunkKey(ccx + dx, ccz + dz))) missing.push([ccx + dx, ccz + dz, dx * dx + dz * dz]);
+      const cx = ccx + dx;
+      const cz = ccz + dz;
+      if (loaded.has(chunkKey(cx, cz))) continue;
+      if (heightAt.ensure && !heightAt.ensure(cx * CHUNK_SIZE, cz * CHUNK_SIZE, (cx + 1) * CHUNK_SIZE, (cz + 1) * CHUNK_SIZE)) continue;
+      missing.push([cx, cz, dx * dx + dz * dz]);
     }
   }
   missing.sort((a, b) => a[2] - b[2]);
@@ -215,7 +223,8 @@ function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, ne
   const heights = sampleChunk(heightAt, cx, cz);
   const chunk = { cx, cz, heights, collider: null, collidersEnabled: true };
   const field = {
-    rocks: generateRocks(heightAt, cx, cz, { count: ROCK_COUNT }),
+    // Real-world terrain has no generated rocks (they would sit in the streets).
+    rocks: heightAt.real ? [] : generateRocks(heightAt, cx, cz, { count: ROCK_COUNT }),
     colliders: [],
     collidersBuilt: false,
     meshBuilt: false,
