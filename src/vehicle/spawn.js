@@ -16,6 +16,7 @@ import {
 } from '../ecs/traits.js';
 import { createCarMesh, createWheelRig } from '../render/car-mesh.js';
 import { createSoftTireMesh } from '../render/soft-tire-mesh.js';
+import { createInstanceBatcher } from '../render/instance-batcher.js';
 import { CONTROLS } from '../controls.js';
 import { effectiveGpuTire, effectiveTire, GPU_TIRE, TIRE } from '../tire/config.js';
 import { createGpuTires, gpuTireMeshes } from '../tire/gpu-tires.js';
@@ -98,6 +99,8 @@ function addCarViews(world, { body, controller, gpuTires, soft, drivetrain, posi
       wheel.add(SoftTireView({ soft: softBody, object: tireObject }));
     }
   });
+  // The moving parts (arms, shocks, joints, shafts) repeat per wheel: draw each shape once, instanced.
+  object.userData.batcher = createInstanceBatcher(object, scene);
   return car;
 }
 
@@ -127,6 +130,7 @@ export function despawnCar(world, car) {
   if (controller.dispose) controller.dispose();
   else physicsWorld.removeVehicleController(controller);
   physicsWorld?.removeRigidBody(body);
+  object.userData.batcher?.dispose();
   scene.remove(object);
   disposeObject(object);
   car.destroy();

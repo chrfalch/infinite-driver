@@ -39,6 +39,7 @@ import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
 import { applyPendingCarAction, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
+import { updateInstanceBatchers } from './render/instance-batcher.js';
 import { createPhysicsClient, workerGpuSupported } from './physics/client.js';
 import { ROCK_COUNT } from './systems/terrain.js';
 import { CAR } from './vehicle/config.js';
@@ -50,6 +51,8 @@ async function main() {
   const container = document.getElementById('app');
   const [render] = await Promise.all([createRenderer(container), RAPIER.init(), glyph.init()]);
 
+  // The frame updates world matrices itself, before the instanced parts read them (see draw).
+  render.scene.matrixWorldAutoUpdate = false;
   const world = createWorld();
   // Red-rock canyon with gravel roads by default; ?terrain=flat (tests) or ?terrain=hills.
   const mode = new URLSearchParams(location.search).get('terrain') ?? 'canyon';
@@ -162,6 +165,9 @@ async function main() {
   const draw = () => {
     if (NO_DRAW) return;
     const { renderer, scene, activeCamera: camera, hudScene, hudCamera } = render;
+    // World matrices first, then the instanced car parts copy theirs (see render/instance-batcher.js).
+    scene.updateMatrixWorld();
+    updateInstanceBatchers();
     renderer.clear();
     renderer.render(scene, camera);
     sample('scene.drawCalls', renderer.info.render.drawCalls);
