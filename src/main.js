@@ -41,7 +41,7 @@ import { applyPendingCarAction, requestRespawn, requestRespawnAt, spawnCar, star
 import { createTuningPanel } from './tuning/panel.js';
 import { updateInstanceBatchers } from './render/instance-batcher.js';
 import { createPhysicsClient, workerGpuSupported } from './physics/client.js';
-import { ROCK_COUNT } from './systems/terrain.js';
+import { ROCK_COUNT, startChunkWorker } from './systems/terrain.js';
 import { CAR } from './vehicle/config.js';
 import { updateGpuGround, updateGpuRocks } from './tire/gpu-tires.js';
 import { createTouchControls } from './ui/touch-controls.js';
@@ -109,6 +109,7 @@ async function main() {
   if (window.innerWidth < 700 || touch.isVisible()) panel.close();
 
   streamTerrain(world, { force: true });
+  startChunkWorker({ mode });
 
   // HUD text through Glyph.
   const hud = glyph.handle('hud', ThreeConfig);
