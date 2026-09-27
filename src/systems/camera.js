@@ -184,8 +184,33 @@ export function followCamera(world) {
   }
   backdrop.update(render.activeCamera, state, low);
 
-  // The sun and its shadow box travel with the car.
-  sun.target.position.set(state.x, state.y, state.z);
-  sun.position.set(state.x - 35, state.y + 45, state.z - 25);
+  // The sun and its shadow box travel with the car, moved in whole shadow-map texels (across the
+  // light direction). A box that slides smoothly resamples every shadow edge at a new sub-texel
+  // offset each frame, and the edges shimmer; snapped, they stay put as the car moves.
+  const box = sun.shadow.camera;
+  const texel = (box.right - box.left) / sun.shadow.mapSize.x;
+  const a = Math.round((state.x * SUN_RIGHT[0] + state.y * SUN_RIGHT[1] + state.z * SUN_RIGHT[2]) / texel) * texel;
+  const b = Math.round((state.x * SUN_UP[0] + state.y * SUN_UP[1] + state.z * SUN_UP[2]) / texel) * texel;
+  const c = state.x * SUN_DIR[0] + state.y * SUN_DIR[1] + state.z * SUN_DIR[2];
+  const tx = SUN_RIGHT[0] * a + SUN_UP[0] * b + SUN_DIR[0] * c;
+  const ty = SUN_RIGHT[1] * a + SUN_UP[1] * b + SUN_DIR[1] * c;
+  const tz = SUN_RIGHT[2] * a + SUN_UP[2] * b + SUN_DIR[2] * c;
+  sun.target.position.set(tx, ty, tz);
+  sun.position.set(tx - SUN_OFFSET[0], ty - SUN_OFFSET[1], tz - SUN_OFFSET[2]);
   sun.target.updateMatrixWorld();
 }
+
+// The sun shines along SUN_OFFSET (from the sun to the car); SUN_RIGHT and SUN_UP span the shadow
+// map's plane.
+const SUN_OFFSET = [35, -45, 25];
+const norm = (v) => {
+  const l = Math.hypot(...v);
+  return v.map((x) => x / l);
+};
+const SUN_DIR = norm(SUN_OFFSET);
+const SUN_RIGHT = norm([-SUN_DIR[2], 0, SUN_DIR[0]]); // SUN_DIR × world up
+const SUN_UP = [
+  SUN_RIGHT[1] * SUN_DIR[2] - SUN_RIGHT[2] * SUN_DIR[1],
+  SUN_RIGHT[2] * SUN_DIR[0] - SUN_RIGHT[0] * SUN_DIR[2],
+  SUN_RIGHT[0] * SUN_DIR[1] - SUN_RIGHT[1] * SUN_DIR[0],
+];

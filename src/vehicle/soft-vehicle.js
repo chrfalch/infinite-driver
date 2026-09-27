@@ -1,4 +1,5 @@
 import { TIRE } from '../tire/config.js';
+import { MAX_TIRES } from '../tire/gpu-tire-solver.js';
 import { GROUP, createSoftTire, groups } from '../tire/soft-tire.js';
 import { CAR, DRIVETRAIN } from './config.js';
 import { WHEELS, wheelMount } from './physics.js';
@@ -624,6 +625,42 @@ export class JointedVehicle {
       angvel: w.hub.angvel(),
       mirror: w.mount.z > 0 ? -1 : 1,
     }));
+  }
+
+  // Hub states plus what the GPU needs to move each hub between the steps of one multi-step
+  // dispatch: the spin axis and inertia, this step's drive torque and brake limit (held for the
+  // batch), and the knuckle's spin rate (the brake stops the hub relative to it).
+  hubBatchStates(dt) {
+    const radius = this.tire.outerRadius;
+    return this.hubStates().map((state, i) => {
+      const w = this.wheels[i];
+      const axis = rotate(w.knuckle.rotation(), AXLE);
+      const wk = w.knuckle.angvel();
+      return {
+        ...state,
+        spinAxis: axis,
+        inertia: HUB_INERTIA_GPU.z,
+        driveTorque: -(w.engineForce ?? 0) * radius,
+        brakeTorque: ((w.brakeImpulse ?? 0) / dt) * radius,
+        knuckleSpin: wk.x * axis.x + wk.y * axis.y + wk.z * axis.z,
+      };
+    });
+  }
+
+  // Runs `steps` GPU tyre steps in one round trip. Returns the force log; apply record j with
+  // applyTyreForces(log, j) before Rapier's step j.
+  stepTyresBatch(steps, dt, { readPositions = false } = {}) {
+    return this.gpu.solver.step(this.hubBatchStates(dt), { readPositions, steps });
+  }
+
+  applyTyreForces(f, step = 0) {
+    const o = step * MAX_TIRES * 8;
+    this.wheels.forEach((w, t) => {
+      const k = o + t * 8;
+      w.hub.resetForces(true);
+      w.hub.addForce({ x: f[k], y: f[k + 1], z: f[k + 2] }, true);
+      w.hub.addTorque({ x: f[k + 4], y: f[k + 5], z: f[k + 6] }, true);
+    });
   }
 
   // Runs the GPU tyres for one step and applies their forces to the hubs (added on top of the

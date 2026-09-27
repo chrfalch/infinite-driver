@@ -2,11 +2,16 @@ import { DEFAULT_TIRE, GPU_TIRE, TIRE } from './config.js';
 import { GpuTireSolver, GROUND_N, rockToGpu } from './gpu-tire-solver.js';
 import { torusMesh } from './soft-tire.js';
 
+// The tyre mesh descriptions (left and mirrored right) for the current settings; the solver's
+// particles follow the same grid.
+export function gpuTireMeshes(tire = TIRE, gpu = GPU_TIRE) {
+  const shape = { ...DEFAULT_TIRE, ...tire, segmentsAround: gpu.segmentsAround, segmentsAcross: gpu.segmentsAcross, beadRings: 0 };
+  return { mesh: torusMesh(shape), mirrored: torusMesh(shape, { mirror: true }) };
+}
+
 // Builds the mesh description and GPU solver for `count` tyres with the current settings.
 export function createGpuTires(device, count, tire = TIRE, gpu = GPU_TIRE) {
-  const shape = { ...DEFAULT_TIRE, ...tire, segmentsAround: gpu.segmentsAround, segmentsAcross: gpu.segmentsAcross, beadRings: 0 };
-  const mesh = torusMesh(shape);
-  const mirrored = torusMesh(shape, { mirror: true });
+  const { mesh, mirrored } = gpuTireMeshes(tire, gpu);
   const inner = Math.round(mesh.nv / 2);
   const spread = Math.max(0, Math.round(gpu.beadRings));
   const solver = new GpuTireSolver(device, {
@@ -94,6 +99,30 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
   solver.setGround(heights, g.ix0 * cell, g.iz0 * cell, cell);
   solver.groundReady = true;
   solver.groundVersion = version;
+}
+
+// Ground height (terrain plus ruts) at (x, z) from the solver's grid, interpolated on the same
+// triangles as the shader (without gravel), or null outside the grid. A few array reads instead of
+// the canyon height function, for per-particle work on the CPU such as finding track contacts.
+export function gpuGroundHeight(solver, x, z) {
+  const g = solver.groundCache;
+  if (!g || !solver.groundReady) return null;
+  const N = GROUND_N;
+  const gx = x / g.cell - g.ix0;
+  const gz = z / g.cell - g.iz0;
+  if (!(gx >= 0 && gz >= 0 && gx < N - 1 && gz < N - 1)) return null;
+  const ix = Math.floor(gx);
+  const iz = Math.floor(gz);
+  const fx = gx - ix;
+  const fz = gz - iz;
+  const h = g.heights;
+  const o = iz * N + ix;
+  const h00 = h[o];
+  const h10 = h[o + 1];
+  const h01 = h[o + N];
+  const h11 = h[o + N + 1];
+  if (fx + fz <= 1) return h00 + (h10 - h00) * fx + (h01 - h00) * fz;
+  return h11 + (h01 - h11) * (1 - fx) + (h10 - h11) * (1 - fz);
 }
 
 // Picks the rocks nearest to (x, z) and uploads them as convex shapes.

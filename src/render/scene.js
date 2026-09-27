@@ -5,10 +5,11 @@ import {
   HemisphereLight,
   OrthographicCamera,
   PerspectiveCamera,
-  PCFSoftShadowMap,
+  PCFShadowMap,
   Scene,
   WebGPURenderer,
 } from 'three/webgpu';
+import { applyQuality } from './quality.js';
 
 export const VIEW_HEIGHT = 22; // metres visible vertically at zoom 1
 // Ground depth per metre of screen height: 1 / sin(35.26 deg) for the isometric view.
@@ -16,9 +17,10 @@ const SHADOW_DEPTH_STRETCH = 1.75;
 
 export async function createRenderer(container) {
   const renderer = new WebGPURenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = PCFSoftShadowMap;
+  // ?noshadow switches shadows off (for profiling).
+  renderer.shadowMap.enabled = !new URLSearchParams(location.search).has('noshadow');
+  // WebGPURenderer replaces PCFSoftShadowMap with PCFShadowMap, so ask for that directly.
+  renderer.shadowMap.type = PCFShadowMap;
   renderer.autoClear = false;
   container.append(renderer.domElement);
   await renderer.init();
@@ -31,11 +33,11 @@ export async function createRenderer(container) {
   scene.add(new HemisphereLight('#fff6e8', '#6f7d5e', 0.9));
   const sun = new DirectionalLight('#fff1dc', 3.2);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
   Object.assign(sun.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, near: 1, far: 130 });
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.03;
   scene.add(sun, sun.target);
+  const quality = applyQuality(renderer, sun);
 
   const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
   // Low, tilted views switch to a perspective camera so the horizon and backdrop show (see
@@ -81,5 +83,5 @@ export async function createRenderer(container) {
   resize();
   window.addEventListener('resize', resize);
 
-  return { renderer, scene, camera, perspective, activeCamera: camera, sun, hudScene, hudCamera, resize };
+  return { renderer, scene, camera, perspective, activeCamera: camera, sun, hudScene, hudCamera, resize, quality };
 }

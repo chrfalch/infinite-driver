@@ -9,6 +9,8 @@ export const DEFAULT_CONTROLS = Object.freeze({
   latchAccelerator: false,
   // Cheaper tyre simulation: fewer solver passes and a coarser mesh.
   performance: false,
+  // Graphics quality: 'auto', 'high', or 'low'. See render/quality.js.
+  graphics: 'auto',
 });
 
 const load = () => loadSettings(STORAGE_KEY);

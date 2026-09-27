@@ -1,9 +1,10 @@
 import { BufferAttribute, BufferGeometry, Color, DoubleSide, Mesh, MeshStandardNodeMaterial } from 'three/webgpu';
 import { attribute, clamp, float, int, positionLocal, uniformArray, varying, vec3, vec4 } from 'three/tsl';
 import { terrainColorAt } from './terrain-mesh.js';
+import { count } from '../perf.js';
 
 const SPACING = 0.12; // metres between track segments
-const MAX_GAP = 1.2; // a longer jump (airborne, respawn) starts a new track
+const MAX_GAP = 1.2; // default: a longer jump (respawn) starts a new track
 const LIFT = 0.006; // above the ground, against z-fighting
 const QUADS = 5; // floor, then inner and outer slope of the berm on each side
 const VERTS = QUADS * 4; // vertices per segment
@@ -104,7 +105,8 @@ export class TireTracks {
   }
 
   // Records a contact point for a wheel. `right` is the unit axle direction in the ground plane.
-  add(wheel, heightAt, point, right, width, strength) {
+  // `maxGap`: a longer jump from the last point starts a new track (callers scale it with speed).
+  add(wheel, heightAt, point, right, width, strength, maxGap = MAX_GAP) {
     const s = this.state[wheel];
     const half = width / 2;
     const y = heightAt(point.x, point.z);
@@ -118,7 +120,8 @@ export class TireTracks {
     if (last) {
       const d = Math.hypot(point.x - last.x, point.z - last.z);
       if (d < SPACING) return;
-      if (d < MAX_GAP) {
+      if (d >= maxGap) count('tracks.breakGap');
+      if (d < maxGap) {
         const q = wheel * this.segments + s.head;
         terrainColorAt(heightAt, point.x, point.z, this.tmp);
         // Alternating shade reads as the tread pattern pressed into the soil.

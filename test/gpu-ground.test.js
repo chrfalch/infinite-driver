@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GroundDeformation } from '../src/terrain/deformation.js';
 import { GROUND_N } from '../src/tire/gpu-tire-solver.js';
-import { updateGpuGround } from '../src/tire/gpu-tires.js';
+import { gpuGroundHeight, updateGpuGround } from '../src/tire/gpu-tires.js';
 
 const heightAt = (x, z) => Math.sin(x * 0.3) + Math.cos(z * 0.2) * 0.5;
 
@@ -82,5 +82,24 @@ describe('GPU ground grid', () => {
     updateGpuGround(s, heightAt, 5.2, 5, null);
     expect(s.uploads).toBe(2);
     expectExact(s, new GroundDeformation());
+  });
+});
+
+describe('gpuGroundHeight', () => {
+  it('matches terrain plus ruts inside the grid and returns null outside it', () => {
+    const d = new GroundDeformation(0.125);
+    d.add(2, 1, -0.08);
+    const s = fakeSolver();
+    updateGpuGround(s, heightAt, 1.7, 0.4, d);
+    let worst = 0;
+    for (let k = 0; k < 500; k++) {
+      const x = 1.7 + Math.sin(k * 12.9898) * 7;
+      const z = 0.4 + Math.cos(k * 78.233) * 7;
+      worst = Math.max(worst, Math.abs(gpuGroundHeight(s, x, z) - (heightAt(x, z) + d.at(x, z))));
+    }
+    // Linear interpolation on a 12.5 cm grid of a smooth field.
+    expect(worst).toBeLessThan(0.01);
+    expect(gpuGroundHeight(s, 1.7 + 20, 0.4)).toBeNull();
+    expect(gpuGroundHeight(fakeSolver(), 0, 0)).toBeNull();
   });
 });
