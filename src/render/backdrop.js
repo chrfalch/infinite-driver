@@ -73,10 +73,13 @@ export function createBackdrop(scene) {
   scene.add(group);
   return {
     group,
-    // Keep the sky centred on the camera and the mountains around the car.
-    update(camera, target, visible) {
+    // Keep the sky centred on the camera and the mountains around the car. Real places
+    // (?place=...) have their own horizon, so only the sky is shown there.
+    update(camera, target, visible, { mountains = true } = {}) {
       group.visible = visible;
       if (!visible) return;
+      far.visible = mountains;
+      near.visible = mountains;
       sky.position.copy(camera.position);
       far.position.set(target.x, target.y - 8, target.z);
       near.position.set(target.x, target.y - 8, target.z);

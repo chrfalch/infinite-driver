@@ -1,5 +1,5 @@
 import { createNoise2D } from 'simplex-noise';
-import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardNodeMaterial } from 'three/webgpu';
+import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardNodeMaterial, ShadowNodeMaterial } from 'three/webgpu';
 import { attribute, dot, exp, fract, fwidth, mix, positionWorld, sin, smoothstep, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import { gravelShade } from '../terrain/gravel.js';
 import { GROUND } from '../tire/config.js';
@@ -53,6 +53,10 @@ terrainMaterial.colorNode = vec4(
   ),
   1,
 );
+
+// Under photorealistic 3D tiles the terrain is only a shadow catcher: invisible except for the
+// car's shadow.
+const shadowCatcher = new ShadowNodeMaterial({ opacity: 0.45 });
 
 const DIRT = new Color('#c2ab82');
 const DRY = new Color('#b4ad84');
@@ -187,7 +191,11 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
   geometry.setIndex(new BufferAttribute(indices, 1));
   geometry.computeBoundingSphere();
 
-  const material = heightAt.real ? createImageryMaterial(heightAt.real.projection, x0, z0, size) : terrainMaterial;
+  const material = !heightAt.real
+    ? terrainMaterial
+    : heightAt.real.photoTiles
+      ? shadowCatcher
+      : createImageryMaterial(heightAt.real.projection, x0, z0, size);
   const mesh = new Mesh(geometry, material);
   mesh.receiveShadow = true;
   mesh.name = `chunk ${cx},${cz}`;

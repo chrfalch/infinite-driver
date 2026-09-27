@@ -3,3 +3,4 @@ dist/
 scratch/
 .DS_Store
 screenshot.png
+.env.local

@@ -39,6 +39,7 @@ import { createHeightField } from './terrain/height.js';
 import { createRealHeightField } from './terrain/real.js';
 import { resolvePlace } from './geo/place.js';
 import { createWater } from './render/water.js';
+import { createPhotoTiles } from './render/photo-tiles.js';
 import { applyPendingCarAction, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
 import { createTouchControls } from './ui/touch-controls.js';
@@ -56,6 +57,9 @@ async function main() {
   const heightAt = place ? createRealHeightField(place) : createHeightField({ mode });
   // The elevation tiles under the start must be there before the car and the first chunks.
   if (place) await heightAt.load(-200, -200, 200, 200);
+  // Google's photorealistic 3D tiles on top when there is a key (?tiles=off for satellite imagery).
+  const googleKey = import.meta.env.VITE_GOOGLE_MAPS_KEY;
+  if (place && googleKey && params.get('tiles') !== 'off') heightAt.real.photoTiles = true;
   const physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   physicsWorld.timestep = 1 / 120;
   // The jointed car is a chain of light links under a heavy chassis; Rapier's default 4 solver
@@ -89,7 +93,9 @@ async function main() {
   if (window.innerWidth < 700 || touch.isVisible()) panel.close();
 
   streamTerrain(world, { force: true });
-  const water = place ? createWater(render.scene) : null;
+  const photoTiles = heightAt.real?.photoTiles ? createPhotoTiles({ key: googleKey, place, scene: render.scene, renderer: render.renderer, heightAt }) : null;
+  // The 3D tiles have their own water.
+  const water = place && !photoTiles ? createWater(render.scene) : null;
 
   // HUD text through Glyph.
   const hud = glyph.handle('hud', ThreeConfig);
@@ -196,6 +202,7 @@ async function main() {
     if (water) water.follow(render.activeCamera);
     updateHud(world);
     const player = world.queryFirst(IsPlayer, Vehicle);
+    if (photoTiles && player) photoTiles.update(render.activeCamera, player.get(Vehicle).body.translation());
     if (player) {
       const canvas = render.renderer.domElement;
       gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible());
@@ -216,6 +223,7 @@ async function main() {
     },
     respawnAt: (x, z, yaw) => requestRespawnAt(world, heightAt, x, z, yaw),
     heightAt,
+    photoTiles,
     traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig, RockField },
   };
 }

@@ -172,8 +172,10 @@ export function followCamera(world) {
     persp.lookAt(state.x, state.y + 0.6, state.z);
     render.activeCamera = persp;
     render.scene.fog.color.copy(HORIZON);
-    render.scene.fog.near = 80;
-    render.scene.fog.far = 210;
+    // Real places are for looking at: the haze starts much further out.
+    const real = Boolean(heightAt?.real);
+    render.scene.fog.near = real ? 250 : 80;
+    render.scene.fog.far = real ? 1400 : 210;
     render.scene.background = HORIZON;
   } else {
     render.activeCamera = camera;
@@ -182,7 +184,7 @@ export function followCamera(world) {
     render.scene.fog.far = orthoFog.far;
     render.scene.background = orthoFog.background;
   }
-  backdrop.update(render.activeCamera, state, low);
+  backdrop.update(render.activeCamera, state, low, { mountains: !world.get(HeightField)?.heightAt?.real });
 
   // The sun and its shadow box travel with the car.
   sun.target.position.set(state.x, state.y, state.z);

@@ -22,6 +22,7 @@
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
     "@pmndrs/glyph": "^0.1.0",
+    "3d-tiles-renderer": "^0.5.3",
     "koota": "^0.6.6",
     "lil-gui": "^0.21.0",
     "simplex-noise": "^4.0.3",
