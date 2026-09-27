@@ -7,6 +7,7 @@
 // so buildings never hide the car. Shadows are still cast by the whole building.
 import { MeshStandardNodeMaterial, Vector3 } from 'three/webgpu';
 import { hash2, valueNoise } from './noise.js';
+import { roofArray } from './roof-imagery.js';
 import {
   attribute,
   bool,
@@ -16,12 +17,14 @@ import {
   floor,
   fract,
   fwidth,
+  int,
   length,
   max,
   mix,
   positionWorld,
   screenCoordinate,
   smoothstep,
+  texture,
   uniform,
   vec2,
   vec3,
@@ -85,7 +88,13 @@ const roofBase = roofPick
   .lessThan(0.4)
   .select(vec3(0.24, 0.24, 0.25), roofPick.lessThan(0.7).select(vec3(0.42, 0.41, 0.39), roofPick.lessThan(0.9).select(vec3(0.33, 0.35, 0.37), vec3(0.36, 0.5, 0.44))));
 const weathering = valueNoise(positionWorld.xz.div(4)).mul(0.6).add(valueNoise(positionWorld.xz.div(1.3)).mul(0.4));
-const roofColor = roofBase.mul(weathering.mul(0.18).add(0.91));
+const proceduralRoof = roofBase.mul(weathering.mul(0.18).add(0.91));
+// Near the car, the real roof from satellite imagery (render/roof-imagery.js).
+const roofMap = attribute('roofMap', 'vec3');
+const hasImagery = roofMap.z.greaterThan(-0.5);
+const imagery = texture(roofArray, roofMap.xy).depth(int(max(roofMap.z, float(0)).add(0.5)));
+// The photo already has the sun's light in it, and the roof is lit again here: darken it to match.
+const roofColor = hasImagery.select(imagery.rgb.mul(0.42), proceduralRoof);
 
 // Line-of-sight cut-away around `focus` (the car).
 const focus = uniform(new Vector3());

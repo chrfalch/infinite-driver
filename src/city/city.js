@@ -5,8 +5,9 @@
 //   for them with city.ensure, like they wait for the elevation tiles.
 // - Ground: each terrain chunk gets a ground map (city/ground.js) from the areas, buildings and
 //   roads under it, which also places its trees.
-// - Buildings: one merged mesh per tile with the facade material (render/facade.js), built once
-//   the tile's elevation is loaded. Tiles far from the car are dropped.
+// - Buildings: one merged mesh per 128 m group with the facade material (render/facade.js), built
+//   once the tile's elevation is loaded; groups near the car get satellite imagery on their roofs
+//   (render/roof-imagery.js). Tiles far from the car are dropped.
 // - Colliders: each building gets its own fixed trimesh (the same triangles that are drawn) when
 //   the car comes within COLLIDER_NEAR metres, and loses it past COLLIDER_FAR.
 import { BufferAttribute, BufferGeometry, DataTexture, DataUtils, HalfFloatType, LinearFilter, LinearMipmapLinearFilter, Mesh, RGBAFormat } from 'three/webgpu';
@@ -16,19 +17,23 @@ import { GROUND_RES, placeTrees, rasterizeGround } from './ground.js';
 import { BUCKET, indexRoads, roadAt } from './roads.js';
 import { CITY_ZOOM, loadCityTile } from './vector-tiles.js';
 import { facadeMaterial } from '../render/facade.js';
+import { createRoofImagery } from '../render/roof-imagery.js';
 
 const LOAD_RADIUS = 700; // m around the car
 const DROP_RADIUS = 1600; // m
 const COLLIDER_NEAR = 70; // m from a building's bounding box
 const COLLIDER_FAR = 130; // m
 const COLLIDERS_PER_FRAME = 24;
+const GROUP = 128; // m, building groups (one mesh and one roof imagery layer each)
 
 export function createCity({ projection, heightAt, scene }) {
-  const tiles = new Map(); // "tx,ty" -> { tx, ty, state: 'loading' | 'ready', data, mesh }
+  const tiles = new Map(); // "tx,ty" -> { tx, ty, state: 'loading' | 'roads' | 'ready', data, groups, solids }
   const buckets = new Map(); // road segments (city/roads.js)
   const shapes = new Map(); // "i,j" bucket -> ground areas, buildings and roads near it
   const grounds = new Map(); // chunk "x0,z0" -> { pixels, texture }
   let groundCtx = null;
+  const roofs = createRoofImagery(projection);
+  const groups = new Set(); // building groups of built tiles
   const solids = new Set(); // buildings of built tiles
   let physics = null;
   let frame = 0;
@@ -47,7 +52,7 @@ export function createCity({ projection, heightAt, scene }) {
     const key = `${tx},${ty}`;
     let tile = tiles.get(key);
     if (tile) return tile;
-    tile = { tx, ty, state: 'loading', data: null, mesh: null, promise: null };
+    tile = { tx, ty, state: 'loading', data: null, groups: null, solids: null, promise: null };
     tiles.set(key, tile);
     tile.promise = loadCityTile(projection, tx, ty)
       .catch((error) => {
@@ -109,29 +114,72 @@ export function createCity({ projection, heightAt, scene }) {
   }
 
   function buildTile(tile) {
-    const built = buildBuildings(tile.data.buildings, heightAt);
+    // Buildings go in the group of the cell their first corner is in.
+    const cells = new Map();
+    for (const b of tile.data.buildings) {
+      const key = `${Math.floor(b.outer[0].x / GROUP)},${Math.floor(b.outer[0].z / GROUP)}`;
+      if (!cells.has(key)) cells.set(key, []);
+      cells.get(key).push(b);
+    }
+    tile.groups = [];
+    tile.solids = [];
+    for (const [key, buildings] of cells) {
+      const group = buildGroup(buildings);
+      if (!group) continue;
+      group.mesh.name = `buildings ${key}`;
+      scene.add(group.mesh);
+      tile.groups.push(group);
+      groups.add(group);
+      for (const s of group.solids) {
+        tile.solids.push(s);
+        solids.add(s);
+      }
+    }
+  }
+
+  function buildGroup(buildings) {
+    const built = buildBuildings(buildings, heightAt);
+    if (!built.solids.length) return null;
+    const bounds = { x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity };
+    for (const s of built.solids) {
+      bounds.x0 = Math.min(bounds.x0, s.min.x);
+      bounds.z0 = Math.min(bounds.z0, s.min.z);
+      bounds.x1 = Math.max(bounds.x1, s.max.x);
+      bounds.z1 = Math.max(bounds.z1, s.max.z);
+    }
+    // Roof vertices map into the group's box for the roof imagery: (u, v, layer = -1 for none).
+    const count = built.positions.length / 3;
+    const roofMap = new Float32Array(count * 3);
+    const roofVertices = [];
+    for (let i = 0; i < count; i++) {
+      roofMap[i * 3 + 2] = -1;
+      if (built.facade[i * 4 + 3] < 0.5 || built.normals[i * 3 + 1] < 0.5) continue;
+      roofMap[i * 3] = (built.positions[i * 3] - bounds.x0) / (bounds.x1 - bounds.x0);
+      roofMap[i * 3 + 1] = (built.positions[i * 3 + 2] - bounds.z0) / (bounds.z1 - bounds.z0);
+      roofVertices.push(i);
+    }
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(built.positions, 3));
     geometry.setAttribute('normal', new BufferAttribute(built.normals, 3));
     geometry.setAttribute('facade', new BufferAttribute(built.facade, 4));
     geometry.setAttribute('tint', new BufferAttribute(built.tint, 3));
     geometry.setAttribute('seed', new BufferAttribute(built.seed, 1));
+    geometry.setAttribute('roofMap', new BufferAttribute(roofMap, 3));
     geometry.computeBoundingSphere();
     const mesh = new Mesh(geometry, facadeMaterial);
-    mesh.name = `buildings ${tile.tx},${tile.ty}`;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    scene.add(mesh);
-    tile.mesh = mesh;
-    tile.solids = built.solids;
-    for (const s of built.solids) solids.add(s);
+    return { mesh, bounds, roofVertices, layer: -1, solids: built.solids };
   }
 
   function dropTile(key, tile) {
     tiles.delete(key);
-    if (tile.mesh) {
-      scene.remove(tile.mesh);
-      tile.mesh.geometry.dispose();
+    for (const group of tile.groups ?? []) {
+      scene.remove(group.mesh);
+      group.mesh.geometry.dispose();
+      group.disposed = true;
+      roofs.release(group);
+      groups.delete(group);
     }
     for (const s of tile.solids ?? []) {
       removeCollider(s);
@@ -241,6 +289,7 @@ export function createCity({ projection, heightAt, scene }) {
           if (d > DROP_RADIUS && tile.state === 'ready') dropTile(key, tile);
         }
       }
+      if (frame % 10 === 0) roofs.update(groups, target);
       // Colliders: add the nearest few missing ones each frame, remove far ones.
       const { rapier, world: rapierWorld } = physics;
       let added = 0;
@@ -255,7 +304,9 @@ export function createCity({ projection, heightAt, scene }) {
     get stats() {
       let colliders = 0;
       for (const s of solids) if (s.collider) colliders++;
-      return { tiles: tiles.size, buildings: solids.size, colliders };
+      let roofImagery = 0;
+      for (const g of groups) if (g.layer >= 0) roofImagery++;
+      return { tiles: tiles.size, buildings: solids.size, colliders, groups: groups.size, roofImagery };
     },
   };
 }

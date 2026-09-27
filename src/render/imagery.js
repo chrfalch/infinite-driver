@@ -14,28 +14,32 @@ const placeholder = new DataTexture(new Uint8Array([112, 118, 102, 255]), 1, 1);
 placeholder.colorSpace = SRGBColorSpace;
 placeholder.needsUpdate = true;
 
-// Stitches the imagery tiles under the square [x0, x0 + size] x [z0, z0 + size] (world metres)
-// into one bitmap: top row north (z0), left column west (x0).
-async function stitch(projection, x0, z0, size) {
-  const a = projection.toPixel(x0, z0, IMAGERY_ZOOM);
-  const b = projection.toPixel(x0 + size, z0 + size, IMAGERY_ZOOM);
-  const scale = TEXTURE_SIZE / (b.x - a.x);
+// Draws the imagery tiles under the rectangle [x0, x1] x [z0, z1] (world metres, at zoom `zoom`)
+// into a 2D context of width x height: top row north (z0), left column west (x0).
+export async function drawImagery(ctx, projection, x0, z0, x1, z1, zoom, width, height) {
+  const a = projection.toPixel(x0, z0, zoom);
+  const b = projection.toPixel(x1, z1, zoom);
+  const sx = width / (b.x - a.x);
+  const sy = height / (b.y - a.y);
   const jobs = [];
   for (let ty = Math.floor(a.y / TILE_SIZE); ty <= Math.floor(b.y / TILE_SIZE); ty++) {
     for (let tx = Math.floor(a.x / TILE_SIZE); tx <= Math.floor(b.x / TILE_SIZE); tx++) {
-      jobs.push(loadTileBitmap(SATELLITE_URL(IMAGERY_ZOOM, tx, ty)).then((bitmap) => ({ bitmap, tx, ty })));
+      jobs.push(loadTileBitmap(SATELLITE_URL(zoom, tx, ty)).then((bitmap) => ({ bitmap, tx, ty })));
     }
   }
   const parts = await Promise.all(jobs);
-  const canvas = new OffscreenCanvas(TEXTURE_SIZE, TEXTURE_SIZE);
-  const ctx = canvas.getContext('2d');
   ctx.fillStyle = 'rgb(112, 118, 102)';
-  ctx.fillRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
+  ctx.fillRect(0, 0, width, height);
   // A hair of overlap hides seams between tiles drawn at fractional positions.
-  const side = TILE_SIZE * scale + 0.5;
   for (const { bitmap, tx, ty } of parts) {
-    if (bitmap) ctx.drawImage(bitmap, (tx * TILE_SIZE - a.x) * scale, (ty * TILE_SIZE - a.y) * scale, side, side);
+    if (bitmap) ctx.drawImage(bitmap, (tx * TILE_SIZE - a.x) * sx, (ty * TILE_SIZE - a.y) * sy, TILE_SIZE * sx + 0.5, TILE_SIZE * sy + 0.5);
   }
+}
+
+// Stitches the imagery under the square [x0, x0 + size]^2 into one bitmap.
+async function stitch(projection, x0, z0, size) {
+  const canvas = new OffscreenCanvas(TEXTURE_SIZE, TEXTURE_SIZE);
+  await drawImagery(canvas.getContext('2d'), projection, x0, z0, x0 + size, z0 + size, IMAGERY_ZOOM, TEXTURE_SIZE, TEXTURE_SIZE);
   return canvas.transferToImageBitmap();
 }
 
