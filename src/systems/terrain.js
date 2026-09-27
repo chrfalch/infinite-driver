@@ -192,7 +192,10 @@ export function streamTerrain(world, { force = false } = {}) {
       const cx = ccx + dx;
       const cz = ccz + dz;
       if (loaded.has(chunkKey(cx, cz))) continue;
-      if (heightAt.ensure && !heightAt.ensure(cx * CHUNK_SIZE, cz * CHUNK_SIZE, (cx + 1) * CHUNK_SIZE, (cz + 1) * CHUNK_SIZE)) continue;
+      const box = [cx * CHUNK_SIZE, cz * CHUNK_SIZE, (cx + 1) * CHUNK_SIZE, (cz + 1) * CHUNK_SIZE];
+      if (heightAt.ensure && !heightAt.ensure(...box)) continue;
+      // With OSM data, the roads painted on a chunk must be there too.
+      if (heightAt.real?.city && !heightAt.real.city.ensure(...box)) continue;
       missing.push([cx, cz, dx * dx + dz * dz]);
     }
   }

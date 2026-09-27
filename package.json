@@ -21,10 +21,12 @@
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
+    "@mapbox/vector-tile": "^3.0.0",
     "@pmndrs/glyph": "^0.1.0",
     "3d-tiles-renderer": "^0.5.3",
     "koota": "^0.6.6",
     "lil-gui": "^0.21.0",
+    "pbf": "^5.1.2",
     "simplex-noise": "^4.0.3",
     "three": "^0.186.1",
     "typegpu": "^0.12.6"

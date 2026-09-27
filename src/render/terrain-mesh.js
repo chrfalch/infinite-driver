@@ -6,6 +6,7 @@ import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
 import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
 import { createImageryMaterial } from './imagery.js';
+import { roadAt } from '../city/roads.js';
 
 // Ground colour from the vertex colours, with the gravel stones drawn on top (the same stones the
 // GPU tyres roll over; see terrain/gravel.js).
@@ -131,6 +132,10 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
   const steep = new Float32Array(n * n);
   // Real-world terrain is drawn with satellite imagery: uv (0, 0) at the north-west corner.
   const uvs = heightAt.real ? new Float32Array(n * n * 2) : null;
+  // With OSM data (city/city.js): the roads under each vertex (city/roads.js).
+  const city = heightAt.real?.city;
+  const roads = city ? new Float32Array(n * n * 4) : null;
+  const segments = city ? city.segmentsIn(x0, z0, x0 + size, z0 + size) : null;
   // Heights on the grid plus a one-sample border, so normals come from the grid (central
   // differences) and still match the neighbouring chunks.
   const m = n + 2;
@@ -151,6 +156,7 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
       const h = heights[i];
       positions.set([x, h, z], i * 3);
       uvs?.set([ix / res, iz / res], i * 2);
+      if (roads) roadAt(segments, x, z, roads, i * 4);
       const dx = (at(ix + 1, iz) - at(ix - 1, iz)) / (2 * step);
       const dz = (at(ix, iz + 1) - at(ix, iz - 1)) / (2 * step);
       const len = Math.hypot(dx, 1, dz);
@@ -188,6 +194,7 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
   geometry.setAttribute('roadDist', new BufferAttribute(roadDist, 1));
   geometry.setAttribute('steep', new BufferAttribute(steep, 1));
   if (uvs) geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
+  if (roads) geometry.setAttribute('road', new BufferAttribute(roads, 4));
   geometry.setIndex(new BufferAttribute(indices, 1));
   geometry.computeBoundingSphere();
 
@@ -195,7 +202,7 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
     ? terrainMaterial
     : heightAt.real.photoTiles
       ? shadowCatcher
-      : createImageryMaterial(heightAt.real.projection, x0, z0, size);
+      : createImageryMaterial(heightAt.real.projection, x0, z0, size, { roads: Boolean(city) });
   const mesh = new Mesh(geometry, material);
   mesh.receiveShadow = true;
   mesh.name = `chunk ${cx},${cz}`;

@@ -40,6 +40,8 @@ import { createRealHeightField } from './terrain/real.js';
 import { resolvePlace } from './geo/place.js';
 import { createWater } from './render/water.js';
 import { createPhotoTiles } from './render/photo-tiles.js';
+import { createCity } from './city/city.js';
+import { setFacadeFocus } from './render/facade.js';
 import { applyPendingCarAction, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
 import { createTouchControls } from './ui/touch-controls.js';
@@ -57,9 +59,17 @@ async function main() {
   const heightAt = place ? createRealHeightField(place) : createHeightField({ mode });
   // The elevation tiles under the start must be there before the car and the first chunks.
   if (place) await heightAt.load(-200, -200, 200, 200);
-  // Google's photorealistic 3D tiles on top when there is a key (?tiles=off for satellite imagery).
+  // Real places are an OSM city by default: buildings and roads on satellite imagery.
+  // ?tiles=google draws Google's photorealistic 3D tiles instead (needs VITE_GOOGLE_MAPS_KEY; the
+  // buildings are not solid there); ?tiles=off shows the bare terrain and imagery.
   const googleKey = import.meta.env.VITE_GOOGLE_MAPS_KEY;
-  if (place && googleKey && params.get('tiles') !== 'off') heightAt.real.photoTiles = true;
+  const tilesMode = params.get('tiles') ?? 'city';
+  if (place && googleKey && tilesMode === 'google') heightAt.real.photoTiles = true;
+  const city = place && tilesMode === 'city' ? createCity({ projection: heightAt.real.projection, heightAt, scene: render.scene }) : null;
+  if (city) {
+    heightAt.real.city = city;
+    await city.load(-200, -200, 200, 200);
+  }
   const physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   physicsWorld.timestep = 1 / 120;
   // The jointed car is a chain of light links under a heavy chassis; Rapier's default 4 solver
@@ -203,6 +213,11 @@ async function main() {
     updateHud(world);
     const player = world.queryFirst(IsPlayer, Vehicle);
     if (photoTiles && player) photoTiles.update(render.activeCamera, player.get(Vehicle).body.translation());
+    if (city && player) {
+      const p = player.get(Vehicle).body.translation();
+      city.update(world.get(Physics), p);
+      setFacadeFocus(p);
+    }
     if (player) {
       const canvas = render.renderer.domElement;
       gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible());
@@ -224,6 +239,7 @@ async function main() {
     respawnAt: (x, z, yaw) => requestRespawnAt(world, heightAt, x, z, yaw),
     heightAt,
     photoTiles,
+    city,
     traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig, RockField },
   };
 }
