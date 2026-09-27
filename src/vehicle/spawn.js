@@ -18,7 +18,7 @@ import { createCarMesh, createWheelRig } from '../render/car-mesh.js';
 import { createSoftTireMesh } from '../render/soft-tire-mesh.js';
 import { CONTROLS } from '../controls.js';
 import { effectiveGpuTire, effectiveTire, GPU_TIRE, TIRE } from '../tire/config.js';
-import { createGpuTires } from '../tire/gpu-tires.js';
+import { createGpuTires, gpuTireMeshes } from '../tire/gpu-tires.js';
 import { CAR, DRIVETRAIN } from './config.js';
 import { Drivetrain } from './drivetrain.js';
 import { createCarBody, WHEELS } from './physics.js';
@@ -29,8 +29,9 @@ const ZERO = { x: 0, y: 0, z: 0 };
 
 // Builds the player car (physics body, controller, meshes, wheel entities) from the current CAR settings.
 export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, angvel = ZERO, steer = 0, drivetrain = null }) {
-  const { rapier, world: physicsWorld } = world.get(Physics);
-  const { scene } = world.get(Render);
+  const { rapier, world: physicsWorld, remote } = world.get(Physics);
+  // Physics in the worker: it simulates the car; here it is only drawn (see physics/client.js).
+  if (remote) return spawnRemoteCar(world, remote, { position, rotation, linvel, angvel, steer, keepDrivetrain: !!drivetrain });
 
   const soft = CAR.softTires;
   const device = world.get(Render).renderer?.backend?.device;
@@ -52,6 +53,22 @@ export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, 
     body.setAngvel(angvel, true);
   }
 
+  return addCarViews(world, { body, controller, gpuTires, soft, drivetrain: drivetrain ?? new Drivetrain(DRIVETRAIN), position, rotation, steer });
+}
+
+function spawnRemoteCar(world, remote, { keepDrivetrain, ...pose }) {
+  const { body, controller, drivetrain } = remote.spawn(pose, { keepDrivetrain });
+  const gpu = effectiveGpuTire(GPU_TIRE, CONTROLS.performance);
+  const gpuTires = { ...gpuTireMeshes(TIRE, gpu), solver: controller.gpu.solver };
+  const car = addCarViews(world, { body, controller, gpuTires, soft: true, drivetrain, position: pose.position, rotation: pose.rotation, steer: pose.steer });
+  // The worker's speed, steering, and brake state go into the entity's own Vehicle object.
+  remote.attach(car.get(Vehicle));
+  return car;
+}
+
+// The player entity, its meshes, and one entity per wheel.
+function addCarViews(world, { body, controller, gpuTires, soft, drivetrain, position, rotation, steer }) {
+  const { scene } = world.get(Render);
   const { object, steeringWheel, axles } = createCarMesh();
   scene.add(object);
   const car = world.spawn(
@@ -60,7 +77,7 @@ export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, 
     Transform({ position: { ...position }, quaternion: { ...rotation } }),
     RigidBody({ body }),
     // The drivetrain reads DRIVETRAIN live, so panel changes apply without a rebuild.
-    Vehicle({ controller, body, drivetrain: drivetrain ?? new Drivetrain(DRIVETRAIN), steer, speed: 0 }),
+    Vehicle({ controller, body, drivetrain, steer, speed: 0 }),
     View({ object }),
     SteeringWheel({ object: steeringWheel }),
     AxleRig({ rig: axles }),
@@ -109,7 +126,7 @@ export function despawnCar(world, car) {
   // The jointed car owns its hubs, joints, and soft tyres; the raycast car is one controller.
   if (controller.dispose) controller.dispose();
   else physicsWorld.removeVehicleController(controller);
-  physicsWorld.removeRigidBody(body);
+  physicsWorld?.removeRigidBody(body);
   scene.remove(object);
   disposeObject(object);
   car.destroy();

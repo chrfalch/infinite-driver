@@ -18,7 +18,7 @@ import { generatePlants } from '../terrain/vegetation.js';
 import { createVegetationMesh } from '../render/vegetation-mesh.js';
 
 // ?rocks=<count per chunk> (default 70); ?rocks=0 gives an empty test ground.
-const ROCK_COUNT = Number(new URLSearchParams(globalThis.location?.search ?? '').get('rocks') ?? 70);
+export const ROCK_COUNT = Number(new URLSearchParams(globalThis.location?.search ?? '').get('rocks') ?? 70);
 
 // Work per frame is spread out to avoid hitches when the car crosses a chunk border: at most one
 // job per frame (a new chunk's ground mesh, a rock mesh, a ground trimesh collider, or one chunk's
@@ -101,11 +101,13 @@ function addRockColliders(physics, field) {
 function setCollidersEnabled(chunk, field, enabled) {
   if (chunk.collidersEnabled === enabled) return;
   chunk.collidersEnabled = enabled;
+  if (!chunk.collider && !field.colliders.length) return;
   chunk.collider?.setEnabled(enabled);
   for (const c of field.colliders) c.setEnabled(enabled);
 }
 
 function removeColliders(physics, chunk, field) {
+  if (!physics.world) return;
   if (chunk.collider) physics.world.removeCollider(chunk.collider, false);
   for (const c of field.colliders) physics.world.removeCollider(c, false);
   chunk.collider = null;
@@ -157,7 +159,8 @@ export function streamTerrain(world, { force = false } = {}) {
       return;
     }
     const dist = dx * dx + dz * dz;
-    const wantsColliders = dx <= colliderRadius && dz <= colliderRadius;
+    // With physics in the worker there is no physics world here; the worker builds its own.
+    const wantsColliders = !!physics.world && dx <= colliderRadius && dz <= colliderRadius;
     if (wantsColliders) {
       setCollidersEnabled(chunk, field, true);
       if (force) {
@@ -224,8 +227,8 @@ function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, ne
     cx,
     cz,
   };
-  if (near && ground) addGroundCollider(physics, chunk);
-  if (near && rocks) addRockColliders(physics, field);
+  if (physics.world && near && ground) addGroundCollider(physics, chunk);
+  if (physics.world && near && rocks) addRockColliders(physics, field);
   const object = new Group();
   object.name = `chunk ${cx},${cz}`;
   object.add(createChunkMesh(heightAt, heights, cx, cz));

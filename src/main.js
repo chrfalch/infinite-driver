@@ -25,7 +25,8 @@ import { createGauges } from './ui/gauges.js';
 import { attachZoom, followCamera, isFollowCamera, toggleFollowCamera } from './systems/camera.js';
 import { updateHud } from './systems/hud.js';
 import { attachKeyboard, readInput } from './systems/input.js';
-import { stepPhysics, syncBodies } from './systems/physics.js';
+import { stepPhysics } from './systems/physics.js';
+import { syncBodies } from './systems/draw-sync.js';
 import { streamTerrain } from './systems/terrain.js';
 import { syncAxles, syncBrakeLights, syncSoftTires, syncViews, syncWheels } from './systems/views.js';
 import { updateTracks } from './systems/tracks.js';
@@ -38,8 +39,12 @@ import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
 import { applyPendingCarAction, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
+import { createPhysicsClient, workerGpuSupported } from './physics/client.js';
+import { ROCK_COUNT } from './systems/terrain.js';
+import { CAR } from './vehicle/config.js';
+import { updateGpuGround, updateGpuRocks } from './tire/gpu-tires.js';
 import { createTouchControls } from './ui/touch-controls.js';
-import { count, sample, startOverlay, timed } from './perf.js';
+import { count, reportError, sample, startOverlay, timed } from './perf.js';
 
 async function main() {
   const container = document.getElementById('app');
@@ -49,16 +54,35 @@ async function main() {
   // Red-rock canyon with gravel roads by default; ?terrain=flat (tests) or ?terrain=hills.
   const mode = new URLSearchParams(location.search).get('terrain') ?? 'canyon';
   const heightAt = createHeightField({ mode });
-  const physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
-  physicsWorld.timestep = 1 / 120;
-  // The jointed car is a chain of light links under a heavy chassis; Rapier's default 4 solver
-  // iterations leave it leaning and trembling at rest. 8 settles it level and still.
-  physicsWorld.numSolverIterations = 8;
+  const deformation = new GroundDeformation();
+
+  // Physics runs in a worker (with its own GPU device) for the GPU tyres when the browser has
+  // WebGPU in workers; ?physics=main keeps it on this thread. Other tyre modes stay here.
+  const params = new URLSearchParams(location.search);
+  const useWorker = CAR.softTires && CAR.gpuTires && params.get('physics') !== 'main' && (await workerGpuSupported());
+  let remote = null;
+  let physicsWorld = null;
+  if (useWorker) {
+    remote = createPhysicsClient({ terrain: mode, rocks: ROCK_COUNT, deformation, slowGpu: Number(params.get('slowgpu') ?? 0) });
+    try {
+      await remote.start();
+    } catch (error) {
+      console.warn('Physics worker unavailable, running physics on the main thread:', error);
+      remote.stop();
+      remote = null;
+    }
+  }
+  if (!remote) {
+    physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+    physicsWorld.timestep = 1 / 120;
+    // The jointed car is a chain of light links under a heavy chassis; Rapier's default 4 solver
+    // iterations leave it leaning and trembling at rest. 8 settles it level and still.
+    physicsWorld.numSolverIterations = 8;
+  }
 
   world.add(Time, Input, TerrainStreaming);
-  world.add(Physics({ rapier: RAPIER, world: physicsWorld, accumulator: 0, step: 1 / 120, stepMs: 0, simTime: 0, displayTime: 0 }));
+  world.add(Physics({ rapier: RAPIER, world: physicsWorld, remote, accumulator: 0, step: 1 / 120, stepMs: 0, simTime: 0, displayTime: 0 }));
   world.add(Render(render));
-  const deformation = new GroundDeformation();
   const surfaceAt = (x, z) => heightAt(x, z) + deformation.at(x, z);
   world.add(HeightField({ heightAt, surfaceAt }));
   world.add(Deformation({ map: deformation }));
@@ -103,7 +127,7 @@ async function main() {
       format: (v) => {
         const tyres = v.controller.gpu ? 'GPU tyres' : v.controller.wheels ? 'Rapier soft tyres' : 'rigid wheels';
         const gpu = render.renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2 (no WebGPU)';
-        return `${tyres}    physics ${world.get(Physics).stepMs.toFixed(1)} ms/step    ${gpu}`;
+        return `${tyres}    physics ${world.get(Physics).stepMs.toFixed(1)} ms/step${remote ? ' (worker)' : ''}    ${gpu}`;
       },
     }),
   );
@@ -168,33 +192,50 @@ async function main() {
   const frame = (now) => {
     const fStart = performance.now();
     sample('frame.interval', now - last);
+    if (now - last > 50) count('longFrames');
     count('wallSeconds', Math.min((now - last) / 1000, 0.1));
     const time = world.get(Time);
     time.delta = Math.min((now - last) / 1000, 0.1);
     time.elapsed += time.delta;
     last = now;
-    if (!busy) simulate();
+    // Safari shows a white canvas for any animation frame that draws nothing, so an error in a
+    // system must not skip the draw: it is logged (and counted in the ?perf overlay) instead.
+    try {
+      if (remote) {
+        // The worker steps on its own clock; send it this frame's input and take its newest time.
+        applyPendingCarAction();
+        readInput(world);
+        remote.tick(world.get(Input));
+        const physics = world.get(Physics);
+        physics.simTime = remote.simTime;
+        physics.stepMs = remote.stepMs;
+        syncRemoteSolver(world);
+      } else if (!busy) simulate();
 
-    timed('sys.syncBodies', () => syncBodies(world));
-    timed('sys.streamTerrain', () => streamTerrain(world));
-    timed('sys.syncViews', () => syncViews(world));
-    timed('sys.syncWheels', () => syncWheels(world));
-    timed('sys.syncAxles', () => syncAxles(world));
-    timed('sys.syncSoftTires', () => syncSoftTires(world));
-    timed('sys.syncBrakeLights', () => syncBrakeLights(world));
-    timed('sys.updateTracks', () => updateTracks(world));
-    timed('sys.updateSoil', () => updateSoil(world));
-    timed('sys.updateBushes', () => updateBushes(world));
-    timed('sys.followCamera', () => followCamera(world));
-    timed('sys.updateHud', () => updateHud(world));
-    const player = world.queryFirst(IsPlayer, Vehicle);
-    if (player) {
-      const canvas = render.renderer.domElement;
-      gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible());
-      gauges.update(player.get(Vehicle), time.delta);
-      { const v = player.get(Vehicle).body.linvel(); sample('speed.kmh', Math.hypot(v.x, v.z) * 3.6); }
+      timed('sys.syncBodies', () => syncBodies(world));
+      timed('sys.streamTerrain', () => streamTerrain(world));
+      timed('sys.syncViews', () => syncViews(world));
+      timed('sys.syncWheels', () => syncWheels(world));
+      timed('sys.syncAxles', () => syncAxles(world));
+      timed('sys.syncSoftTires', () => syncSoftTires(world));
+      timed('sys.syncBrakeLights', () => syncBrakeLights(world));
+      timed('sys.updateTracks', () => updateTracks(world));
+      timed('sys.updateSoil', () => updateSoil(world));
+      timed('sys.updateBushes', () => updateBushes(world));
+      timed('sys.followCamera', () => followCamera(world));
+      timed('sys.updateHud', () => updateHud(world));
+      const player = world.queryFirst(IsPlayer, Vehicle);
+      if (player) {
+        const canvas = render.renderer.domElement;
+        gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible());
+        gauges.update(player.get(Vehicle), time.delta);
+        { const v = player.get(Vehicle).body.linvel(); sample('speed.kmh', Math.hypot(v.x, v.z) * 3.6); }
+      }
+      timed('sys.glyph', () => glyph.shape());
+    } catch (error) {
+      count('frameErrors');
+      reportError(error);
     }
-    timed('sys.glyph', () => glyph.shape());
     timed('draw', draw);
     sample('frame.js', performance.now() - fStart);
   };
@@ -212,6 +253,25 @@ async function main() {
     heightAt,
     traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig, RockField },
   };
+}
+
+// Worker physics: the draw side keeps its own copy of the tyre solver's ground grid (for the
+// track contacts) and of the nearby rocks (the tyre mesh keeps its tread out of them).
+function syncRemoteSolver(world) {
+  const vehicle = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle);
+  const solver = vehicle?.controller.gpu?.solver;
+  if (!solver) return;
+  solver.setGround ??= () => {};
+  solver.setRocks ??= (rocks) => (solver.rockList = rocks);
+  const p = vehicle.body.translation();
+  updateGpuGround(solver, world.get(HeightField).heightAt, p.x, p.z, world.get(Deformation).map);
+  const last = solver.rockCentre;
+  if (!last || Math.hypot(last.x - p.x, last.z - p.z) > 3) {
+    const rocks = [];
+    world.query(RockField).forEach((e) => rocks.push(...e.get(RockField).rocks));
+    updateGpuRocks(solver, rocks, p.x, p.z);
+    solver.rockCentre = { x: p.x, z: p.z };
+  }
 }
 
 main().catch((error) => {

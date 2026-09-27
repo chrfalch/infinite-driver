@@ -145,3 +145,27 @@ Stability (`scripts/stability.mjs`, flat ground): idle, throttle, hard brake, th
 - wheel-spin wobble in the same range.
 
 There was no NaN and no growing oscillation. On the canyon with rocks: no NaN, and the car stays upright. Runs on the canyon differ from run to run anyway: the batches depend on timing, so the car meets different ground.
+
+## Phase 2 results (worker, built 2026-09-27)
+
+What was built:
+- `src/physics/worker.js`: Rapier world, car, drivetrain, and GPU tyre solver on the worker's own GPU device. It reuses `stepPhysics` in a small koota world, and `onStep` records the chassis pose for each step. It chains batches with a `MessageChannel` yield when behind.
+- `src/physics/colliders.js`: the worker's terrain colliders (ground trimesh, rock hulls, tree trunks). They come from the same seeded functions as the main thread, one job per batch.
+- `src/physics/client.js`: the main-thread side. `RemoteBody` and `RemoteController` offer what the draw code reads (poses, `wheelHubPose`, `suspensionPose`, spin, solver particles, drivetrain). The rut tiles are shared through `SharedArrayBuffer` (`GroundDeformation.onTile`/`adoptTile`). Settings are copied to the worker after every save (`onSettingsSaved`). Gear keys, rebuilds, and respawns become messages.
+- `main.js` picks worker mode for GPU tyres when WebGPU works in a worker. `?physics=main` keeps the old path. If the worker fails to start, the physics stays on the main thread. Switching the tyre type in the panel reloads the page.
+
+Measured (M4, driving 14 s):
+
+| | main thread (4 steps/trip) | worker (4 steps/trip) |
+|---|---|---|
+| WebKit, flat: step avg / p95 | 2.77 / 4.96 ms | **1.66 / 2.10 ms** |
+| WebKit, canyon: step avg / p95 | 2.05 / 2.53 ms | **1.57 / 2.01 ms** |
+| Chromium, flat: step avg / p95 | 2.53 / 3.99 ms | **1.81 / 2.34 ms** |
+| Speed trace (flat) | 7 … 74 km/h | the same |
+
+Checks:
+- The stability drive (flat) matches main-thread physics in every phase.
+- On the canyon: no NaN, and the car stays upright.
+- Gear keys, rebuild (keeps speed and gear), and respawn work.
+- The worker reads the same rut depth as the main thread at the deepest rut cell.
+- The test suite passes.

@@ -120,6 +120,9 @@ export function syncBrakeLights(world) {
 export function syncSoftTires(world) {
   world.query(SoftTireView).updateEach(([view]) => {
     if (view.gpu) {
+      // Worker physics: nothing to draw until the first tyre particles arrive.
+      view.object.visible = view.gpu.ready !== false;
+      if (!view.object.visible) return;
       const vehicle = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle);
       const hub = vehicle?.controller.wheels?.[view.index]?.hub;
       updateGpuTireMesh(view.object, view.gpu, view.index, hub);

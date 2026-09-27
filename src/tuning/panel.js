@@ -179,12 +179,14 @@ export function createTuningPanel(world, { heightAt }) {
       world.get(Input).engineOn = false;
     });
 
+  // Worker physics only runs the GPU tyres; another tyre mode needs a fresh start.
+  const rebuildOrReload = () => (world.get(Physics).remote ? location.reload() : requestRebuild(world));
   controls
     .add(CAR, 'softTires')
     .name('Soft tyres')
     .onChange(() => {
       saveCar();
-      requestRebuild(world);
+      rebuildOrReload();
     });
   const suspension = { independent: !CAR.solidAxles };
   controls
@@ -200,7 +202,7 @@ export function createTuningPanel(world, { heightAt }) {
     .name('GPU tyres (TypeGPU)')
     .onChange(() => {
       saveCar();
-      requestRebuild(world);
+      rebuildOrReload();
     });
   controls
     .add(CONTROLS, 'graphics', ['auto', 'high', 'low'])

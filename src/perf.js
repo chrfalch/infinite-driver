@@ -40,6 +40,17 @@ export function timed(name, fn) {
   return r;
 }
 const counters = {};
+let lastError = '';
+// Logs an error once per distinct message, and shows the newest in the overlay.
+const seenErrors = new Set();
+export function reportError(error) {
+  const text = String(error?.message ?? error);
+  if (!seenErrors.has(text)) {
+    seenErrors.add(text);
+    console.error(error);
+  }
+  lastError = text.slice(0, 120);
+}
 export function count(name, v = 1) {
   if (PERF_ON) counters[name] = (counters[name] ?? 0) + v;
 }
@@ -86,6 +97,7 @@ export function startOverlay() {
     const wallT = c.wallSeconds ?? 0;
     lines.push(`sim/real ${(wallT ? simT / wallT : 0).toFixed(2)}  dropped ${(c.droppedSeconds ?? 0).toFixed(2)}s  ${wallT.toFixed(0)}s`);
     lines.push(`track breaks: no contact ${c['tracks.breakNoContact'] ?? 0}  gap ${c['tracks.breakGap'] ?? 0}`);
+    lines.push(`frame errors ${c.frameErrors ?? 0}  long frames (>50 ms) ${c.longFrames ?? 0}${lastError ? `\nlast error: ${lastError}` : ''}`);
     text.textContent = lines.join('\n');
   }, 500);
 }

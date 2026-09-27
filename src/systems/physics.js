@@ -1,10 +1,9 @@
-import { Matrix4, Quaternion, Vector3 } from 'three/webgpu';
 import { Deformation, HeightField, Input, Physics, RigidBody, RockField, Time, Transform, Vehicle } from '../ecs/traits.js';
 import { updateGpuGround, updateGpuRocks } from '../tire/gpu-tires.js';
 import { GPU_TIRE } from '../tire/config.js';
 import { MAX_STEPS } from '../tire/gpu-tire-solver.js';
 import { applyDriverInput } from '../vehicle/physics.js';
-import { advanceDisplayTime, createPoseHistory, pushPose, samplePose } from './interpolation.js';
+import { createPoseHistory, pushPose } from './interpolation.js';
 import { count, sample } from '../perf.js';
 // ?slowgpu=ms adds that much extra wait per step, to mimic a slower GPU (for profiling).
 const SLOW_GPU = Number(new URLSearchParams(location.search).get('slowgpu') ?? 0);
@@ -26,8 +25,6 @@ function updateGpuTyreWorld(world, vehicle) {
 }
 
 const MAX_BATCH_STEPS = 4;
-// ?nointerp draws the newest physics pose instead of the interpolated one (to compare).
-const NO_INTERP = new URLSearchParams(globalThis.location?.search ?? '').has('nointerp');
 
 // Fixed-step simulation so the car behaves the same at any frame rate. With GPU tyres each
 // step waits for the GPU's hub forces, so this is async.
@@ -75,7 +72,7 @@ export async function stepPhysics(world, frameDelta = null) {
             // The trip's drive and brake torques come from this first step's inputs.
             if (tripSize > 1) logs.set(vehicle, await vehicle.controller.stepTyresBatch(n, physics.step, { readPositions: lastTrip }));
             else await vehicle.controller.stepTyres({ readPositions: lastTrip });
-            if (SLOW_GPU) await new Promise((r) => setTimeout(r, SLOW_GPU));
+            if (physics.slowGpu ?? SLOW_GPU) await new Promise((r) => setTimeout(r, physics.slowGpu ?? SLOW_GPU));
           }
           const log = logs.get(vehicle);
           if (log) vehicle.controller.applyTyreForces(log, j);
@@ -91,6 +88,7 @@ export async function stepPhysics(world, frameDelta = null) {
       physics.simTime += physics.step;
       steps++;
       recordPoses(world, physics.simTime);
+      physics.onStep?.(physics.simTime);
     }
     // Remember where each hub was when the drawn tyre shape was read back: drawing moves the
     // shape with the hub from there, so tyres never lag the car while physics catches up.
@@ -102,6 +100,7 @@ export async function stepPhysics(world, frameDelta = null) {
     }
   }
   const batchMs = performance.now() - t0;
+  physics.lastBatch = { steps, ms: batchMs, js: tJs, gpu: tGpu, rapier: tRapier, dropped: wanted - Math.min(wanted, physics.step * MAX_BATCH_STEPS) };
   count('steps', steps);
   count('simSeconds', steps * physics.step);
   sample('batch.steps', steps);
@@ -116,7 +115,7 @@ export async function stepPhysics(world, frameDelta = null) {
 }
 
 // Pose history per Rapier body, for drawing between physics steps (see interpolation.js).
-const histories = new WeakMap();
+export const histories = new WeakMap();
 function recordPoses(world, t) {
   world.query(RigidBody).forEach((entity) => {
     const { body } = entity.get(RigidBody);
@@ -125,42 +124,3 @@ function recordPoses(world, t) {
     pushPose(history, t, body.translation(), body.rotation());
   });
 }
-
-// Sets each body's drawn transform: interpolated at a display time that advances smoothly behind
-// the newest physics step. A vehicle also gets `drawOffset`, the rigid move from its physics pose
-// to its drawn pose, for parts drawn in world space from other bodies (the GPU tyre meshes).
-export function syncBodies(world) {
-  const physics = world.get(Physics);
-  physics.displayTime = advanceDisplayTime(physics.displayTime, physics.simTime, world.get(Time).delta, physics.step);
-  world.query(RigidBody, Transform).updateEach(([rb, transform], entity) => {
-    const history = histories.get(rb.body);
-    if (NO_INTERP || !history || !samplePose(history, physics.displayTime, transform)) {
-      const p = rb.body.translation();
-      const q = rb.body.rotation();
-      Object.assign(transform.position, { x: p.x, y: p.y, z: p.z });
-      Object.assign(transform.quaternion, { x: q.x, y: q.y, z: q.z, w: q.w });
-    }
-    const vehicle = entity.has(Vehicle) ? entity.get(Vehicle) : null;
-    if (vehicle) {
-      const p = rb.body.translation();
-      const q = rb.body.rotation();
-      const drawn = drawnPose.compose(tmpV.set(transform.position.x, transform.position.y, transform.position.z), tmpQ.copy(transform.quaternion), ONE);
-      const actual = actualPose.compose(tmpV.set(p.x, p.y, p.z), tmpQ.set(q.x, q.y, q.z, q.w), ONE);
-      vehicle.drawOffset ??= new Matrix4();
-      vehicle.drawOffset.multiplyMatrices(drawn, actual.invert());
-      // Profiling: how far the drawn car's move this frame is from speed x frame time.
-      const v = rb.body.linvel();
-      const speed = Math.hypot(v.x, v.z);
-      const last = (vehicle.lastDrawn ??= { x: transform.position.x, z: transform.position.z });
-      const moved = Math.hypot(transform.position.x - last.x, transform.position.z - last.z);
-      if (speed > 2) sample('car.motionErrCm', Math.abs(moved - speed * world.get(Time).delta) * 100);
-      last.x = transform.position.x;
-      last.z = transform.position.z;
-    }
-  });
-}
-const drawnPose = new Matrix4();
-const actualPose = new Matrix4();
-const tmpV = new Vector3();
-const tmpQ = new Quaternion();
-const ONE = new Vector3(1, 1, 1);

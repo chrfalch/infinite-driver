@@ -26,6 +26,32 @@ export class GroundDeformation {
     this.dirtyZ0 = Infinity;
     this.dirtyX1 = -Infinity;
     this.dirtyZ1 = -Infinity;
+    // Sharing with a physics worker: new tiles live in SharedArrayBuffers (when the page is
+    // cross-origin isolated) and are announced through onTile(key, tile); clear() calls onClear().
+    this.shared = typeof SharedArrayBuffer !== 'undefined' && !!globalThis.crossOriginIsolated;
+    this.onTile = null;
+    this.onClear = null;
+  }
+
+  // Worker side: use a tile the main thread created (same memory, so its edits show up here).
+  adoptTile(key, tile) {
+    this.tiles.set(key, tile);
+    this.lastTx = this.lastTz = NaN;
+    this.lastTile = undefined;
+  }
+
+  // Worker side: the main thread's version and the cells it changed since the last call (null:
+  // treat everything as changed), so changedSince() here reports them.
+  markChanged(version, rect) {
+    if (version === this.version) return;
+    this.version = version;
+    if (!rect) this.dirtyAll = true;
+    else if (rect.x0 <= rect.x1) {
+      this.dirtyX0 = Math.min(this.dirtyX0, rect.x0);
+      this.dirtyZ0 = Math.min(this.dirtyZ0, rect.z0);
+      this.dirtyX1 = Math.max(this.dirtyX1, rect.x1);
+      this.dirtyZ1 = Math.max(this.dirtyZ1, rect.z1);
+    }
   }
 
   tile(tx, tz, create) {
@@ -33,8 +59,9 @@ export class GroundDeformation {
     const key = tileKey(tx, tz);
     let t = this.tiles.get(key);
     if (!t && create) {
-      t = new Float32Array(TILE * TILE);
+      t = this.shared ? new Float32Array(new SharedArrayBuffer(TILE * TILE * 4)) : new Float32Array(TILE * TILE);
       this.tiles.set(key, t);
+      this.onTile?.(key, t);
     }
     this.lastTx = tx;
     this.lastTz = tz;
@@ -137,6 +164,7 @@ export class GroundDeformation {
   }
 
   clear() {
+    this.onClear?.();
     this.tiles.clear();
     this.lastTx = this.lastTz = NaN;
     this.lastTile = undefined;

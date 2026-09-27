@@ -2,11 +2,16 @@ import { DEFAULT_TIRE, GPU_TIRE, TIRE } from './config.js';
 import { GpuTireSolver, GROUND_N, rockToGpu } from './gpu-tire-solver.js';
 import { torusMesh } from './soft-tire.js';
 
+// The tyre mesh descriptions (left and mirrored right) for the current settings; the solver's
+// particles follow the same grid.
+export function gpuTireMeshes(tire = TIRE, gpu = GPU_TIRE) {
+  const shape = { ...DEFAULT_TIRE, ...tire, segmentsAround: gpu.segmentsAround, segmentsAcross: gpu.segmentsAcross, beadRings: 0 };
+  return { mesh: torusMesh(shape), mirrored: torusMesh(shape, { mirror: true }) };
+}
+
 // Builds the mesh description and GPU solver for `count` tyres with the current settings.
 export function createGpuTires(device, count, tire = TIRE, gpu = GPU_TIRE) {
-  const shape = { ...DEFAULT_TIRE, ...tire, segmentsAround: gpu.segmentsAround, segmentsAcross: gpu.segmentsAcross, beadRings: 0 };
-  const mesh = torusMesh(shape);
-  const mirrored = torusMesh(shape, { mirror: true });
+  const { mesh, mirrored } = gpuTireMeshes(tire, gpu);
   const inner = Math.round(mesh.nv / 2);
   const spread = Math.max(0, Math.round(gpu.beadRings));
   const solver = new GpuTireSolver(device, {

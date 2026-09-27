@@ -34,4 +34,12 @@ export function saveSettings(key, defaults, value) {
   } catch {
     // Storage can be unavailable (private mode); settings still work for this session.
   }
+  for (const listener of listeners) listener(key);
+}
+
+// Called after any settings object is saved (the physics worker keeps a copy of all settings).
+const listeners = new Set();
+export function onSettingsSaved(listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 }
