@@ -96,6 +96,30 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
   solver.groundVersion = version;
 }
 
+// Ground height (terrain plus ruts) at (x, z) from the solver's grid, interpolated on the same
+// triangles as the shader (without gravel), or null outside the grid. A few array reads instead of
+// the canyon height function, for per-particle work on the CPU such as finding track contacts.
+export function gpuGroundHeight(solver, x, z) {
+  const g = solver.groundCache;
+  if (!g || !solver.groundReady) return null;
+  const N = GROUND_N;
+  const gx = x / g.cell - g.ix0;
+  const gz = z / g.cell - g.iz0;
+  if (!(gx >= 0 && gz >= 0 && gx < N - 1 && gz < N - 1)) return null;
+  const ix = Math.floor(gx);
+  const iz = Math.floor(gz);
+  const fx = gx - ix;
+  const fz = gz - iz;
+  const h = g.heights;
+  const o = iz * N + ix;
+  const h00 = h[o];
+  const h10 = h[o + 1];
+  const h01 = h[o + N];
+  const h11 = h[o + N + 1];
+  if (fx + fz <= 1) return h00 + (h10 - h00) * fx + (h01 - h00) * fz;
+  return h11 + (h01 - h11) * (1 - fx) + (h10 - h11) * (1 - fz);
+}
+
 // Picks the rocks nearest to (x, z) and uploads them as convex shapes.
 export function updateGpuRocks(solver, rocks, x, z, range = 14) {
   const near = rocks

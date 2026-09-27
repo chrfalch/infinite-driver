@@ -67,6 +67,9 @@ export const DEFAULT_GPU_TIRE = Object.freeze({
   // Do not wait for the GPU each step (forces arrive one step late). Faster, but the wheel spin
   // coupling goes unstable with the current tyre stiffness, so it is off for now.
   pipelined: false,
+  // Physics steps per GPU round trip (1..4). Each round trip has a fixed cost, so more steps per
+  // trip leave more time for everything else; between the steps of a trip the GPU moves the hubs.
+  stepsPerTrip: 4,
   pressureLead: 1.0, // substeps of spin the pressure normal is turned ahead (cancels spin drag)
   rubberMass: 12,
 });
@@ -77,6 +80,9 @@ export const GPU_TIRE = { ...DEFAULT_GPU_TIRE };
 for (const [key, value] of Object.entries(loadGpu())) {
   if (typeof value === typeof DEFAULT_GPU_TIRE[key]) GPU_TIRE[key] = value;
 }
+// ?trip=N overrides the steps per GPU round trip for this page load (not saved).
+const tripParam = Number(new URLSearchParams(globalThis.location?.search ?? '').get('trip'));
+if (tripParam >= 1) GPU_TIRE.stepsPerTrip = tripParam;
 export function saveGpuTire() {
   saveSettings(GPU_STORAGE_KEY, DEFAULT_GPU_TIRE, GPU_TIRE);
 }

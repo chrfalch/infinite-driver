@@ -1,6 +1,13 @@
+import { Matrix4, Quaternion, Vector3 } from 'three/webgpu';
 import { Deformation, HeightField, Input, Physics, RigidBody, RockField, Time, Transform, Vehicle } from '../ecs/traits.js';
 import { updateGpuGround, updateGpuRocks } from '../tire/gpu-tires.js';
+import { GPU_TIRE } from '../tire/config.js';
+import { MAX_STEPS } from '../tire/gpu-tire-solver.js';
 import { applyDriverInput } from '../vehicle/physics.js';
+import { advanceDisplayTime, createPoseHistory, pushPose, samplePose } from './interpolation.js';
+import { count, sample } from '../perf.js';
+// ?slowgpu=ms adds that much extra wait per step, to mimic a slower GPU (for profiling).
+const SLOW_GPU = Number(new URLSearchParams(location.search).get('slowgpu') ?? 0);
 
 // Keeps the GPU tyre solver's ground grid and nearby rocks centred on the car.
 function updateGpuTyreWorld(world, vehicle) {
@@ -18,6 +25,10 @@ function updateGpuTyreWorld(world, vehicle) {
   }
 }
 
+const MAX_BATCH_STEPS = 4;
+// ?nointerp draws the newest physics pose instead of the interpolated one (to compare).
+const NO_INTERP = new URLSearchParams(globalThis.location?.search ?? '').has('nointerp');
+
 // Fixed-step simulation so the car behaves the same at any frame rate. With GPU tyres each
 // step waits for the GPU's hub forces, so this is async.
 export async function stepPhysics(world, frameDelta = null) {
@@ -25,53 +36,131 @@ export async function stepPhysics(world, frameDelta = null) {
   // The time to simulate: what passed since the last batch (it may span several frames).
   const delta = frameDelta ?? world.get(Time).delta;
   const input = world.get(Input);
-  physics.accumulator = Math.min(physics.accumulator + delta, 0.1);
+  // At most MAX_BATCH_STEPS per batch; time beyond that is dropped. When steps are slow (GPU tyres
+  // wait for the GPU, Rapier soft tyres cost ~10 ms), an uncapped batch spirals: a long batch
+  // leaves more time to catch up, so the next is longer still, up to 12 steps (~170 ms) between
+  // visible updates. Capped, the game slows down evenly instead and still updates every few frames.
+  const wanted = physics.accumulator + delta;
+  physics.accumulator = Math.min(wanted, physics.step * MAX_BATCH_STEPS);
 
   const vehicles = [];
   world.query(Vehicle).updateEach(([vehicle]) => vehicles.push(vehicle));
-  // Rapier soft-body tyres cost about 10 ms per step. Rather than spiralling into 12 steps per
-  // frame, run at most 4 and let the simulation slow down a little on slow machines.
-  if (vehicles.some((v) => v.controller.softBodies?.length)) {
-    physics.accumulator = Math.min(physics.accumulator, physics.step * 4);
-  }
+  count('droppedSeconds', wanted - physics.accumulator);
+  const tw = performance.now();
   for (const v of vehicles) if (v.controller.gpu) updateGpuTyreWorld(world, v);
+  sample('phys.groundUpload', performance.now() - tw);
 
   const t0 = performance.now();
+  let tJs = 0, tGpu = 0, tRapier = 0;
   let steps = 0;
+  // GPU tyres can run several steps per GPU round trip (GPU_TIRE.stepsPerTrip): one dispatch
+  // computes the tyre forces for the whole trip, then Rapier steps through them one by one.
+  const tripSize = vehicles.some((v) => v.controller.gpu && !v.controller.gpu.pipelined)
+    ? Math.max(1, Math.min(MAX_STEPS, Math.round(GPU_TIRE.stepsPerTrip ?? 1)))
+    : 1;
   while (physics.accumulator >= physics.step) {
-    steps++;
-    physics.accumulator -= physics.step;
-    const last = physics.accumulator < physics.step;
-    for (const vehicle of vehicles) {
-      applyDriverInput(vehicle, input, physics.step);
-      vehicle.controller.updateVehicle(physics.step);
-      // Read tyre positions back once per frame, on the last step, for drawing.
-      if (vehicle.controller.gpu) await vehicle.controller.stepTyres({ readPositions: last });
-      vehicle.speed = vehicle.controller.currentVehicleSpeed();
+    const n = Math.max(1, Math.min(tripSize, Math.floor((physics.accumulator + 1e-9) / physics.step)));
+    // Read tyre positions back once per batch, on its last trip, for drawing.
+    const lastTrip = physics.accumulator - n * physics.step < physics.step;
+    const logs = new Map();
+    for (let j = 0; j < n; j++) {
+      for (const vehicle of vehicles) {
+        let ta = performance.now();
+        applyDriverInput(vehicle, input, physics.step);
+        vehicle.controller.updateVehicle(physics.step);
+        let tb = performance.now();
+        tJs += tb - ta;
+        if (vehicle.controller.gpu) {
+          if (j === 0) {
+            // The trip's drive and brake torques come from this first step's inputs.
+            if (tripSize > 1) logs.set(vehicle, await vehicle.controller.stepTyresBatch(n, physics.step, { readPositions: lastTrip }));
+            else await vehicle.controller.stepTyres({ readPositions: lastTrip });
+            if (SLOW_GPU) await new Promise((r) => setTimeout(r, SLOW_GPU));
+          }
+          const log = logs.get(vehicle);
+          if (log) vehicle.controller.applyTyreForces(log, j);
+        }
+        ta = performance.now();
+        tGpu += ta - tb;
+        vehicle.speed = vehicle.controller.currentVehicleSpeed();
+      }
+      const tr = performance.now();
+      physics.world.step();
+      tRapier += performance.now() - tr;
+      physics.accumulator -= physics.step;
+      physics.simTime += physics.step;
+      steps++;
+      recordPoses(world, physics.simTime);
     }
-    physics.world.step();
     // Remember where each hub was when the drawn tyre shape was read back: drawing moves the
     // shape with the hub from there, so tyres never lag the car while physics catches up.
-    if (last) {
+    if (lastTrip) {
       for (const vehicle of vehicles) {
         const solver = vehicle.controller.gpu?.solver;
         if (solver) solver.readbackHubs = vehicle.controller.wheels.map((w) => ({ p: { ...w.hub.translation() }, q: { ...w.hub.rotation() } }));
       }
     }
   }
+  const batchMs = performance.now() - t0;
+  count('steps', steps);
+  count('simSeconds', steps * physics.step);
+  sample('batch.steps', steps);
+  sample('batch.ms', batchMs);
+  if (steps) {
+    sample('step.total', batchMs / steps);
+    sample('step.vehicleJs', tJs / steps);
+    sample('step.gpuWait', tGpu / steps);
+    sample('step.rapier', tRapier / steps);
+  }
   if (steps) physics.stepMs = physics.stepMs * 0.95 + ((performance.now() - t0) / steps) * 0.05;
 }
 
-export function syncBodies(world) {
-  world.query(RigidBody, Transform).updateEach(([rb, transform]) => {
-    const p = rb.body.translation();
-    const q = rb.body.rotation();
-    transform.position.x = p.x;
-    transform.position.y = p.y;
-    transform.position.z = p.z;
-    transform.quaternion.x = q.x;
-    transform.quaternion.y = q.y;
-    transform.quaternion.z = q.z;
-    transform.quaternion.w = q.w;
+// Pose history per Rapier body, for drawing between physics steps (see interpolation.js).
+const histories = new WeakMap();
+function recordPoses(world, t) {
+  world.query(RigidBody).forEach((entity) => {
+    const { body } = entity.get(RigidBody);
+    let history = histories.get(body);
+    if (!history) histories.set(body, (history = createPoseHistory()));
+    pushPose(history, t, body.translation(), body.rotation());
   });
 }
+
+// Sets each body's drawn transform: interpolated at a display time that advances smoothly behind
+// the newest physics step. A vehicle also gets `drawOffset`, the rigid move from its physics pose
+// to its drawn pose, for parts drawn in world space from other bodies (the GPU tyre meshes).
+export function syncBodies(world) {
+  const physics = world.get(Physics);
+  physics.displayTime = advanceDisplayTime(physics.displayTime, physics.simTime, world.get(Time).delta, physics.step);
+  world.query(RigidBody, Transform).updateEach(([rb, transform], entity) => {
+    const history = histories.get(rb.body);
+    if (NO_INTERP || !history || !samplePose(history, physics.displayTime, transform)) {
+      const p = rb.body.translation();
+      const q = rb.body.rotation();
+      Object.assign(transform.position, { x: p.x, y: p.y, z: p.z });
+      Object.assign(transform.quaternion, { x: q.x, y: q.y, z: q.z, w: q.w });
+    }
+    const vehicle = entity.has(Vehicle) ? entity.get(Vehicle) : null;
+    if (vehicle) {
+      const p = rb.body.translation();
+      const q = rb.body.rotation();
+      const drawn = drawnPose.compose(tmpV.set(transform.position.x, transform.position.y, transform.position.z), tmpQ.copy(transform.quaternion), ONE);
+      const actual = actualPose.compose(tmpV.set(p.x, p.y, p.z), tmpQ.set(q.x, q.y, q.z, q.w), ONE);
+      vehicle.drawOffset ??= new Matrix4();
+      vehicle.drawOffset.multiplyMatrices(drawn, actual.invert());
+      // Profiling: how far the drawn car's move this frame is from speed x frame time.
+      const v = rb.body.linvel();
+      const speed = Math.hypot(v.x, v.z);
+      const last = (vehicle.lastDrawn ??= { x: transform.position.x, z: transform.position.z });
+      const moved = Math.hypot(transform.position.x - last.x, transform.position.z - last.z);
+      if (speed > 2) sample('car.motionErrCm', Math.abs(moved - speed * world.get(Time).delta) * 100);
+      last.x = transform.position.x;
+      last.z = transform.position.z;
+    }
+  });
+}
+const drawnPose = new Matrix4();
+const actualPose = new Matrix4();
+const tmpV = new Vector3();
+const tmpQ = new Quaternion();
+const ONE = new Vector3(1, 1, 1);

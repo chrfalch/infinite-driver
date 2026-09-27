@@ -120,8 +120,11 @@ export function syncBrakeLights(world) {
 export function syncSoftTires(world) {
   world.query(SoftTireView).updateEach(([view]) => {
     if (view.gpu) {
-      const hub = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.wheels?.[view.index]?.hub;
+      const vehicle = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle);
+      const hub = vehicle?.controller.wheels?.[view.index]?.hub;
       updateGpuTireMesh(view.object, view.gpu, view.index, hub);
+      // Follow the chassis' interpolated pose (see syncBodies), so the tyre stays on its rim.
+      if (vehicle?.drawOffset) view.object.matrix.premultiply(vehicle.drawOffset);
     }
     else updateSoftTireMesh(view.object, view.soft);
   });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_GPU_TIRE, effectiveGpuTire } from '../src/tire/config.js';
-import { MAX_PER_TIRE, ROCK_FACES, rockToGpu } from '../src/tire/gpu-tire-solver.js';
+import { MAX_PER_TIRE, MAX_STEPS, ROCK_FACES, rockToGpu } from '../src/tire/gpu-tire-solver.js';
 import { mulberry32 } from '../src/terrain/height.js';
 import { makeRock } from '../src/terrain/rocks.js';
 import { createNoise3D } from 'simplex-noise';
@@ -28,5 +28,10 @@ describe('GPU tyre inputs', () => {
       expect(s.segmentsAround * s.segmentsAcross).toBeLessThanOrEqual(MAX_PER_TIRE);
     }
     expect(effectiveGpuTire(DEFAULT_GPU_TIRE, true).substeps).toBeLessThanOrEqual(DEFAULT_GPU_TIRE.substeps);
+  });
+
+  it('runs at most MAX_STEPS physics steps per GPU round trip', () => {
+    expect(DEFAULT_GPU_TIRE.stepsPerTrip).toBeGreaterThanOrEqual(1);
+    expect(DEFAULT_GPU_TIRE.stepsPerTrip).toBeLessThanOrEqual(MAX_STEPS);
   });
 });

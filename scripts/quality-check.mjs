@@ -1,0 +1,15 @@
+import { chromium } from 'playwright-core';
+const exe = `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
+const b = await chromium.launch({ executablePath: exe, headless: true, args: ['--enable-unsafe-webgpu'] });
+const ctx = await b.newContext({ viewport: { width: 430, height: 932 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+const p = await ctx.newPage();
+const errs = []; p.on('pageerror', (e) => errs.push(e.message)); p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+await p.goto('http://127.0.0.1:8731/?tires=gpu'); await p.waitForFunction(() => window.__game?.car, null, { timeout: 30000 }); await p.waitForTimeout(2000);
+const st = () => p.evaluate(() => { const r = window.__game.render; return `quality ${r.quality} canvas ${r.renderer.domElement.width}x${r.renderer.domElement.height} shadow ${r.sun.shadow.mapSize.x} map ${r.sun.shadow.map?.width}`; });
+console.log('mobile auto:', await st());
+await p.evaluate(() => { const names = [...document.querySelectorAll('.lil-controller .lil-name')].map(n => n.textContent); if (!names.includes('Graphics quality')) throw new Error(names.join('|')); const sel = [...document.querySelectorAll('.lil-controller')].find((c) => c.querySelector('.lil-name')?.textContent === 'Graphics quality').querySelector('select'); sel.value = [...sel.options].find((o) => o.textContent === 'high').value; sel.dispatchEvent(new Event('change')); });
+await p.waitForTimeout(1000);
+console.log('after picking high:', await st());
+await p.evaluate(() => localStorage.clear());
+console.log('errors:', errs.length ? errs : 'none');
+await b.close();

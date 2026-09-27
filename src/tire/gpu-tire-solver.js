@@ -12,8 +12,15 @@ import { GRAVEL_HASH_WGSL, GRAVEL_HEIGHT_WGSL } from '../terrain/gravel.js';
 //             (its corrections give the reaction force on the hub);
 //   finish  – velocities from positions; reduce – bead reactions summed per hub.
 // The caller reads back one force and one torque per hub and applies them to its rigid hubs.
+//
+// A dispatch can run up to MAX_STEPS physics steps (`steps`), so several steps share one GPU round
+// trip. Between those steps the kernel moves each hub itself: its spin about the axle is integrated
+// from the drive torque, the brake, and the tyre's own torque (the stiff loop, closed here at step
+// rate as it is on the CPU), and the rest of its motion carries on at the batch's start velocity.
+// One force/torque record per step goes into a log that the CPU applies step by step to Rapier.
 
 export const MAX_TIRES = 4;
+export const MAX_STEPS = 4; // physics steps per dispatch
 export const MAX_ROCKS = 48;
 export const ROCK_FACES = 80;
 export const GROUND_N = 129; // ground height samples per side (16 m at 12.5 cm)
@@ -55,6 +62,8 @@ const Params = d.struct({
   beadHigh: d.u32,
   substeps: d.u32,
   iterations: d.u32,
+  steps: d.u32, // physics steps in this dispatch (1..MAX_STEPS)
+  stepDt: d.f32, // one physics step (s)
 });
 
 const Hub = d.struct({
@@ -62,6 +71,8 @@ const Hub = d.struct({
   rotation: d.vec4f,
   linvel: d.vec4f,
   angvel: d.vec4f,
+  spin: d.vec4f, // xyz: spin axis (world), w: hub inertia about it (kg·m²)
+  drive: d.vec4f, // x: drive torque about the axis, y: brake torque limit, z: knuckle spin rate
 });
 
 export class GpuTireSolver {
@@ -85,7 +96,7 @@ export class GpuTireSolver {
     this.pos = root.createMutable(d.arrayOf(d.vec4f, this.count));
     this.prev = root.createMutable(d.arrayOf(d.vec4f, this.count));
     this.vel = root.createMutable(d.arrayOf(d.vec4f, this.count));
-    this.hubOut = root.createMutable(d.arrayOf(d.vec4f, MAX_TIRES * 2));
+    this.hubOut = root.createMutable(d.arrayOf(d.vec4f, MAX_STEPS * MAX_TIRES * 2));
     this.rest = root.createReadonly(d.arrayOf(d.vec4f, this.perTire));
     // Uniform, to stay within the default 8 storage buffers per shader stage (Safari included).
     this.hubs = root.createUniform(d.arrayOf(Hub, MAX_TIRES));
@@ -102,17 +113,17 @@ export class GpuTireSolver {
     this.groundCell = 0.125;
     this.rockCount = 0;
 
-    this.hubData = new Float32Array(MAX_TIRES * 16);
+    this.hubData = new Float32Array(MAX_TIRES * 24);
     this.raw = {
       pos: root.unwrap(this.pos),
       hubOut: root.unwrap(this.hubOut),
       hubs: root.unwrap(this.hubs),
       params: root.unwrap(this.params),
     };
-    this.hubStaging = device.createBuffer({ size: MAX_TIRES * 2 * 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    this.hubStaging = device.createBuffer({ size: MAX_STEPS * MAX_TIRES * 2 * 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     this.posStaging = device.createBuffer({ size: this.count * 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     this.positions = new Float32Array(this.count * 4);
-    this.hubForces = new Float32Array(MAX_TIRES * 8);
+    this.hubForces = new Float32Array(MAX_STEPS * MAX_TIRES * 8);
     this.busy = false;
 
     this.buildPipelines();
@@ -126,6 +137,9 @@ export class GpuTireSolver {
     const A = { x: wg(), y: wg(), z: wg() };
     const B = { x: wg(), y: wg(), z: wg() };
     const sets = { ax: A.x, ay: A.y, az: A.z, bx: B.x, by: B.y, bz: B.z };
+    // The hub's pose during the dispatch (position with mirror in w, rotation, linvel, angvel): it
+    // starts from the uniform and moves on after each physics step.
+    const hubW = tgpu.workgroupVar(d.arrayOf(d.vec4f, 4));
     const dbgA = tgpu.workgroupVar(d.arrayOf(d.f32, WG));
     const dbgB = tgpu.workgroupVar(d.arrayOf(d.f32, WG));
     const getP = tgpu.fn([d.u32, d.u32], d.vec3f)/* wgsl */ `(which, k) {
@@ -154,16 +168,15 @@ export class GpuTireSolver {
     }`.$uses({ rest: this.rest, hubs: this.hubs });
     // Hub pose extrapolated s seconds into the step (small-angle rotation update).
     const hubPoint = tgpu.fn([d.u32, d.u32, d.f32], d.vec3f)/* wgsl */ `(t, k, s) {
-      let h = hubs[t];
-      let w = h.angvel.xyz;
-      let q = h.rotation;
+      let w = hubW[3].xyz;
+      let q = hubW[1];
       let dq = 0.5 * s * vec4f(
         w.x * q.w + w.y * q.z - w.z * q.y,
         w.y * q.w + w.z * q.x - w.x * q.z,
         w.z * q.w + w.x * q.y - w.y * q.x,
         -(w.x * q.x + w.y * q.y + w.z * q.z));
-      return h.position.xyz + h.linvel.xyz * s + qrot(normalize(q + dq), restOf(t, k));
-    }`.$uses({ hubs: this.hubs, qrot, restOf });
+      return hubW[0].xyz + hubW[2].xyz * s + qrot(normalize(q + dq), restOf(t, k));
+    }`.$uses({ hubW, qrot, restOf });
     const gravelHash = tgpu.fn([d.i32, d.i32], d.u32)/* wgsl */ `${GRAVEL_HASH_WGSL}`;
     const gravelHeight = tgpu.fn([d.f32, d.f32], d.f32)/* wgsl */ `${GRAVEL_HEIGHT_WGSL}`.$uses({ gravelHash });
     const groundHeight = tgpu.fn([d.f32, d.f32], d.f32)/* wgsl */ `(x, z) {
@@ -328,8 +341,15 @@ export class GpuTireSolver {
       let m = params.particleMass;
 
       for (var k = lid; k < per; k += ${WG}u) { setP(0u, k, pos[base + k].xyz); }
+      if (lid == 0u) {
+        hubW[0] = hubs[t].position;
+        hubW[1] = hubs[t].rotation;
+        hubW[2] = hubs[t].linvel;
+        hubW[3] = hubs[t].angvel;
+      }
       workgroupBarrier();
 
+      for (var ps = 0u; ps < params.steps; ps++) {
       // The hub's force and torque on the tyre follow from momentum balance: the tyre's change
       // of momentum minus the external forces (gravity, ground, rocks). That is exact however well
       // the constraint passes converge; summing the passes' corrections overshoots when they fight.
@@ -337,10 +357,15 @@ export class GpuTireSolver {
       var hubTorque = vec3f(0.0);
       var dbgCount = 0.0;
       var dbgFric = 0.0;
+      let hsPos = hubW[0];
+      let hsRot = hubW[1];
+      let hsLin = hubW[2];
+      let hsAng = hubW[3];
+      let hsSpin = hubs[t].spin;
+      let hsDrive = hubs[t].drive;
       for (var s = 0u; s < params.substeps; s++) {
-        let hs = hubs[t];
         let s0 = dt * f32(s);
-        let c0 = hs.position.xyz + hs.linvel.xyz * s0;
+        let c0 = hsPos.xyz + hsLin.xyz * s0;
         var momentum = vec3f(0.0);
         var angular = vec3f(0.0);
         var extForce = vec3f(0.0);
@@ -362,13 +387,13 @@ export class GpuTireSolver {
           // tyre feels a drag torque proportional to spin (about 30 N·m per rad/s at 120 kPa).
           let dvu = vel[base + nb(u + 1, v)].xyz - vel[base + nb(u - 1, v)].xyz;
           let dvv = vel[base + nb(u, v + 1)].xyz - vel[base + nb(u, v - 1)].xyz;
-          let sign = hs.position.w;
+          let sign = hsPos.w;
           var area = 0.25 * cross(du, dv) * sign;
           area += 0.25 * (cross(dvu, dv) + cross(du, dvv)) * sign * (params.pressureLead * dt);
           let gravity = vec3f(0.0, -params.gravity * m, 0.0);
           var vl = vOld + dt * (gravity + params.pressure * area) / m;
           // Damping of motion relative to the wheel's rigid motion (rolling itself is not damped).
-          let rigid = hs.linvel.xyz + cross(hs.angvel.xyz, x - c0);
+          let rigid = hsLin.xyz + cross(hsAng.xyz, x - c0);
           vl -= (vl - rigid) * min(1.0, params.damping * dt);
           // Ground push and rocks.
           let fc = contactForce(x, vl, m, dt);
@@ -390,8 +415,8 @@ export class GpuTireSolver {
         // Jacobi passes ping-pong B -> A -> B ...: cords, shear, bending, shape memory, and the
         // bead held on the rim seat.
         let st = dt * f32(s + 1u);
-        let center = hs.position.xyz + hs.linvel.xyz * st;
-        let axleDir = qrot(hs.rotation, vec3f(0.0, 0.0, 1.0));
+        let center = hsPos.xyz + hsLin.xyz * st;
+        let axleDir = qrot(hsRot, vec3f(0.0, 0.0, 1.0));
         var src = 1u;
         for (var it = 0u; it < params.iterations; it++) {
           for (var k = lid; k < per; k += ${WG}u) {
@@ -460,9 +485,12 @@ export class GpuTireSolver {
         workgroupBarrier();
       }
 
+      // Park the positions in storage (the reduction below reuses both sets as scratch). The
+      // clearance for drawing is only needed after the last step.
+      let lastStep = ps + 1u == params.steps;
       for (var k = lid; k < per; k += ${WG}u) {
         let p = getP(0u, k);
-        pos[base + k] = vec4f(p, clearance(p));
+        pos[base + k] = vec4f(p, select(0.0, clearance(p), lastStep));
       }
       workgroupBarrier();
 
@@ -483,10 +511,43 @@ export class GpuTireSolver {
         workgroupBarrier();
       }
       if (lid == 0u) {
-        hubOut[t * 2u] = vec4f(getP(1u, 0u), dbgA[0]);
-        hubOut[t * 2u + 1u] = vec4f(getP(0u, 0u), dbgB[0]);
+        let force = getP(1u, 0u);
+        let torque = getP(0u, 0u);
+        let o = (ps * ${MAX_TIRES}u + t) * 2u;
+        hubOut[o] = vec4f(force, dbgA[0]);
+        hubOut[o + 1u] = vec4f(torque, dbgB[0]);
+        // Move the hub on by one physics step, as Rapier will: the spin from the drive torque, the
+        // tyre's torque about the axle, and the brake (a torque that at most stops the spin relative
+        // to the knuckle); everything else at the batch's start velocity.
+        let axis = hsSpin.xyz;
+        let h = params.stepDt;
+        let spin = dot(hsAng.xyz, axis);
+        var spinNew = spin + h * (hsDrive.x + dot(torque, axis)) / hsSpin.w;
+        var rel = spinNew - hsDrive.z;
+        let brakeCut = h * hsDrive.y / hsSpin.w;
+        if (abs(rel) <= brakeCut) { rel = 0.0; } else { rel -= sign(rel) * brakeCut; }
+        spinNew = hsDrive.z + rel;
+        let w = hsAng.xyz + axis * (spinNew - spin);
+        let turn = w * h;
+        let angle = length(turn);
+        var dq = vec4f(0.0, 0.0, 0.0, 1.0);
+        if (angle > 1e-9) { dq = vec4f(turn / angle * sin(0.5 * angle), cos(0.5 * angle)); }
+        let q = hsRot;
+        hubW[0] = vec4f(hsPos.xyz + hsLin.xyz * h, hsPos.w);
+        hubW[1] = normalize(vec4f(
+          dq.w * q.xyz + q.w * dq.xyz + cross(dq.xyz, q.xyz),
+          dq.w * q.w - dot(dq.xyz, q.xyz)));
+        hubW[3] = vec4f(w, 0.0);
+      }
+      workgroupBarrier();
+      // Back to the particle positions for the next step.
+      if (!lastStep) {
+        for (var k = lid; k < per; k += ${WG}u) { setP(0u, k, pos[base + k].xyz); }
+        workgroupBarrier();
+      }
       }
     }`.$uses({
+      hubW,
       clearance,
       rockPushOut,
       params: this.params,
@@ -541,7 +602,7 @@ export class GpuTireSolver {
     const s = settings;
     this.substeps = Math.max(1, Math.round(s.substeps));
     this.iterations = Math.max(1, Math.round(s.iterations));
-    this.params.write({
+    this.paramValues = {
       dt: dt / this.substeps,
       gravity: 9.81,
       pressure: s.pressureKpa * 1000,
@@ -579,7 +640,10 @@ export class GpuTireSolver {
       beadHigh: this.beadHigh,
       substeps: this.substeps,
       iterations: this.iterations,
-    });
+      steps: this.paramValues?.steps ?? 1,
+      stepDt: dt,
+    };
+    this.params.write(this.paramValues);
     this.settings = settings;
     this.dt = dt;
   }
@@ -610,12 +674,16 @@ export class GpuTireSolver {
     const h = this.hubData;
     h.fill(0);
     hubs.forEach((hub, t) => {
-      const o = t * 16;
+      const o = t * 24;
       h.set([hub.position.x, hub.position.y, hub.position.z, hub.mirror], o);
       const q = hub.rotation;
       h.set([q.x, q.y, q.z, q.w], o + 4);
       h.set([hub.linvel.x, hub.linvel.y, hub.linvel.z, 0], o + 8);
       h.set([hub.angvel.x, hub.angvel.y, hub.angvel.z, 0], o + 12);
+      // Only used between the steps of a multi-step dispatch (see the kernel).
+      const axis = hub.spinAxis ?? rotateObj(q, { x: 0, y: 0, z: 1 });
+      h.set([axis.x, axis.y, axis.z, hub.inertia ?? 1], o + 16);
+      h.set([hub.driveTorque ?? 0, hub.brakeTorque ?? 0, hub.knuckleSpin ?? 0, 0], o + 20);
     });
     this.device.queue.writeBuffer(this.raw.hubs, 0, h);
   }
@@ -624,14 +692,21 @@ export class GpuTireSolver {
   // With readPositions, the particle positions are copied back too (for drawing).
   // Pipelined use: submit() records and queues a step without waiting; the returned promise
   // resolves with the forces once the GPU is done. step() is submit() followed by waiting.
-  submit(hubs, { readPositions = false } = {}) {
+  // `steps` physics steps run in this one dispatch; the result then holds one record per step
+  // (hubForces[(step * MAX_TIRES + t) * 8 ...]).
+  submit(hubs, { readPositions = false, steps = 1 } = {}) {
+    steps = Math.max(1, Math.min(MAX_STEPS, steps));
+    if (steps !== this.paramValues.steps) {
+      this.paramValues.steps = steps;
+      this.params.write(this.paramValues);
+    }
     this.writeHubs(hubs);
     const encoder = this.root['~unstable'].createCommandEncoder();
     const pass = encoder.beginComputePass();
     this.pipeline.with(pass).dispatchWorkgroups(this.tires);
     pass.end();
     const raw = this.root.unwrap(encoder);
-    raw.copyBufferToBuffer(this.raw.hubOut, 0, this.hubStaging, 0, MAX_TIRES * 2 * 16);
+    raw.copyBufferToBuffer(this.raw.hubOut, 0, this.hubStaging, 0, MAX_STEPS * MAX_TIRES * 2 * 16);
     if (readPositions) raw.copyBufferToBuffer(this.raw.pos, 0, this.posStaging, 0, this.count * 16);
     encoder.submit();
     return this.collect(readPositions);
@@ -652,8 +727,8 @@ export class GpuTireSolver {
 
   // Runs one physics step for all tyres and waits for the per-hub forces (and, with
   // readPositions, the particle positions, mapped together with the forces).
-  step(hubs, { readPositions = false } = {}) {
-    return this.submit(hubs, { readPositions });
+  step(hubs, { readPositions = false, steps = 1 } = {}) {
+    return this.submit(hubs, { readPositions, steps });
   }
 
   destroy() {
@@ -664,6 +739,11 @@ export class GpuTireSolver {
     }
   }
 }
+
+const rotateObj = (q, v) => {
+  const [x, y, z] = rotate(q, [v.x, v.y, v.z]);
+  return { x, y, z };
+};
 
 function rotate(q, v) {
   const [x, y, z] = v;

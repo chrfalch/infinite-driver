@@ -1,6 +1,7 @@
 import GUI from 'lil-gui';
 import { CONTROLS, DEFAULT_CONTROLS, saveControls } from '../controls.js';
-import { Deformation, Input, IsPlayer, Physics, Soil, Tracks, Vehicle } from '../ecs/traits.js';
+import { Deformation, Input, IsPlayer, Physics, Render, Soil, Tracks, Vehicle } from '../ecs/traits.js';
+import { applyQuality, resolveQuality } from '../render/quality.js';
 import { CAR, DEFAULT_CAR, resetCar, saveCar } from '../vehicle/config.js';
 import {
   GPU_TIRE,
@@ -202,6 +203,15 @@ export function createTuningPanel(world, { heightAt }) {
       requestRebuild(world);
     });
   controls
+    .add(CONTROLS, 'graphics', ['auto', 'high', 'low'])
+    .name('Graphics quality')
+    .onChange(() => {
+      saveControls();
+      const render = world.get(Render);
+      render.quality = applyQuality(render.renderer, render.sun, resolveQuality());
+      render.resize();
+    });
+  controls
     .add(CONTROLS, 'performance')
     .name('Performance preset')
     .onChange(() => {
@@ -359,6 +369,7 @@ function addGpuTireFolder(gui, world, scheduleRebuild) {
   };
   for (const [key, label, min, max, step] of [
     ['pressureKpa', 'Air pressure (kPa)', 10, 300, 5],
+    ['stepsPerTrip', 'Physics steps per GPU round trip', 1, 4, 1],
     ['substeps', 'Substeps per step', 1, 16, 1],
     ['iterations', 'Solver passes per substep', 1, 24, 1],
     ['cordStiffness', 'Cords (per pass)', 0, 1, 0.05],
