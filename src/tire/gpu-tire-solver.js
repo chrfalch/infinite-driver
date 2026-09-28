@@ -40,6 +40,8 @@ const Params = d.struct({
   treadRadius: d.f32, // rest radius (in the wheel plane) above which a particle counts as tread
   beltStretch: d.f32, // growth past its rest radius a particle may have, as a fraction (0 = off)
   beltPull: d.f32, // fraction of the growth past beltStretch taken back per pass
+  treadBend: d.f32, // per pass: how much the tread keeps its moulded curve (around and across)
+  sidewallShapeAxial: d.f32, // 0..1: share of shape memory kept sideways on the sidewalls
   beadPull: d.f32,
   damping: d.f32,
   friction: d.f32,
@@ -450,7 +452,27 @@ export class GpuTireSolver {
             let rel = p - center;
             let radial = normalize(rel - axleDir * dot(rel, axleDir) + vec3f(0.0, 1e-6, 0.0));
             shape -= radial * dot(shape, radial) * treadW * (1.0 - params.treadShapeRadial);
+            // The sidewalls may bow out sideways: the cords across keep their length, so where the
+            // tread is pushed in the sidewalls bulge, as a real tyre's do.
+            shape -= axleDir * dot(shape, axleDir) * (1.0 - treadW) * (1.0 - params.sidewallShapeAxial);
             p += shape;
+            // Belt bending: the tread keeps its moulded curve with its neighbours around the wheel
+            // and across it, so the ground or a rock flattens a longer piece of the tread instead of
+            // pressing a small dent into it like a rubber sheet.
+            if (params.treadBend > 0.0 && treadW > 0.0) {
+              let ub = i32(k / params.nv);
+              let vb = i32(k % params.nv);
+              let ua = nb(ub - 1, vb);
+              let uc = nb(ub + 1, vb);
+              let va = nb(ub, vb - 1);
+              let vc = nb(ub, vb + 1);
+              let x0 = getP(src, k);
+              let lapU0 = seat - 0.5 * (hubPoint(t, ua, st) + hubPoint(t, uc, st));
+              let lapU = x0 - 0.5 * (getP(src, ua) + getP(src, uc));
+              let lapV0 = seat - 0.5 * (hubPoint(t, va, st) + hubPoint(t, vc, st));
+              let lapV = x0 - 0.5 * (getP(src, va) + getP(src, vc));
+              p += params.treadBend * treadW * 0.5 * ((lapU0 - lapU) + (lapV0 - lapV));
+            }
             let vv = k % params.nv;
             if (vv >= params.beadLow && vv <= params.beadHigh) { p += params.beadPull * (seat - p); }
             // Belt: the cords alone let the pressure balloon the tyre (more with higher pressure and
@@ -643,6 +665,8 @@ export class GpuTireSolver {
       treadRadius: this.treadRadius,
       beltStretch: s.beltStretch ?? 0,
       beltPull: s.beltPull ?? 0.3,
+      treadBend: s.treadBend ?? 0,
+      sidewallShapeAxial: s.sidewallShapeAxial ?? 1,
       beadPull: s.beadPull,
       damping: s.damping,
       friction: s.friction,
