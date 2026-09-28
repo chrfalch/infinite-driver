@@ -65,7 +65,8 @@ export const DEFAULT_GPU_TIRE = Object.freeze({
   beltStretch: 0.02, // 0 = off
   beltPull: 0.3,
   treadBend: 0.1, // per pass: the tread keeps its moulded curve, so it flattens over a length instead of denting
-  sidewallBulge: 1.5, // sidewalls push out this much per metre the tread is pushed in (0 = no bulge)
+  rockFloor: 0.03, // m: how far below bare rock the solver stops a particle (hard stop)
+  sidewallBulge: 2.5, // sidewalls push out this much per metre the tread is pushed in (0 = no bulge)
   beadPull: 0.5, // fraction of the gap to the rim seat closed per pass
   damping: 2, // 1/s, relative to the wheel's rigid motion
   friction: 1.1,

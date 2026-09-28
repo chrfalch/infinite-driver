@@ -1,6 +1,7 @@
 import { DEFAULT_TIRE, GPU_TIRE, TIRE } from './config.js';
 import { GpuTireSolver, GROUND_N, rockToGpu } from './gpu-tire-solver.js';
 import { torusMesh } from './soft-tire.js';
+import { drawnSurface } from '../terrain/drawn-surface.js';
 
 // The tyre mesh descriptions (left and mirrored right) for the current settings; the solver's
 // particles follow the same grid.
@@ -56,6 +57,8 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
   }
   const { heights } = g;
   const rockAt = heightAt.rockAt;
+  // The tyres feel the ground as it is drawn (see terrain/drawn-surface.js).
+  const surface = (heightAt.drawn ??= drawnSurface(heightAt));
   if (recentre) {
     const ix0 = Math.round((x - half) / cell);
     const iz0 = Math.round((z - half) / cell);
@@ -76,7 +79,7 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
           base[iz * N + ix] = g.base[pz * N + px];
           rock[iz * N + ix] = g.rock[pz * N + px];
         } else {
-          base[iz * N + ix] = heightAt(ox + ix * cell, oz + iz * cell);
+          base[iz * N + ix] = surface(ox + ix * cell, oz + iz * cell);
           rock[iz * N + ix] = rockAt?.(ox + ix * cell, oz + iz * cell) ? 1 : 0;
         }
       }

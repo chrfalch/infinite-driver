@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { GroundDeformation } from '../src/terrain/deformation.js';
 import { GROUND_N } from '../src/tire/gpu-tire-solver.js';
 import { gpuGroundHeight, updateGpuGround } from '../src/tire/gpu-tires.js';
+import { drawnSurface } from '../src/terrain/drawn-surface.js';
 
 const heightAt = (x, z) => Math.sin(x * 0.3) + Math.cos(z * 0.2) * 0.5;
+// The tyres read the ground as drawn: the height function on the 1 m ground mesh's triangles.
+const drawn = drawnSurface(heightAt);
 
 function fakeSolver() {
   return {
@@ -26,7 +29,7 @@ function expectExact(solver, deformation, cell = 0.125) {
   let worst = 0;
   for (let iz = 0; iz < GROUND_N; iz++) {
     for (let ix = 0; ix < GROUND_N; ix++) {
-      const want = heightAt(ox + ix * cell, oz + iz * cell) + deformation.cellValue(ix0 + ix, iz0 + iz);
+      const want = drawn(ox + ix * cell, oz + iz * cell) + deformation.cellValue(ix0 + ix, iz0 + iz);
       worst = Math.max(worst, Math.abs(want - solver.heights[iz * GROUND_N + ix]));
     }
   }
@@ -95,7 +98,7 @@ describe('gpuGroundHeight', () => {
     for (let k = 0; k < 500; k++) {
       const x = 1.7 + Math.sin(k * 12.9898) * 7;
       const z = 0.4 + Math.cos(k * 78.233) * 7;
-      worst = Math.max(worst, Math.abs(gpuGroundHeight(s, x, z) - (heightAt(x, z) + d.at(x, z))));
+      worst = Math.max(worst, Math.abs(gpuGroundHeight(s, x, z) - (drawn(x, z) + d.at(x, z))));
     }
     // Linear interpolation on a 12.5 cm grid of a smooth field.
     expect(worst).toBeLessThan(0.01);

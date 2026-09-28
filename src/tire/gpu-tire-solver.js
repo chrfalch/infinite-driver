@@ -55,6 +55,7 @@ const Params = d.struct({
   groundDamping: d.f32, // N·s/m per particle
   soilRebound: d.f32, // fraction of soil push kept while the tread lifts off
   maxSink: d.f32,
+  rockFloor: d.f32, // how far below bare rock (m) a particle may be pushed before it is stopped
   gravel: d.f32, // 0..1: amount of loose gravel stones on the ground (see terrain/gravel.js)
   groundOriginX: d.f32,
   groundOriginZ: d.f32,
@@ -303,7 +304,7 @@ export class GpuTireSolver {
     // contact springs normally hold it).
     const floorClamp = tgpu.fn([d.vec3f], d.vec3f)/* wgsl */ `(pIn) {
       var p = pIn;
-      let floorDepth = select(0.06, params.maxSink, params.soilStiffness > 0.0 && groundRock(p.x, p.z) < 0.5);
+      let floorDepth = select(params.rockFloor, params.maxSink, params.soilStiffness > 0.0 && groundRock(p.x, p.z) < 0.5);
       let floor = groundHeight(p.x, p.z) + params.radius - floorDepth;
       if (p.y < floor) { p.y = floor; }
       return p;
@@ -696,6 +697,7 @@ export class GpuTireSolver {
       // Critically damped contact (2·√(k·m)); the kernel integrates it implicitly.
       groundDamping: 2 * Math.sqrt(((3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)) * (s.rubberMass / this.perTire)),
       maxSink: s.maxSink ?? 0.25,
+      rockFloor: s.rockFloor ?? 0.06,
       gravel: s.gravel ?? 0,
       groundOriginX: this.groundOrigin.x,
       groundOriginZ: this.groundOrigin.z,
