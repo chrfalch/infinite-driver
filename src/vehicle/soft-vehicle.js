@@ -2,8 +2,8 @@ import { TIRE } from '../tire/config.js';
 import { MAX_TIRES } from '../tire/gpu-tire-solver.js';
 import { GROUP, createSoftTire, groups } from '../tire/soft-tire.js';
 import { CAR, DRIVETRAIN } from './config.js';
-import { WHEELS, wheelMount } from './physics.js';
-import { DESIGN_WHEEL_MOUNT_Y, IFS_ARM_LIMIT, IFS_RACK, ifsCorner, ifsSpindleLift, ifsSpringOffset } from './frame-geometry.js';
+import { WHEELS, frameStretch, wheelMount } from './physics.js';
+import { DESIGN_WHEEL_MOUNT_Y, IFS_ARM_LIMIT, IFS_RACK, ifsCorner, ifsRack, ifsSpindleLift, ifsSpringOffset } from './frame-geometry.js';
 
 const DOWN = { x: 0, y: -1, z: 0 };
 const UP = { x: 0, y: 1, z: 0 };
@@ -80,6 +80,7 @@ export class JointedVehicle {
     this.world = world;
     this.body = chassis;
     this.car = car;
+    this.rackGeo = ifsRack(car); // the rack moves with the front of the frame (wheelbase)
     this.tire = tire;
     this.wheels = [];
     this.bodies = [];
@@ -233,8 +234,8 @@ export class JointedVehicle {
 
   // Independent suspension: a steering rack across the nose box, sliding sideways on the chassis.
   createRack() {
-    const rack = this.createLink(IFS_RACK.center, 4, 0.3);
-    const slide = this.joint(this.RAPIER.JointData.prismatic(IFS_RACK.center, ORIGIN, AXLE), this.body, rack);
+    const rack = this.createLink(this.rackGeo.center, 4, 0.3);
+    const slide = this.joint(this.RAPIER.JointData.prismatic(this.rackGeo.center, ORIGIN, AXLE), this.body, rack);
     // The rack is held at the steering position by the joint's limits (a hard constraint): a
     // position motor is too soft against the tyres' aligning torque and the wheels steer late.
     slide.setLimits(0, 0);
@@ -268,7 +269,7 @@ export class JointedVehicle {
     const tie = this.createLink(tieMid, 2, 0.08);
     this.joint(RAPIER.JointData.spherical(sub(G.tieOuter, tieMid), sub(G.tieOuter, G.wheel)), tie, upright);
     if (G.front) {
-      this.joint(RAPIER.JointData.spherical(sub(G.tieInner, IFS_RACK.center), sub(G.tieInner, tieMid)), this.rack.body, tie);
+      this.joint(RAPIER.JointData.spherical(sub(G.tieInner, this.rackGeo.center), sub(G.tieInner, tieMid)), this.rack.body, tie);
     } else {
       this.joint(RAPIER.JointData.spherical(G.tieInner, sub(G.tieInner, tieMid)), chassis, tie);
     }
@@ -450,7 +451,7 @@ export class JointedVehicle {
       upperInner: G.upperInner,
       lowerBall: local(c.lower.translation()),
       upperBall: local(c.upper.translation()),
-      tieInner: G.front ? local(worldPoint(this.rack.body, sub(G.tieInner, IFS_RACK.center))) : G.tieInner,
+      tieInner: G.front ? local(worldPoint(this.rack.body, sub(G.tieInner, this.rackGeo.center))) : G.tieInner,
       tieOuter: local(worldPoint(c.upright, sub(G.tieOuter, G.wheel))),
       shockTop: G.shockTop,
       shockBottom: local(worldPoint(c.lower, c.shockLocal)),
@@ -697,7 +698,9 @@ export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIR
   const body = world.createRigidBody(
     RAPIER.RigidBodyDesc.dynamic().setTranslation(position.x, position.y, position.z).setRotation(rotation).setCanSleep(false),
   );
-  const { x: hx, y: hy, z: hz } = car.halfExtents;
+  // The collision box grows with the frame when the wheelbase stretches it.
+  const hx = car.halfExtents.x + frameStretch(car);
+  const { y: hy, z: hz } = car.halfExtents;
   // The jointed car's axles, hubs, knuckles, and tyres add mass; the chassis gets the rest so the
   // whole car weighs car.mass.
   // Independent: per corner lower arm 8, upper 5, upright 10, tie rod 2, hub 22 kg, plus the rack.

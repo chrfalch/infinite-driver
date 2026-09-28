@@ -7,10 +7,26 @@ export const WHEELS = [
   { name: 'RR', front: false },
 ];
 
+// The frame is built for a 2.7 m wheelbase. Another wheelbase stretches (or shortens) it between the
+// cab and each end: everything ahead of the cab moves forward by frameStretch, everything behind it
+// back (wheels, suspension, steering rack, the tube chassis' front and rear). Limited so the ends
+// stay clear of the cab.
+export const DESIGN_HALF_WHEELBASE = 1.35;
+const CAB_HALF_LENGTH = 0.75; // |x| of the cab's ends (chassis-local)
+export function frameStretch(car = CAR) {
+  return Math.max(-0.2, Math.min(0.6, car.wheelBase / 2 - DESIGN_HALF_WHEELBASE));
+}
+// A chassis-local x on the frame designed for DESIGN_HALF_WHEELBASE, moved with the stretch.
+export function stretchX(x, car = CAR, stretch = frameStretch(car)) {
+  if (x > CAB_HALF_LENGTH) return x + stretch;
+  if (x < -CAB_HALF_LENGTH) return x - stretch;
+  return x;
+}
+
 export function wheelMount(i, car = CAR) {
   const w = WHEELS[i];
   return {
-    x: (w.front ? 1 : -1) * car.wheelBase * 0.5,
+    x: (w.front ? 1 : -1) * (DESIGN_HALF_WHEELBASE + frameStretch(car)),
     y: car.wheelMountY,
     // Independent suspension limits the track to what its arms allow (see ifsTrackOffset).
     z: (i % 2 === 0 ? -1 : 1) * (car.solidAxles === false ? Math.max(0.85, Math.min(1.5, car.track * 0.5)) : car.track * 0.5),

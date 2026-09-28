@@ -1,5 +1,6 @@
 import { BoxGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, SphereGeometry, Vector3 } from 'three/webgpu';
 import { CAR } from '../vehicle/config.js';
+import { DESIGN_HALF_WHEELBASE, stretchX } from '../vehicle/physics.js';
 import { rimInnerFace } from './wheel-inset.js';
 
 const housing = new MeshStandardMaterial({ color: '#34373a', roughness: 0.55, metalness: 0.5 });
@@ -136,7 +137,7 @@ export function updateAxleRig(rig, hubs, shaftSpin, dt, steerQuats = null, geome
     let diffPos;
     if (rig.independent) {
       // Differential fixed to the chassis between the lower arm pivots; half-shafts to the hubs.
-      diffPos = new Vector3(left.x > 0 ? 1.35 : -1.35, -0.4, 0.08);
+      diffPos = new Vector3(stretchX(left.x > 0 ? DESIGN_HALF_WHEELBASE : -DESIGN_HALF_WHEELBASE), -0.4, 0.08);
       axle.diff.position.copy(diffPos);
       axle.diff.quaternion.identity();
       const k = axle === rig.front ? 0 : 2;

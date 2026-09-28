@@ -1,5 +1,5 @@
 import { CAR } from './config.js';
-import { wheelMount } from './physics.js';
+import { stretchX, wheelMount } from './physics.js';
 
 // Shared chassis-local geometry (x forward, y up, z right) of the tube chassis (the sand buggy in
 // render/tube-chassis.js) and every suspension and steering mounting point. The chassis builder,
@@ -28,7 +28,7 @@ export function suspensionMounts(i, car = CAR) {
   const side = Math.sign(m.z);
   const front = m.x > 0;
   const toward = front ? -1 : 1; // toward the middle of the car
-  const P = (p) => ({ x: p[0], y: p[1], z: side * p[2] });
+  const P = (p) => ({ x: stretchX(p[0], car), y: p[1], z: side * p[2] });
   const g = frameGeometry();
   return {
     mount: m,
@@ -115,14 +115,18 @@ export function ifsCorner(i, car = CAR) {
   const lift = ifsSpindleLift(car);
   const out = { front, side };
   for (const [key, value] of Object.entries(base)) {
-    const P = (p) => ({ x: sx * p[0], y: p[1] - (key === 'wheel' ? lift : 0), z: side * (p[2] + dz * (OUTBOARD[key] ?? 0)) });
+    const P = (p) => ({ x: stretchX(sx * p[0], car), y: p[1] - (key === 'wheel' ? lift : 0), z: side * (p[2] + dz * (OUTBOARD[key] ?? 0)) });
     out[key] = Array.isArray(value[0]) ? value.map(P) : P(value);
   }
   return out;
 }
 
-// The steering rack (front, independent suspension): its centre and half-length.
+// The steering rack (front, independent suspension): its centre and half-length, on the frame
+// designed for DESIGN_HALF_WHEELBASE; ifsRack moves it with the wheelbase.
 export const IFS_RACK = { center: { x: 1.5, y: -0.375, z: 0 }, halfLength: 0.44, travel: 0.11 };
+export function ifsRack(car = CAR) {
+  return { ...IFS_RACK, center: { ...IFS_RACK.center, x: stretchX(IFS_RACK.center.x, car) } };
+}
 
 // Double A-arm points for drawing a corner whose wheel centre is at `hub` (chassis-local), when
 // no physics links exist (the raycast car): the wheel-side points move with the hub.
