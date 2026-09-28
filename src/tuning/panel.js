@@ -15,7 +15,6 @@ import {
   saveGround,
   saveTire,
 } from '../tire/config.js';
-import { TIRE_REBUILD_KEYS, updateSoftTire } from '../tire/soft-tire.js';
 import { applyWheelSettings } from '../vehicle/physics.js';
 import { DRIVETRAIN, resetDrivetrain, saveDrivetrain } from '../vehicle/config.js';
 import { requestRebuild, requestRespawn } from '../vehicle/spawn.js';
@@ -54,16 +53,6 @@ const GROUPS = [
       ['antiDive', 'Anti-dive / anti-squat', 0, 1, 0.05, 'live'],
       ['rollStiffness', 'Solid-axle roll stiffness ×', 0.2, 3, 0.05, 'rebuild'],
       ['pinionReaction', 'Axle torque reaction', 0, 2, 0.05, 'live'],
-      ['rigidBodyRoll', 'Body roll (rigid wheels)', 0, 2, 0.05, 'live'],
-    ],
-  ],
-  [
-    'Tyres',
-    [
-      ['frictionSlip', 'Grip (friction slip)', 0.2, 5, 0.05, 'wheels'],
-      ['sideFrictionStiffness', 'Side grip stiffness', 0.1, 3, 0.05, 'wheels'],
-      ['wheelRadius', 'Wheel radius (m)', 0.25, 0.8, 0.01, 'rebuild'],
-      ['wheelWidth', 'Wheel width (m)', 0.15, 0.6, 0.01, 'rebuild'],
     ],
   ],
   [
@@ -162,13 +151,11 @@ export function createTuningPanel(world, { heightAt }) {
       requestRebuild(world);
     },
     respawn: () => requestRespawn(world, heightAt),
-    lab: () => (location.href = '/tire-lab.html'),
   };
 
   const copyButton = gui.add(actions, 'copy').name('Copy settings');
   gui.add(actions, 'reset').name('Reset to defaults');
   gui.add(actions, 'respawn').name('Respawn car (R)');
-  gui.add(actions, 'lab').name('Open soft tyre lab →');
 
   const controls = gui.addFolder('Controls');
   controls
@@ -179,15 +166,6 @@ export function createTuningPanel(world, { heightAt }) {
       world.get(Input).engineOn = false;
     });
 
-  // Worker physics only runs the GPU tyres; another tyre mode needs a fresh start.
-  const rebuildOrReload = () => (world.get(Physics).remote ? location.reload() : requestRebuild(world));
-  controls
-    .add(CAR, 'softTires')
-    .name('Soft tyres')
-    .onChange(() => {
-      saveCar();
-      rebuildOrReload();
-    });
   const suspension = { independent: !CAR.solidAxles };
   controls
     .add(suspension, 'independent')
@@ -196,13 +174,6 @@ export function createTuningPanel(world, { heightAt }) {
       CAR.solidAxles = !suspension.independent;
       saveCar();
       requestRebuild(world);
-    });
-  controls
-    .add(CAR, 'gpuTires')
-    .name('GPU tyres (TypeGPU)')
-    .onChange(() => {
-      saveCar();
-      rebuildOrReload();
     });
   controls
     .add(CONTROLS, 'graphics', ['auto', 'high', 'low'])
@@ -237,40 +208,8 @@ export function createTuningPanel(world, { heightAt }) {
     folder.close();
   }
 
-  // Soft tyre settings: most apply live to the four tyres, size and mesh rebuild the car.
-  const softFolder = gui.addFolder('Soft tyres');
-  const onTire = (key) => () => {
-    saveTire();
-    if (!CAR.softTires) return;
-    if (TIRE_REBUILD_KEYS.includes(key)) scheduleRebuild();
-    else {
-      const car = world.queryFirst(IsPlayer, Vehicle);
-      const { controller } = car.get(Vehicle);
-      const rapier = world.get(Physics).rapier;
-      controller.wheels?.forEach((w) => updateSoftTire(rapier, w.soft, TIRE));
-    }
-  };
-  for (const [key, label, min, max, step] of [
-    ['inflation', 'Air pressure (inflation ×)', 0.8, 1.3, 0.01],
-    ['airStiffness', 'Air stiffness (Hz)', 20, 800, 10],
-    ['carcassStiffness', 'Carcass / cords (Hz)', 20, 800, 10],
-    ['sidewallStiffness', 'Sidewall bending (Hz)', 0, 120, 1],
-    ['shapeMemory', 'Shape memory (Hz)', 0, 120, 1],
-    ['damping', 'Damping ratio', 0, 2, 0.05],
-    ['friction', 'Rubber friction', 0.2, 2, 0.05],
-    ['rubberMass', 'Rubber mass (kg)', 2, 40, 1],
-    ['outerRadius', 'Outer radius (m)', 0.3, 0.8, 0.01],
-    ['rimRadius', 'Rim radius (m)', 0.15, 0.6, 0.01],
-    ['width', 'Width (m)', 0.12, 0.6, 0.01],
-    ['segmentsAround', 'Segments around', 12, 48, 1],
-    ['segmentsAcross', 'Segments across', 4, 16, 1],
-    ['beadRings', 'Bead width (rings)', 0, 2, 1],
-    ['substeps', 'Solver substeps', 0, 6, 1],
-    ['pgsIterations', 'Solver iterations', 0, 6, 1],
-  ]) {
-    softFolder.add(TIRE, key, min, max, step).name(label).onChange(onTire(key));
-  }
-  softFolder.close();
+  // Tyres: pressure, grip and mass apply live; size, mass and mesh rebuild the car.
+  addTireFolder(gui, world, scheduleRebuild);
 
   // Drivetrain: read live every step.
   const dt = gui.addFolder('Drivetrain');
@@ -305,11 +244,11 @@ export function createTuningPanel(world, { heightAt }) {
   }
   dt.close();
 
-  // Ground: softness sinks the GPU tyres into the soil; tracks are drawn in every tyre mode.
+  // Ground: softness sinks the tyres into the soil; gravel is what the tread rolls over.
   const ground = gui.addFolder('Ground');
   ground
     .add(GROUND, 'softness', 0, 1, 0.05)
-    .name('Softness (GPU tyres)')
+    .name('Soil softness')
     .onChange(() => {
       saveGround();
       const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.gpu?.solver;
@@ -317,7 +256,7 @@ export function createTuningPanel(world, { heightAt }) {
     });
   ground
     .add(GROUND, 'gravel', 0, 1, 0.05)
-    .name('Gravel (GPU tyres)')
+    .name('Gravel')
     .onChange(() => {
       saveGround();
       const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.gpu?.solver;
@@ -338,8 +277,6 @@ export function createTuningPanel(world, { heightAt }) {
     )
     .name('Clear tracks and ruts');
 
-  // GPU tyre settings: most apply live, mesh and mass rebuild the car.
-  addGpuTireFolder(gui, world, scheduleRebuild);
 
   // Give the keyboard back to the car once a value is committed.
   gui.onFinishChange(() => {
@@ -360,8 +297,10 @@ export function isTyping(e) {
 
 const GPU_REBUILD_KEYS = ['segmentsAround', 'segmentsAcross', 'beadRings', 'rubberMass'];
 
-function addGpuTireFolder(gui, world, scheduleRebuild) {
-  const folder = gui.addFolder('GPU tyres');
+// One folder for the tyres (the GPU soft-body tyres): the everyday settings at the top, the solver
+// in a closed sub-folder. Size lives in TIRE (shared with the tyre meshes), the rest in GPU_TIRE.
+function addTireFolder(gui, world, scheduleRebuild) {
+  const folder = gui.addFolder('Tyres');
   const apply = (key) => () => {
     saveGpuTire();
     if (GPU_REBUILD_KEYS.includes(key)) return scheduleRebuild();
@@ -371,6 +310,25 @@ function addGpuTireFolder(gui, world, scheduleRebuild) {
   };
   for (const [key, label, min, max, step] of [
     ['pressureKpa', 'Air pressure (kPa)', 10, 300, 5],
+    ['friction', 'Rubber friction', 0.2, 2, 0.05],
+    ['rubberMass', 'Rubber mass (kg)', 2, 40, 1],
+  ]) {
+    folder.add(GPU_TIRE, key, min, max, step).name(label).onChange(apply(key));
+  }
+  const resize = () => {
+    saveTire();
+    scheduleRebuild();
+  };
+  for (const [key, label, min, max, step] of [
+    ['outerRadius', 'Outer radius (m)', 0.3, 0.8, 0.01],
+    ['rimRadius', 'Rim radius (m)', 0.15, 0.6, 0.01],
+    ['width', 'Width (m)', 0.12, 0.6, 0.01],
+  ]) {
+    folder.add(TIRE, key, min, max, step).name(label).onChange(resize);
+  }
+
+  const solver = folder.addFolder('Tyre solver (advanced)');
+  for (const [key, label, min, max, step] of [
     ['stepsPerTrip', 'Physics steps per GPU round trip', 1, 4, 1],
     ['substeps', 'Substeps per step', 1, 16, 1],
     ['iterations', 'Solver passes per substep', 1, 24, 1],
@@ -380,16 +338,14 @@ function addGpuTireFolder(gui, world, scheduleRebuild) {
     ['shapeStiffness', 'Shape memory (per pass)', 0, 0.3, 0.005],
     ['beadPull', 'Bead grip on rim (per pass)', 0.05, 1, 0.05],
     ['damping', 'Damping (1/s)', 0, 30, 0.5],
-    ['friction', 'Rubber friction', 0.2, 2, 0.05],
     ['contactRadius', 'Tread thickness (m)', 0.005, 0.06, 0.005],
-    ['rubberMass', 'Rubber mass (kg)', 2, 40, 1],
     ['segmentsAround', 'Segments around', 16, 48, 1],
     ['segmentsAcross', 'Segments across', 6, 10, 1],
     ['beadRings', 'Bead width (rings)', 0, 2, 1],
   ]) {
-    folder.add(GPU_TIRE, key, min, max, step).name(label).onChange(apply(key));
+    solver.add(GPU_TIRE, key, min, max, step).name(label).onChange(apply(key));
   }
+  solver.close();
   folder.close();
   return folder;
 }
-

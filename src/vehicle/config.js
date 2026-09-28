@@ -62,7 +62,10 @@ function merge(target, source) {
 // The live, tunable settings. Systems read from this object every step.
 export const CAR = merge(clone(DEFAULT_CAR), loadSaved());
 
-// ?tires=gpu, ?tires=soft (Rapier soft bodies) or ?tires=rigid overrides the saved choice.
+// The game uses the GPU tyres; an older saved choice of tyre model is ignored. For tests,
+// ?tires=soft (Rapier soft bodies) or ?tires=rigid (raycast wheels) still selects the others.
+CAR.softTires = DEFAULT_CAR.softTires;
+CAR.gpuTires = DEFAULT_CAR.gpuTires;
 const tiresParam = globalThis.location ? new URLSearchParams(globalThis.location.search).get('tires') : null;
 if (tiresParam === 'rigid') CAR.softTires = false;
 if (tiresParam === 'soft' || tiresParam === 'gpu') {
