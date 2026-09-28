@@ -1,6 +1,6 @@
 // Tyre shape check: how far the GPU tyres grow past their set radius, how many particles touch the
-// ground, and how much the hub shakes, at rest and driving. Usage: node scripts/tyre-shape.mjs x27<localStorage json>x27
-// e.g. x27{"drift.tire.v2":{"outerRadius":0.55,"width":0.6},"drift.gputire.v2":{"pressureKpa":165}}x27
+// ground, and how much the hub shakes, at rest and driving. Usage: node scripts/tyre-shape.mjs '<localStorage json>'
+// e.g. '{"drift.tire.v2":{"outerRadius":0.55,"width":0.6},"drift.gputire.v2":{"pressureKpa":165}}'
 import { chromium } from 'playwright-core';
 const exe = `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
 const store = JSON.parse(process.argv[2] ?? '{}');
