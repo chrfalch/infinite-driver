@@ -122,7 +122,7 @@ describe('dry river terrain', () => {
     expect(heightAt.sample(0, 0).road).toBe(1);
   });
 
-  it('keeps the bed gentle along its length: under 10.5° over any 10 m (the ground under the rock)', () => {
+  it('keeps the bed drivable along its length: under 20° over any 10 m (the ground under the rock)', () => {
     const points = walkBed(2000);
     let steepest = 0;
     for (let i = 20; i < points.length; i++) {
@@ -130,7 +130,12 @@ describe('dry river terrain', () => {
       steepest = Math.max(steepest, Math.abs(under(points[i]) - under(points[i - 20])) / 10);
       expect(heightAt.roadDistance(points[i].x, points[i].z)).toBeLessThan(1.5);
     }
-    expect(Math.atan(steepest)).toBeLessThan((10.5 * Math.PI) / 180);
+    expect(Math.atan(steepest)).toBeLessThan((20 * Math.PI) / 180);
+    // ...but it takes work: the median grade over 10 m is over 4°.
+    const grades = [];
+    for (let i = 20; i < points.length; i++) grades.push(Math.abs(heightAt.sample(points[i].x, points[i].z).under - heightAt.sample(points[i - 20].x, points[i - 20].z).under) / 10);
+    grades.sort((p, q) => p - q);
+    expect(Math.atan(grades[grades.length >> 1])).toBeGreaterThan((4 * Math.PI) / 180);
   });
 
   it('goes up and down along the bed', () => {

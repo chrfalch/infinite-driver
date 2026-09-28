@@ -38,10 +38,14 @@ let chunkWorker = null;
 export function startChunkWorker({ mode, rockCount = ROCK_COUNT }) {
   try {
     const worker = new Worker(new URL('../terrain/chunk-worker.js', import.meta.url), { type: 'module' });
-    const state = { worker, requested: new Set(), ready: new Map() };
+    const state = { worker, requested: new Set(), ready: new Map(), sheets: new Map() };
     worker.onmessage = (e) => {
       const msg = e.data;
       const key = chunkKey(msg.cx, msg.cz);
+      if (msg.type === 'sheet') {
+        state.sheets.set(key, msg.sheet);
+        return;
+      }
       state.requested.delete(key);
       if (msg.type === 'chunk') state.ready.set(key, msg);
       else console.error('[chunk worker]', msg.message);
@@ -230,8 +234,18 @@ export function streamTerrain(world, { force = false } = {}) {
         rockDist = dist;
       }
     }
-    loaded.add(chunkKey(chunk.cx, chunk.cz));
+    // A rock sheet the chunk worker built for a chunk made here.
+    const key = chunkKey(chunk.cx, chunk.cz);
+    if (chunkWorker?.sheets.has(key)) {
+      const sheet = createRockSheetMesh(chunkWorker.sheets.get(key));
+      chunkWorker.sheets.delete(key);
+      if (sheet) entity.get(View).object.add(sheet);
+    }
+    loaded.add(key);
   });
+
+  // Forget rock sheets for chunks that went out of range before theirs arrived.
+  if (chunkWorker) for (const key of chunkWorker.sheets.keys()) if (!loaded.has(key)) chunkWorker.sheets.delete(key);
 
   // Build missing chunks nearest first.
   const missing = [];
@@ -301,7 +315,10 @@ function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, ne
   const object = new Group();
   object.name = `chunk ${cx},${cz}`;
   object.add(data ? createChunkMeshFromData(data.mesh, cx, cz) : timed('terrain.chunkMesh', () => createChunkMesh(heightAt, heights, cx, cz)));
-  const sheet = createRockSheetMesh(data ? data.sheet : timed('terrain.rockSheet', () => rockSheetData(heightAt, cx, cz)));
+  // The dry river's rock sheet comes with the worker's chunk. For a chunk made here, the worker
+  // builds it on the side (it costs ~90 ms) and it is added when it arrives (see streamTerrain).
+  if (!data && chunkWorker && heightAt.rockAt) chunkWorker.worker.postMessage({ type: 'sheet', cx, cz });
+  const sheet = createRockSheetMesh(data ? data.sheet : chunkWorker ? null : timed('terrain.rockSheet', () => rockSheetData(heightAt, cx, cz)));
   if (sheet) object.add(sheet);
   scene.add(object);
   const entity = world.spawn(TerrainChunk(chunk), RockField(field), View({ object }));

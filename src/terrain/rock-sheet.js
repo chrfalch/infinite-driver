@@ -79,62 +79,61 @@ function toneFor(id, out) {
 }
 
 // Vertex data for the drawn sheet (plain arrays, so the chunk worker can build it), or null if the
-// chunk has none. Triangles are split along the same diagonal as the ground mesh.
+// chunk has none: an indexed mesh with smooth normals from the grid (central differences), so the
+// big facets stay flat and only the ridges between them soften over a grid cell. (Face normals
+// per 25 cm triangle speckled the facets wherever a triangle straddled a ridge.) Triangles are split
+// along the same diagonal as the ground mesh.
 export function rockSheetData(heightAt, cx, cz) {
   if (!heightAt.rockAt) return null;
   const step = ROCK_SHEET_STEP;
   const { heights, ids, cells, n, x0, z0 } = sampleSheet(heightAt, cx, cz, step);
   if (!cells.length) return null;
-  const positions = new Float32Array(cells.length * 18);
-  const normals = new Float32Array(cells.length * 18);
-  const colors = new Float32Array(cells.length * 18);
-  let o = 0;
-  const put = (i, nx, ny, nz) => {
+  // Grid points in use, numbered in order.
+  const index = new Int32Array(n * n).fill(-1);
+  let count = 0;
+  for (let i = 0; i < heights.length; i++) if (!Number.isNaN(heights[i])) index[i] = count++;
+  const positions = new Float32Array(count * 3);
+  const normals = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const h = (i, fallback) => (i >= 0 && i < heights.length && !Number.isNaN(heights[i]) ? heights[i] : fallback);
+  for (let i = 0; i < heights.length; i++) {
+    const k = index[i];
+    if (k < 0) continue;
     const gx = i % n;
     const gz = (i - gx) / n;
-    positions[o] = x0 + gx * step;
-    positions[o + 1] = heights[i];
-    positions[o + 2] = z0 + gz * step;
-    normals[o] = nx;
-    normals[o + 1] = ny;
-    normals[o + 2] = nz;
-    colors[o] = tone.r;
-    colors[o + 1] = tone.g;
-    colors[o + 2] = tone.b;
-    o += 3;
-  };
-  const tri = (a, b, c) => {
-    // Face normal from the three corners.
-    const ax = (a % n) * step, az = Math.floor(a / n) * step, ay = heights[a];
-    const bx = (b % n) * step, bz = Math.floor(b / n) * step, by = heights[b];
-    const cx2 = (c % n) * step, cz2 = Math.floor(c / n) * step, cy = heights[c];
-    const ux = bx - ax, uy = by - ay, uz = bz - az;
-    const wx = cx2 - ax, wy = cy - ay, wz = cz2 - az;
-    let nx = uy * wz - uz * wy;
-    let ny = uz * wx - ux * wz;
-    let nz = ux * wy - uy * wx;
-    if (ny < 0) {
-      nx = -nx;
-      ny = -ny;
-      nz = -nz;
-    }
-    const len = Math.hypot(nx, ny, nz) || 1;
-    // The facet's colour: its boulder's tone (the corner ids agree inside a boulder's facets),
-    // bare ground colour where the sheet has faded out.
-    const id = Math.max(ids[a], ids[b], ids[c]);
-    toneFor(id < 0 ? 0.5 : id, tone);
-    put(a, nx / len, ny / len, nz / len);
-    put(b, nx / len, ny / len, nz / len);
-    put(c, nx / len, ny / len, nz / len);
-  };
+    const y = heights[i];
+    positions.set([x0 + gx * step, y, z0 + gz * step], k * 3);
+    // Slopes from the neighbours either side (one-sided at the edge of the sampled cells).
+    const l = gx > 0 ? h(i - 1, NaN) : NaN;
+    const r = gx < n - 1 ? h(i + 1, NaN) : NaN;
+    const u = h(i - n, NaN);
+    const d = h(i + n, NaN);
+    const dx = !Number.isNaN(l) && !Number.isNaN(r) ? (r - l) / (2 * step) : !Number.isNaN(r) ? (r - y) / step : !Number.isNaN(l) ? (y - l) / step : 0;
+    const dz = !Number.isNaN(u) && !Number.isNaN(d) ? (d - u) / (2 * step) : !Number.isNaN(d) ? (d - y) / step : !Number.isNaN(u) ? (y - u) / step : 0;
+    const len = Math.hypot(dx, 1, dz);
+    normals.set([-dx / len, 1 / len, -dz / len], k * 3);
+    // Each point takes its boulder's tone (bare ground where the sheet has faded out), darkened in
+    // the creases between boulders and a little lighter on their ridges, so the boulders read apart
+    // under the smooth shading.
+    toneFor(ids[i] < 0 ? 0.5 : ids[i], tone);
+    const around = (Number.isNaN(l) ? y : l) + (Number.isNaN(r) ? y : r) + (Number.isNaN(u) ? y : u) + (Number.isNaN(d) ? y : d) - 4 * y;
+    const shade = 1 - Math.min(0.5, Math.max(0, around * 1.4)) + Math.min(0.12, Math.max(0, -around * 0.5));
+    colors.set([tone.r * shade, tone.g * shade, tone.b * shade], k * 3);
+  }
+  const indices = new Uint32Array(cells.length * 6);
+  let o = 0;
   for (const a of cells) {
     const b = a + 1;
     const c = a + n;
     const d = c + 1;
-    tri(a, c, b);
-    tri(b, c, d);
+    indices[o++] = index[a];
+    indices[o++] = index[c];
+    indices[o++] = index[b];
+    indices[o++] = index[b];
+    indices[o++] = index[c];
+    indices[o++] = index[d];
   }
-  return { positions, normals, colors };
+  return { positions, normals, colors, indices };
 }
 
 // Bands a chunk's sheet collider is built in, one per call (each a few ms).

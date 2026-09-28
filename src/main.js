@@ -120,8 +120,9 @@ async function main() {
   // Small screens start with the panel folded so the road stays visible.
   if (window.innerWidth < 700 || touch.isVisible()) panel.close();
 
-  streamTerrain(world, { force: true });
+  // The chunk worker first, so the initial load can hand it the rock sheets (dry river).
   startChunkWorker({ mode });
+  streamTerrain(world, { force: true });
 
   // HUD text through Glyph.
   const hud = glyph.handle('hud', ThreeConfig);

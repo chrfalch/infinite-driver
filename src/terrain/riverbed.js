@@ -14,7 +14,7 @@
 // the drawn rock mesh (render/rock-surface.js) their shape. Toward the banks the domes grow tall and
 // steep into boulder walls the car cannot climb.
 //
-// Kept drivable: the bed floor stays under about 8° along the bed, the humps stand 15-45 cm over
+// Kept drivable: the bed floor stays under about 19° over any 10 m, the humps stand 15-45 cm over
 // the creases between them, and bedrock ledges are at most ~20 cm.
 import { createNoise2D } from 'simplex-noise';
 import { mulberry32 } from './height.js';
@@ -122,8 +122,9 @@ export function createRiverField(seed = 4711) {
     return { d: (a - k * SPACING) / g, gx: gx / g, gz: gz / g, k };
   }
 
-  // Bed floor height along the bed: rolling climbs and dips (up to about 6°, 8° briefly).
-  const floorAt = (px, pz) => 9 * floorNoise(px * 0.003, pz * 0.003) + 1.2 * floorNoise(px * 0.011 + 5, pz * 0.011 + 3);
+  // Bed floor height along the bed: climbs and dips that take some work (a median grade of about
+  // 5.5°, one tenth steeper than 11°, the steepest 10 m about 19°).
+  const floorAt = (px, pz) => 12 * floorNoise(px * 0.0042, pz * 0.0042) + 1.8 * floorNoise(px * 0.013 + 5, pz * 0.013 + 3);
 
   // Everything the renderer needs at a point; heightAt uses only .h.
   function sample(x, z) {
