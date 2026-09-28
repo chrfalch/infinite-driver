@@ -114,11 +114,28 @@ export function ifsCorner(i, car = CAR) {
   const dz = ifsTrackOffset(car);
   const lift = ifsSpindleLift(car);
   const out = { front, side };
-  for (const [key, value] of Object.entries(base)) {
+  // Caster: the front upper ball joint sits behind the lower one by the kingpin's lean.
+  const kingpin = front
+    ? { ...base, upperBall: [base.lowerBall[0] - Math.tan(((car.caster ?? 5.71) * Math.PI) / 180) * (base.upperBall[1] - base.lowerBall[1]), base.upperBall[1], base.upperBall[2]] }
+    : base;
+  for (const [key, value] of Object.entries(kingpin)) {
     const P = (p) => ({ x: stretchX(sx * p[0], car), y: p[1] - (key === 'wheel' ? lift : 0), z: side * (p[2] + dz * (OUTBOARD[key] ?? 0)) });
     out[key] = Array.isArray(value[0]) ? value.map(P) : P(value);
   }
   return out;
+}
+
+// The spindle's turn on its upright for corner i (chassis frame, a quaternion): camber about the
+// car's forward axis, then toe about the up axis, mirrored for the left side.
+export function spindleAlignment(i, car = CAR) {
+  const side = i % 2 === 0 ? -1 : 1;
+  const rad = Math.PI / 180;
+  const camber = side * (car.camber ?? 0) * rad;
+  const toe = side * ((i < 2 ? car.toeFront : car.toeRear) ?? 0) * rad;
+  // Toe (about y) after camber (about x): q = qy * qx.
+  const cx = Math.cos(camber / 2), sx = Math.sin(camber / 2);
+  const cy = Math.cos(toe / 2), sy = Math.sin(toe / 2);
+  return { x: cy * sx, y: sy * cx, z: -sy * sx, w: cy * cx };
 }
 
 // The steering rack (front, independent suspension): its centre and half-length, on the frame

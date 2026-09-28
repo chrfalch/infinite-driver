@@ -20,6 +20,13 @@ export const DEFAULT_CAR = Object.freeze({
   wheelBase: 2.7,
   track: 2.1,
   wheelMountY: -0.08,
+  // Wheel alignment, independent suspension (degrees). Camber and toe are the spindle's angles on
+  // its upright; caster is the front kingpin's lean back. The car's links still move the wheel as
+  // it travels, so the camber at rest also follows the ride height (about +0.6° by default).
+  camber: 0, // top of the wheel out is positive
+  caster: 5.71, // front only; the rear kingpins are upright
+  toeFront: 0, // toe-in is positive (the front of the wheel points in)
+  toeRear: 0,
   suspensionRestLength: 0.52,
   maxSuspensionTravel: 0.36,
   // Rapier scales these by chassis mass, so they read as spring rate per kg.

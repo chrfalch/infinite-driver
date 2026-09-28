@@ -209,6 +209,26 @@ export class GpuTireSolver {
       if (fx + fz <= 1.0) { return h00 + (h10 - h00) * fx + (h01 - h00) * fz + stonesHere; }
       return h11 + (h01 - h11) * (1.0 - fx) + (h10 - h11) * (1.0 - fz) + stonesHere;
     }`.$uses({ params: this.params, ground: this.ground, gravelHeight });
+    // Up normal of the ground grid's triangle under (x, z) (the ground as drawn, without gravel).
+    const groundNormal = tgpu.fn([d.f32, d.f32], d.vec3f)/* wgsl */ `(x, z) {
+      let last = f32(${GROUND_N - 1}) - 0.001;
+      let gx = clamp((x - params.groundOriginX) / params.groundCell, 0.0, last);
+      let gz = clamp((z - params.groundOriginZ) / params.groundCell, 0.0, last);
+      let ix = u32(floor(gx));
+      let iz = u32(floor(gz));
+      let n = ${GROUND_N}u;
+      let h00 = ground[iz * n + ix];
+      let h10 = ground[iz * n + ix + 1u];
+      let h01 = ground[(iz + 1u) * n + ix];
+      let h11 = ground[(iz + 1u) * n + ix + 1u];
+      var sx = (h10 - h00) / params.groundCell;
+      var sz = (h01 - h00) / params.groundCell;
+      if ((gx - f32(ix)) + (gz - f32(iz)) > 1.0) {
+        sx = (h11 - h01) / params.groundCell;
+        sz = (h11 - h10) / params.groundCell;
+      }
+      return normalize(vec3f(-sx, 1.0, -sz));
+    }`.$uses({ params: this.params, ground: this.ground });
     // 1 on bare rock (the nearest grid cell's flag), else 0.
     const groundRock = tgpu.fn([d.f32, d.f32], d.f32)/* wgsl */ `(x, z) {
       let last = f32(${GROUND_N - 1});
@@ -259,21 +279,25 @@ export class GpuTireSolver {
       var f = vec3f(0.0);
       // Bare rock does not give like soil.
       let soft = params.soilStiffness > 0.0 && groundRock(x.x, x.z) < 0.5;
-      let depth = groundHeight(x.x, x.z) + params.radius - x.y;
+      // The ground pushes along its normal (the triangle's slope), by the depth along it: on a steep
+      // face a straight-up push let a tyre pressed sideways sink into the rock.
+      let gn = groundNormal(x.x, x.z);
+      let depth = (groundHeight(x.x, x.z) + params.radius - x.y) * gn.y;
       if (depth > 0.0) {
         var push = select(params.groundStiffness, params.soilStiffness, soft) * depth;
-        if (soft && vTrial.y > 0.0) {
+        let vn0 = dot(vTrial, gn);
+        if (soft && vn0 > 0.0) {
           // Soil pushes back fully while compressed, only partly as the tread lifts (it absorbs energy).
           push *= params.soilRebound;
         }
         // Normal damping, integrated implicitly (stable at any strength): the tread settles on the
         // ground instead of bouncing in and out of contact between substeps.
         let c = params.groundDamping;
-        let vn = (vTrial.y + push * dt / m) / (1.0 + c * dt / m);
-        push = (vn - vTrial.y) * m / dt;
+        let vn = (vn0 + push * dt / m) / (1.0 + c * dt / m);
+        push = (vn - vn0) * m / dt;
         // Ground friction is applied after the constraint passes (see the finish step), where the
         // whole substep's sliding is known.
-        f.y += max(push, 0.0);
+        f += gn * max(push, 0.0);
       }
       for (var r = 0u; r < params.rocks; r++) {
         let sphere = rocks[r];
@@ -298,7 +322,7 @@ export class GpuTireSolver {
         }
       }
       return f;
-    }`.$uses({ params: this.params, rocks: this.rocks, groundHeight, groundRock });
+    }`.$uses({ params: this.params, rocks: this.rocks, groundHeight, groundNormal, groundRock });
 
     // Safety floor: if a particle is ever driven deep into the ground, put it back (rare; the
     // contact springs normally hold it).
@@ -426,7 +450,7 @@ export class GpuTireSolver {
           // springs make a tread particle bounce in and out of contact between substeps, so the
           // budget remembers recent contact (it fades over a few substeps) to keep the patch gripping.
           let inContact = groundHeight(x.x, x.z) + params.radius > x.y;
-          let pushNow = max(fc.y, 0.0) * select(0.0, 1.0, inContact);
+          let pushNow = max(dot(fc, groundNormal(x.x, x.z)), 0.0) * select(0.0, 1.0, inContact);
           var pushed = max(pushNow, pushMemory * 0.6);
           if (pushed < 1.0) { pushed = 0.0; }
           prev[base + k] = vec4f(x, pushed);
@@ -513,15 +537,17 @@ export class GpuTireSolver {
           // let it slide by what exceeds μ·N over the substep. Applied once, so its force is exact.
           let push = pr.w;
           if (push > 0.0) {
-            let slide = vec2f(p.x - pr.x, p.z - pr.z);
+            // Sliding in the ground's plane (on flat ground, sideways and along).
+            let gn = groundNormal(p.x, p.z);
+            let moved = p - pr.xyz;
+            let slide = moved - gn * dot(moved, gn);
             let len = length(slide);
             let mu = select(params.friction, params.rockFriction, groundRock(p.x, p.z) > 0.5);
             let limit = mu * push * dt * dt / m;
             var cut = slide;
             if (len > limit) { cut = slide * (limit / len); }
-            p.x -= cut.x;
-            p.z -= cut.y;
-            let ff = vec3f(-cut.x, 0.0, -cut.y) * (m / (dt * dt));
+            p -= cut;
+            let ff = -cut * (m / (dt * dt));
             dbgCount += 1.0;
             dbgFric += ff.z;
             extForce += ff;
@@ -616,6 +642,7 @@ export class GpuTireSolver {
       params: this.params,
       hubs: this.hubs,
       groundHeight,
+      groundNormal,
       groundRock,
       pos: this.pos,
       prev: this.prev,

@@ -54,6 +54,11 @@ const GROUPS = [
       ['antiDive', 'Anti-dive / anti-squat', 0, 1, 0.05, 'live'],
       ['rollStiffness', 'Solid-axle roll stiffness ×', 0.2, 3, 0.05, 'rebuild'],
       ['pinionReaction', 'Axle torque reaction', 0, 2, 0.05, 'live'],
+      // Wheel alignment (independent suspension).
+      ['camber', 'Camber (°)', -5, 5, 0.1, 'rebuild'],
+      ['caster', 'Caster (°)', 0, 12, 0.1, 'rebuild'],
+      ['toeFront', 'Toe-in front (°)', -2, 2, 0.05, 'rebuild'],
+      ['toeRear', 'Toe-in rear (°)', -2, 2, 0.05, 'rebuild'],
     ],
   ],
   [
