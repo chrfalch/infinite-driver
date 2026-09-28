@@ -190,7 +190,7 @@ const HALF_LENGTH = 2.5;
 const HALF_WIDTH = 1.25;
 
 // Heights over the car's footprint at (x, z) facing yaw: corners, edge midpoints and centre.
-function footprint(heightAt, x, z, yaw) {
+export function footprint(heightAt, x, z, yaw) {
   const c = Math.cos(yaw);
   const s = Math.sin(yaw);
   const hs = [];

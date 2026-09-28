@@ -37,7 +37,9 @@ import { TireTracks } from './render/tracks.js';
 import { GROUND } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
-import { applyPendingCarAction, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
+import { worldMode } from './world.js';
+import { setTerrainWorld } from './render/terrain-mesh.js';
+import { applyPendingCarAction, footprint, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
 import { updateInstanceBatchers } from './render/instance-batcher.js';
 import { createPhysicsClient, workerGpuSupported } from './physics/client.js';
@@ -54,11 +56,17 @@ async function main() {
   // The frame updates world matrices itself, before the instanced parts read them (see draw).
   render.scene.matrixWorldAutoUpdate = false;
   const world = createWorld();
-  // Red-rock canyon with gravel roads by default; ?terrain=flat (tests), ?terrain=hills, or
-  // ?terrain=ramp&slope=20 (a straight climb for hill-start tests).
-  const terrainParams = new URLSearchParams(location.search);
-  let mode = terrainParams.get('terrain') ?? 'canyon';
-  if (mode === 'ramp') mode = `ramp:${terrainParams.get('slope') ?? 20}`;
+  // The world from the panel's picker (red-rock canyon by default, or the dry river);
+  // ?terrain=flat (tests), ?terrain=hills, ?terrain=ramp&slope=20 (a straight climb for hill-start
+  // tests), or any world overrides it.
+  let mode = worldMode();
+  if (mode === 'ramp') mode = `ramp:${new URLSearchParams(location.search).get('slope') ?? 20}`;
+  setTerrainWorld(mode);
+  // The dry river's isometric views get a paler, less dusty haze than the canyon.
+  if (mode === 'river') {
+    render.scene.background.set('#e4e1d6');
+    render.scene.fog.color.set('#e4e1d6');
+  }
   const heightAt = createHeightField({ mode });
   const deformation = new GroundDeformation();
 
@@ -100,10 +108,11 @@ async function main() {
     }),
   );
 
-  // The car starts just above the ground at the origin (on a road in the canyon, facing along it).
+  // The car starts just above the ground at the origin (on the road or river bed, facing along it),
+  // above the highest ground under it so no wheel starts inside a slab.
   const yaw = heightAt.roadHeading ? heightAt.roadHeading(0, 0) : 0;
   spawnCar(world, {
-    position: { x: 0, y: heightAt(0, 0) + startHeight(), z: 0 },
+    position: { x: 0, y: footprint(heightAt, 0, 0, yaw).max + startHeight(), z: 0 },
     rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
   });
   const panel = createTuningPanel(world, { heightAt });

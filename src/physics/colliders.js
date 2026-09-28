@@ -60,7 +60,7 @@ export function createColliderStreamer({ rapier, world: physicsWorld, ecs, RockF
     }
     for (const p of generatePlants(heightAt, c.cx, c.cz)) {
       if (p.kind !== 'tree') continue;
-      const r = 0.05 * p.height;
+      const r = p.trunk ?? 0.05 * p.height;
       const half = 0.3 * p.height;
       const desc = rapier.ColliderDesc.cylinder(half, r).setTranslation(p.x, p.y + half, p.z).setFriction(0.7);
       c.colliders.push(physicsWorld.createCollider(desc));

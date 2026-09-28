@@ -121,7 +121,7 @@ function addRockColliders(physics, field) {
   // Tree trunks are solid (a thin cylinder); bushes are only drawn, the car drives through them.
   for (const p of plantsOf(field)) {
     if (p.kind !== 'tree') continue;
-    const r = 0.05 * p.height;
+    const r = p.trunk ?? 0.05 * p.height;
     const half = 0.3 * p.height;
     const desc = rapier.ColliderDesc.cylinder(half, r).setTranslation(p.x, p.y + half, p.z).setFriction(0.7);
     field.colliders.push(world.createCollider(desc));

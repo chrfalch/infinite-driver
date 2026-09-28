@@ -86,6 +86,7 @@ export function makeRock(heightAt, x, z, size, rand, noise) {
 
 // Deterministic rocks for one chunk. Each rock has a world transform baked into its vertices.
 export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) {
+  if (heightAt.world === 'river') return generateRiverRocks(heightAt, cx, cz, { seed, count });
   const rand = mulberry32(hashChunk(seed, cx, cz));
   const noise = createNoise3D(rand);
   const rocks = [];
@@ -99,6 +100,44 @@ export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) 
     if (heightAt.canyon && Math.abs(heightAt(x + 1, z) - heightAt(x - 1, z)) + Math.abs(heightAt(x, z + 1) - heightAt(x, z - 1)) > 1.6) continue;
     const rock = makeRock(heightAt, x, z, size, rand, noise);
     if (heightAt.canyon) rock.red = true;
+    rocks.push(rock);
+  }
+  return rocks;
+}
+
+// Dry river: cobbles along the bed edges and on the banks, an odd one in the bed to steer round,
+// a few rocks in the forest; yellow-grey sandstone. The bed's slabs and ledges are in the ground
+// itself. Kept sparse, so about 15 rocks lie within the GPU tyres' 14 m rock range (48 at most).
+function riverRockSize(r, boulders) {
+  if (r < 0.7) return 0.2 + r * 0.35; // cobbles
+  if (r < 0.95 || !boulders) return 0.45 + (r - 0.7) * 1.2; // small rocks
+  return 0.75 + (r - 0.95) * 10; // an odd boulder on the banks
+}
+
+function generateRiverRocks(heightAt, cx, cz, { seed, count }) {
+  const rand = mulberry32(hashChunk(seed, cx, cz));
+  const noise = createNoise3D(rand);
+  const rocks = [];
+  for (let n = 0; n < count * 3; n++) {
+    const x = (cx + rand()) * CHUNK_SIZE;
+    const z = (cz + rand()) * CHUNK_SIZE;
+    const keep = rand();
+    const sizeRoll = rand();
+    const dist = heightAt.roadDistance(x, z);
+    let p;
+    let boulders = false;
+    if (dist < 2.8) p = 0.02;
+    else if (dist < 5) p = 0.3;
+    else if (dist < 10) [p, boulders] = [0.4, true];
+    else if (dist < 30) [p, boulders] = [0.05, true];
+    else p = 0.02;
+    if (keep > p) continue;
+    // Mid-bed rocks stay small enough to straddle or steer round.
+    const size = dist < 2.8 ? 0.2 + sizeRoll * 0.2 : riverRockSize(sizeRoll, boulders);
+    if (Math.hypot(x, z) < SPAWN_CLEAR_RADIUS + size) continue;
+    if (Math.abs(heightAt(x + 1, z) - heightAt(x - 1, z)) + Math.abs(heightAt(x, z + 1) - heightAt(x, z - 1)) > 1.2) continue;
+    const rock = makeRock(heightAt, x, z, size, rand, noise);
+    rock.sand = true;
     rocks.push(rock);
   }
   return rocks;

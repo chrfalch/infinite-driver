@@ -7,6 +7,9 @@ const DARK = new Color('#6f675d');
 // Red sandstone for the canyon.
 const RED_LIGHT = new Color('#cf8d62');
 const RED_DARK = new Color('#8f4a2d');
+// Yellow-grey sandstone for the dry river.
+const SAND_LIGHT = new Color('#d8c08e');
+const SAND_DARK = new Color('#8f7a55');
 const tmp = new Color();
 
 // All rocks of a chunk merged into one flat-shaded mesh.
@@ -25,6 +28,7 @@ export function rocksMeshData(rocks) {
   let o = 0;
   for (const rock of rocks) {
     if (rock.red) tmp.copy(RED_DARK).lerp(RED_LIGHT, rock.tint);
+    else if (rock.sand) tmp.copy(SAND_DARK).lerp(SAND_LIGHT, rock.tint);
     else tmp.copy(DARK).lerp(LIGHT, rock.tint);
     const v = rock.vertices;
     for (const [a, b, c] of rock.faces) {
