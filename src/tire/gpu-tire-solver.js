@@ -41,7 +41,8 @@ const Params = d.struct({
   beltStretch: d.f32, // growth past its rest radius a particle may have, as a fraction (0 = off)
   beltPull: d.f32, // fraction of the growth past beltStretch taken back per pass
   treadBend: d.f32, // per pass: how much the tread keeps its moulded curve (around and across)
-  sidewallShapeAxial: d.f32, // 0..1: share of shape memory kept sideways on the sidewalls
+  sidewallBulge: d.f32, // sidewall push out per metre the tread there is pushed in (at its widest)
+  halfWidth: d.f32, // the tyre's rest half-width (m)
   beadPull: d.f32,
   damping: d.f32,
   friction: d.f32,
@@ -96,6 +97,8 @@ export class GpuTireSolver {
     let maxR = 0;
     for (let i = 0; i < this.perTire; i++) maxR = Math.max(maxR, Math.hypot(restLocal[i * 3], restLocal[i * 3 + 1]));
     this.treadRadius = maxR - 0.06;
+    this.halfWidth = 0;
+    for (let i = 0; i < this.perTire; i++) this.halfWidth = Math.max(this.halfWidth, Math.abs(restLocal[i * 3 + 2]));
 
     const root = this.root;
     this.pos = root.createMutable(d.arrayOf(d.vec4f, this.count));
@@ -452,9 +455,19 @@ export class GpuTireSolver {
             let rel = p - center;
             let radial = normalize(rel - axleDir * dot(rel, axleDir) + vec3f(0.0, 1e-6, 0.0));
             shape -= radial * dot(shape, radial) * treadW * (1.0 - params.treadShapeRadial);
-            // The sidewalls may bow out sideways: the cords across keep their length, so where the
-            // tread is pushed in the sidewalls bulge, as a real tyre's do.
-            shape -= axleDir * dot(shape, axleDir) * (1.0 - treadW) * (1.0 - params.sidewallShapeAxial);
+            // Sidewall bulge: the cords across keep their length, so where the tread is pushed in the
+            // sidewalls bow out, as a real tyre's do. The pull toward the moulded shape then aims
+            // sidewallBulge times the tread's inward travel (at this point around the wheel) out
+            // sideways, most at the sidewall's widest.
+            if (params.sidewallBulge > 0.0 && treadW < 1.0) {
+              let crown = u32(i32(k / params.nv)) * params.nv;
+              let relC = getP(src, crown) - center;
+              let rCrown = length(relC - axleDir * dot(relC, axleDir));
+              let pushedIn = max(0.0, length(restOf(t, crown).xy) - rCrown);
+              let widest = clamp(abs(r0.z) / params.halfWidth, 0.0, 1.0);
+              let out = axleDir * sign(r0.z) * (params.sidewallBulge * pushedIn * widest * (1.0 - treadW));
+              shape += params.shapeStiffness * out;
+            }
             p += shape;
             // Belt bending: the tread keeps its moulded curve with its neighbours around the wheel
             // and across it, so the ground or a rock flattens a longer piece of the tread instead of
@@ -666,7 +679,8 @@ export class GpuTireSolver {
       beltStretch: s.beltStretch ?? 0,
       beltPull: s.beltPull ?? 0.3,
       treadBend: s.treadBend ?? 0,
-      sidewallShapeAxial: s.sidewallShapeAxial ?? 1,
+      sidewallBulge: s.sidewallBulge ?? 0,
+      halfWidth: this.halfWidth,
       beadPull: s.beadPull,
       damping: s.damping,
       friction: s.friction,

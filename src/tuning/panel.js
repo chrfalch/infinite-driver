@@ -324,6 +324,7 @@ function addTireFolder(gui, world, scheduleRebuild) {
     ['pressureKpa', 'Air pressure (kPa)', 10, 300, 5],
     ['friction', 'Rubber friction', 0.2, 2, 0.05],
     ['rubberMass', 'Rubber mass (kg)', 2, 40, 1],
+    ['sidewallBulge', 'Sidewall bulge', 0, 3, 0.05],
   ]) {
     folder.add(GPU_TIRE, key, min, max, step).name(label).onChange(apply(key));
   }
@@ -349,10 +350,9 @@ function addTireFolder(gui, world, scheduleRebuild) {
     ['bendStiffness', 'Bending (per pass)', 0, 1, 0.01],
     ['shapeStiffness', 'Shape memory (per pass)', 0, 0.3, 0.005],
     ['beadPull', 'Bead grip on rim (per pass)', 0.05, 1, 0.05],
-    ['beltStretch', 'Belt stretch limit (0 = off)', 0, 0.2, 0.005],
-    ['beltPull', 'Belt pull (per pass)', 0.05, 1, 0.05],
-    ['treadBend', 'Tread bending stiffness (per pass)', 0, 1, 0.05],
-    ['sidewallShapeAxial', 'Sidewall shape sideways (lower bulges more)', 0, 1, 0.05],
+    ['beltStretch', 'Belt stretch (0 = off)', 0, 0.2, 0.005],
+    ['beltPull', 'Belt pull', 0.05, 1, 0.05],
+    ['treadBend', 'Tread stiffness', 0, 0.3, 0.01],
     ['damping', 'Damping (1/s)', 0, 30, 0.5],
     ['contactRadius', 'Tread thickness (m)', 0.005, 0.06, 0.005],
     ['segmentsAround', 'Segments around', 16, 48, 1],
