@@ -1,4 +1,4 @@
-import { createNoise2D, createNoise3D } from 'simplex-noise';
+import { createNoise3D } from 'simplex-noise';
 import { mulberry32 } from './height.js';
 import { CHUNK_SIZE } from './chunk.js';
 import { BED_HALF_WIDTH } from './riverbed.js';
@@ -60,9 +60,10 @@ function pickSize(r) {
 }
 
 // One rock with its world transform baked into its vertices.
-export function makeRock(heightAt, x, z, size, rand, noise, bury = 0) {
+// `bury`: extra share of its height sunk into the ground; `squash`: height scale (flatter rocks).
+export function makeRock(heightAt, x, z, size, rand, noise, { bury = 0, squash = 1 } = {}) {
   const sx = size * (0.8 + rand() * 0.5);
-  const sy = size * (0.45 + rand() * 0.35);
+  const sy = size * (0.45 + rand() * 0.35) * squash;
   const sz = size * (0.8 + rand() * 0.5);
   const yaw = rand() * Math.PI * 2;
   const cos = Math.cos(yaw);
@@ -106,69 +107,87 @@ export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) 
   return rocks;
 }
 
-// Dry river: the bed is a rock garden of faceted rocks half buried in the sand, denser in some
-// stretches than others, with cobbles along the bed edges and banks and a few rocks in the forest;
-// yellow-grey sandstone. Bed rocks stand about 10-30 cm proud: the car has to slow down, but its
-// tyres can climb them. They are flagged `bed` (respawn drops the car onto them rather than
-// looking for a clear spot).
-const bedDensity = createNoise2D(mulberry32(31337));
-const BED_CELL = 1.0; // m, jittered grid of candidate bed rocks
+// Dry river: the bed is floored with big boulders (as big as the walls', 2-3.5 m across), sunk
+// deep and overlapping so their broad tops join into one uneven rock surface, and walled in by two
+// staggered rows of tall, steep boulders along each bank (1-2 m high) that the car cannot climb. A few
+// rocks lie in the forest beyond. Yellow-grey sandstone. Bed rocks are flagged `bed`: respawn drops
+// the car onto them rather than looking for a clear spot.
+const BED_CELL = 1.9; // m, jittered grid of bed boulders
+const WALL_CELL = 1.5; // m between boulders along a wall row
+const WALL_ROWS = [BED_HALF_WIDTH + 1.9, BED_HALF_WIDTH + 3.5]; // m from the bed centre line
 
-function riverRockSize(r, boulders) {
-  if (r < 0.7) return 0.2 + r * 0.35; // cobbles
-  if (r < 0.95 || !boulders) return 0.45 + (r - 0.7) * 1.2; // small rocks
-  return 0.75 + (r - 0.95) * 10; // an odd boulder on the banks
+// Moves (x, z) across the bed onto the line `target` metres from its centre (two Newton steps on
+// the distance field), or returns null if it is not near that line.
+function ontoRow(heightAt, x, z, target, reach) {
+  for (let k = 0; k < 2; k++) {
+    const d = heightAt.roadDistance(x, z);
+    if (k === 0 && Math.abs(d - target) > reach) return null;
+    const e = 0.3;
+    const gx = (heightAt.roadDistance(x + e, z) - heightAt.roadDistance(x - e, z)) / (2 * e);
+    const gz = (heightAt.roadDistance(x, z + e) - heightAt.roadDistance(x, z - e)) / (2 * e);
+    const g = Math.hypot(gx, gz) || 1;
+    x -= (gx / g) * (d - target);
+    z -= (gz / g) * (d - target);
+  }
+  return { x, z };
 }
 
 function generateRiverRocks(heightAt, cx, cz, { seed, count }) {
   const rand = mulberry32(hashChunk(seed, cx, cz));
   const noise = createNoise3D(rand);
   const rocks = [];
-  const steep = (x, z) => Math.abs(heightAt(x + 1, z) - heightAt(x - 1, z)) + Math.abs(heightAt(x, z + 1) - heightAt(x, z - 1)) > 1.2;
-  // Bed rocks.
+  const x0 = cx * CHUNK_SIZE;
+  const z0 = cz * CHUNK_SIZE;
+  const inChunk = (x, z) => x >= x0 && x < x0 + CHUNK_SIZE && z >= z0 && z < z0 + CHUNK_SIZE;
+  // The bed floor.
   const n = CHUNK_SIZE / BED_CELL;
   for (let j = 0; j < n; j++) {
     for (let i = 0; i < n; i++) {
-      const x = cx * CHUNK_SIZE + (i + 0.1 + rand() * 0.8) * BED_CELL;
-      const z = cz * CHUNK_SIZE + (j + 0.1 + rand() * 0.8) * BED_CELL;
-      const keep = rand();
+      const x = x0 + (i + 0.2 + rand() * 0.6) * BED_CELL;
+      const z = z0 + (j + 0.2 + rand() * 0.6) * BED_CELL;
       const sizeRoll = rand();
       const buryRoll = rand();
-      if (x >= (cx + 1) * CHUNK_SIZE || z >= (cz + 1) * CHUNK_SIZE) continue;
       const dist = heightAt.roadDistance(x, z);
-      if (dist > BED_HALF_WIDTH + 0.6) continue;
-      // Patchy: stretches of dense rock and of sparser, sandier going.
-      const density = 0.68 + 0.25 * bedDensity(x * 0.025, z * 0.025);
-      const edge = 1 - Math.max(0, Math.min(1, (dist - (BED_HALF_WIDTH - 0.8)) / 1.4));
-      if (keep > density * edge) continue;
-      const size = sizeRoll < 0.7 ? 0.28 + sizeRoll * 0.4 : sizeRoll < 0.95 ? 0.56 + (sizeRoll - 0.7) * 0.8 : 0.76 + (sizeRoll - 0.95) * 3;
-      // The biggest rocks lie toward the bed edges; mid-bed they stay under about 45 cm tall.
-      if (dist < 2.5 && size > 0.66) continue;
-      if (Math.hypot(x, z) < 5 + size) continue;
-      const rock = makeRock(heightAt, x, z, size, rand, noise, 0.2 + buryRoll * 0.25);
+      if (dist > BED_HALF_WIDTH + 0.8) continue;
+      if (Math.hypot(x, z) < 5) continue; // a small sandy patch where the car first starts
+      const size = 0.95 + sizeRoll * 0.4;
+      // Flattened and sunk deep: broad, gently domed tops that stand 15-45 cm proud of the sand.
+      const rock = makeRock(heightAt, x, z, size, rand, noise, { bury: 0.35 + buryRoll * 0.3, squash: 0.6 });
       rock.sand = true;
       rock.bed = true;
       rocks.push(rock);
     }
   }
-  // Cobbles and rocks on the banks and in the forest.
-  for (let k = 0; k < count * 3; k++) {
-    const x = (cx + rand()) * CHUNK_SIZE;
-    const z = (cz + rand()) * CHUNK_SIZE;
+  // Boulder walls: each row's candidates come from its own grid, moved onto the row line. The
+  // second row's grid is offset half a cell, so its boulders sit in the gaps of the first.
+  WALL_ROWS.forEach((row, r) => {
+    const off = r * WALL_CELL * 0.5;
+    const m = Math.ceil(CHUNK_SIZE / WALL_CELL) + 1;
+    for (let j = -1; j < m; j++) {
+      for (let i = -1; i < m; i++) {
+        const gx = x0 + off + (i + 0.5) * WALL_CELL;
+        const gz = z0 + off + (j + 0.5) * WALL_CELL;
+        const sizeRoll = rand();
+        const p = ontoRow(heightAt, gx, gz, row, WALL_CELL * 0.5);
+        if (!p || !inChunk(p.x, p.z)) continue;
+        // Tall, steep-sided boulders: a tyre meets a face it cannot climb, so the car bumps off
+        // instead of riding up and beaching on them.
+        const rock = makeRock(heightAt, p.x, p.z, 0.95 + sizeRoll * 0.35, rand, noise, { squash: 1.5 });
+        rock.sand = true;
+        rock.wall = true;
+        rocks.push(rock);
+      }
+    }
+  });
+  // A few rocks in the forest.
+  for (let k = 0; k < count; k++) {
+    const x = x0 + rand() * CHUNK_SIZE;
+    const z = z0 + rand() * CHUNK_SIZE;
     const keep = rand();
-    const sizeRoll = rand();
+    const size = 0.3 + rand() * rand() * 1.2;
     const dist = heightAt.roadDistance(x, z);
-    let p;
-    let boulders = false;
-    if (dist < BED_HALF_WIDTH + 0.6) continue;
-    else if (dist < 6) p = 0.35;
-    else if (dist < 10) [p, boulders] = [0.4, true];
-    else if (dist < 30) [p, boulders] = [0.05, true];
-    else p = 0.02;
-    if (keep > p) continue;
-    const size = riverRockSize(sizeRoll, boulders);
-    if (Math.hypot(x, z) < SPAWN_CLEAR_RADIUS + size) continue;
-    if (steep(x, z)) continue;
+    if (dist < WALL_ROWS[1] + 2 || keep > (dist < 30 ? 0.15 : 0.05)) continue;
+    if (Math.abs(heightAt(x + 1, z) - heightAt(x - 1, z)) + Math.abs(heightAt(x, z + 1) - heightAt(x, z - 1)) > 1.2) continue;
     const rock = makeRock(heightAt, x, z, size, rand, noise);
     rock.sand = true;
     rocks.push(rock);

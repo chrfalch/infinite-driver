@@ -2,7 +2,6 @@ import { createNoise2D } from 'simplex-noise';
 import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardNodeMaterial } from 'three/webgpu';
 import { attribute, dot, exp, fract, fwidth, mix, positionWorld, sin, smoothstep, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import { gravelShade } from '../terrain/gravel.js';
-import { slabColorTsl } from '../terrain/slabs.js';
 import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
 import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
@@ -50,27 +49,17 @@ const sandstone = uniform(0);
 const strata = mix(redStrata, yellowStrata, sandstone);
 const seam = smoothstep(0.86, 0.97, fract(layer)).mul(0.25);
 const rock = strata.mul(seam.oneMinus());
-// Dry river: sandstone slabs drawn per pixel where 'slab' (0..1 per vertex) says the bed and banks
-// have them. Slabs are bare rock, so they get no gravel drawn on them. Other worlds build the
-// material without the slab pattern (it costs nine cell lookups per pixel).
-function terrainColorNode(world) {
-  const gravel = gravelAmount.clamp(0, 1).sqrt().mul(attribute('gravel', 'float'));
-  if (world !== 'river') {
-    const ground = mix(attribute('color', 'vec3'), rock, attribute('steep', 'float'));
-    return vec4(mix(ground, roadColor, roadMask).mul(mix(vec3(1), gravelShade(), gravel)), 1);
-  }
-  const slabs = slabColorTsl();
-  const onSlab = slabs.w.mul(attribute('slab', 'float'));
-  const ground = mix(mix(attribute('color', 'vec3'), slabs.xyz, onSlab), rock, attribute('steep', 'float'));
-  return vec4(ground.mul(mix(vec3(1), gravelShade(), gravel.mul(onSlab.oneMinus()))), 1);
-}
-terrainMaterial.colorNode = terrainColorNode('canyon');
+const ground = mix(attribute('color', 'vec3'), rock, attribute('steep', 'float'));
+terrainMaterial.colorNode = vec4(
+  mix(ground, roadColor, roadMask).mul(
+    mix(vec3(1), gravelShade(), gravelAmount.clamp(0, 1).sqrt().mul(attribute('gravel', 'float'))),
+  ),
+  1,
+);
 
 // The world's rock colours for the shader (steep faces): red sandstone, or yellow for the river.
 export function setTerrainWorld(world) {
   sandstone.value = world === 'river' ? 1 : 0;
-  terrainMaterial.colorNode = terrainColorNode(world);
-  terrainMaterial.needsUpdate = true;
 }
 
 const DIRT = new Color('#c2ab82');
@@ -114,19 +103,16 @@ function canyonColor(s, slope, x, z, out) {
   return out;
 }
 
-// Dry river palette: pale yellow sand in the bed with a darker orange low channel, ochre sandstone
-// slabs, orange-yellow banks, and a forest floor of dry grass and leaf litter with red-brown soil.
+// Dry river palette: pale yellow sand in the bed (between its rocks) with a darker orange low
+// channel, orange-yellow banks, and a forest floor of dry grass and leaf litter with red-brown soil.
 const SAND = new Color('#ebd8a8');
 const CHANNEL = new Color('#c99a5e');
-const SLAB = new Color('#b3a58a');
-const SLAB_STAIN = new Color('#b8834f');
 const BANK = new Color('#d8ae6c');
 const LITTER = new Color('#b3a477');
 const LITTER_DARK = new Color('#978a62');
 const SOIL = new Color('#a0714c');
-const slabTone = new Color();
 
-function riverColor(s, slope, x, z, out, slabs = true) {
+function riverColor(s, slope, x, z, out) {
   const p = patchNoise(x * 0.05, z * 0.05) * 0.6 + patchNoise(x * 0.15, z * 0.15) * 0.4;
   out.copy(LITTER).lerp(LITTER_DARK, Math.min(1, Math.max(0, p * 0.8 + 0.35)));
   out.lerp(SOIL, Math.max(0, patchNoise(x * 0.03 + 7, z * 0.03) - 0.2) * 0.8);
@@ -135,11 +121,6 @@ function riverColor(s, slope, x, z, out, slabs = true) {
   out.lerp(BANK, bank * 0.85);
   // The bed: sand, darker in the low channel.
   out.lerp(tmp2.copy(SAND).lerp(CHANNEL, s.rut * 0.6), s.road);
-  // Slabs: ochre sandstone with orange stains.
-  if (slabs && s.slab > 0.005) {
-    slabTone.copy(SLAB).lerp(SLAB_STAIN, Math.max(0, fineNoise(x * 0.35 + 3, z * 0.35)) * 0.6);
-    out.lerp(slabTone, Math.min(1, s.slab / 0.03));
-  }
   out.offsetHSL(0, 0, fineNoise(x * 0.6, z * 0.6) * 0.025);
   return out;
 }
@@ -181,7 +162,6 @@ export function chunkMeshData(heightAt, heights, cx, cz, size = CHUNK_SIZE, res 
   const gravel = new Float32Array(n * n);
   const roadDist = new Float32Array(n * n).fill(99);
   const steep = new Float32Array(n * n);
-  const slab = new Float32Array(n * n);
   // Heights on the grid plus a one-sample border, so normals come from the grid (central
   // differences) and still match the neighbouring chunks.
   const m = n + 2;
@@ -208,10 +188,7 @@ export function chunkMeshData(heightAt, heights, cx, cz, size = CHUNK_SIZE, res 
       const slope = Math.hypot(dx, dz);
       if (heightAt.world === 'river') {
         // No gravel road paint in the river bed (roadDist stays far): the sand is in the colours.
-        // The slabs themselves are drawn by the shader.
-        const s = heightAt.sample(x, z);
-        riverColor(s, slope, x, z, tmp, false);
-        slab[i] = s.slabZone;
+        riverColor(heightAt.sample(x, z), slope, x, z, tmp);
       } else if (heightAt.sample) {
         const s = heightAt.sample(x, z);
         canyonColor(s, slope, x, z, tmp);
@@ -223,7 +200,7 @@ export function chunkMeshData(heightAt, heights, cx, cz, size = CHUNK_SIZE, res 
     }
   }
 
-  return { positions, normals, colors, gravel, roadDist, steep, slab };
+  return { positions, normals, colors, gravel, roadDist, steep };
 }
 
 // Triangle indices, the same for every chunk.
@@ -248,7 +225,7 @@ function indicesFor(res) {
   return indices;
 }
 
-export function createChunkMeshFromData({ positions, normals, colors, gravel, roadDist, steep, slab }, cx, cz, res = CHUNK_RES) {
+export function createChunkMeshFromData({ positions, normals, colors, gravel, roadDist, steep }, cx, cz, res = CHUNK_RES) {
   const indices = indicesFor(res);
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(positions, 3));
@@ -257,7 +234,6 @@ export function createChunkMeshFromData({ positions, normals, colors, gravel, ro
   geometry.setAttribute('gravel', new BufferAttribute(gravel, 1));
   geometry.setAttribute('roadDist', new BufferAttribute(roadDist, 1));
   geometry.setAttribute('steep', new BufferAttribute(steep, 1));
-  geometry.setAttribute('slab', new BufferAttribute(slab, 1));
   geometry.setIndex(new BufferAttribute(indices, 1));
   geometry.computeBoundingSphere();
 

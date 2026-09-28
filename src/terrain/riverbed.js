@@ -1,5 +1,5 @@
-// Dry river country: a winding, dry river bed of yellow sand and sandstone slabs, with low banks
-// of cobbles and open gum forest either side, rolling hills beyond. The bed climbs and dips
+// Dry river country: a winding, dry river bed floored with rocks (terrain/rocks.js), walled in by
+// rows of boulders along its low banks, with open gum forest either side, rolling hills beyond. The bed climbs and dips
 // gently along its length. Like the canyon, everything comes from one deterministic height
 // function, so physics colliders, the GPU tyre ground grid, tracks, soil and the render mesh agree.
 //
@@ -8,10 +8,9 @@
 // cross-section.
 //
 // Kept easy to drive: the bed floor stays under about 8° along the bed, bedrock ledges are at most
-// ~20 cm and ramp up over about a metre, slabs stand 5-20 cm proud with rounded edges.
+// ~20 cm and ramp up over about a metre.
 import { createNoise2D } from 'simplex-noise';
 import { mulberry32 } from './height.js';
-import { SLAB_INSET, SLAB_SAND_SHARE, SLAB_SEED, slabCells, slabHash } from './slabs.js';
 
 export const BED_HALF_WIDTH = 4; // m, the flat sandy bed either side of the centre line
 const SPACING = 360; // m between neighbouring beds
@@ -35,7 +34,7 @@ export function createRiverField(seed = 4711) {
   const floorNoise = createNoise2D(rand);
   const hillNoise = createNoise2D(rand);
   const ledgeNoise = createNoise2D(rand);
-  const slabNoise = createNoise2D(rand);
+  createNoise2D(rand); // unused; kept so the fields after it stay the same
   const bankNoise = createNoise2D(rand);
   const ridgeNoise = createNoise2D(rand);
 
@@ -58,20 +57,6 @@ export function createRiverField(seed = 4711) {
 
   // Bed floor height along the bed: rolling climbs and dips (up to about 6°, 8° briefly).
   const floorAt = (px, pz) => 9 * floorNoise(px * 0.003, pz * 0.003) + 1.2 * floorNoise(px * 0.011 + 5, pz * 0.011 + 3);
-
-  // Sandstone slabs (terrain/slabs.js): a plate stands a little proud of the sand, slightly tilted,
-  // with rounded edges (it rises over 0.8 m from its edge), and sand between plates.
-  function slabAt(x, z) {
-    const c = slabCells(x, z);
-    if (slabHash(c.hx, c.hz, SLAB_SEED + 2) < SLAB_SAND_SHARE) return 0;
-    const edge = (c.d2 - c.d1) / 2 - SLAB_INSET; // m inside the plate's edge
-    if (edge <= 0) return 0;
-    const tall = 0.04 + 0.12 * slabHash(c.hx, c.hz, SLAB_SEED + 3);
-    const tiltX = (slabHash(c.hx, c.hz, SLAB_SEED + 4) - 0.5) * 0.05;
-    const tiltZ = (slabHash(c.hx, c.hz, SLAB_SEED + 5) - 0.5) * 0.05;
-    const top = tall + tiltX * (x - c.px) + tiltZ * (z - c.pz) + 0.02 * slabNoise(x * 0.8, z * 0.8);
-    return Math.max(0, top) * smoothstep(0, 0.8, edge);
-  }
 
   // Everything the renderer needs at a point; heightAt uses only .h.
   function sample(x, z) {
@@ -114,10 +99,6 @@ export function createRiverField(seed = 4711) {
     const bankRise = 0.6 + 0.9 * (0.5 + 0.5 * bankNoise(x * 0.018, z * 0.018));
     const bank = smoothstep(BED_HALF_WIDTH, BED_HALF_WIDTH + 4.5, dist);
     h += bank * bankRise;
-    // Slabs: bedrock showing along the bank foot (the bed itself is loose rock, see rocks.js).
-    const slabs = smoothstep(BED_HALF_WIDTH - 0.5, BED_HALF_WIDTH + 1.5, dist) * (1 - smoothstep(8, 11, dist));
-    const slab = slabs > 0 ? slabAt(x, z) * slabs : 0;
-    h += slab;
     // Forest floor: rolling ground, with small bumps.
     const forest = smoothstep(8, 40, dist);
     const hill = 0.5 + 0.5 * hillNoise(x * 0.011, z * 0.011);
@@ -130,7 +111,7 @@ export function createRiverField(seed = 4711) {
       rock = ridge * r * 26;
       h += rock;
     }
-    return { h, road: inBed, rut: channel * inBed, dist, rock: rock + slab * 5, slab, slabZone: slabs, bank, cliff: ridge };
+    return { h, road: inBed, rut: channel * inBed, dist, rock, bank, cliff: ridge };
   }
 
   const heightAt = (x, z) => sample(x, z).h;

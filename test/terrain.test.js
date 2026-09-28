@@ -159,7 +159,7 @@ describe('dry river terrain', () => {
     }
   });
 
-  it('fills the bed with rocks, within the GPU tyres’ rock set', async () => {
+  it('floors the bed with boulders and walls it in, within the GPU tyres’ rock set', async () => {
     const { generateRocks } = await import('../src/terrain/rocks.js');
     const { MAX_ROCKS } = await import('../src/tire/gpu-tire-solver.js').catch(() => ({ MAX_ROCKS: 48 }));
     const rocks = [];
@@ -168,10 +168,20 @@ describe('dry river terrain', () => {
       const near = rocks.filter((r) => Math.hypot(r.x - p.x, r.z - p.z) < 6.5 + r.size * 2).length;
       expect(near).toBeLessThanOrEqual(MAX_ROCKS * 0.8);
     }
-    // The bed is full of rocks, but mid-bed they stay small enough to climb.
+    // The bed is floored with boulders whose tops stand at most about half a metre proud, and each
+    // bank is walled in by taller ones.
+    const top = (r) => {
+      let t = -Infinity;
+      for (let i = 1; i < r.vertices.length; i += 3) t = Math.max(t, r.vertices[i]);
+      return t - heightAt(r.x, r.z);
+    };
     const bed = rocks.filter((r) => r.bed);
-    expect(bed.length).toBeGreaterThan(300);
-    for (const r of rocks) if (heightAt.roadDistance(r.x, r.z) < 2.5) expect(r.size).toBeLessThan(0.67);
+    const wall = rocks.filter((r) => r.wall);
+    expect(bed.length).toBeGreaterThan(100);
+    expect(wall.length).toBeGreaterThan(100);
+    for (const r of bed) expect(top(r)).toBeLessThan(0.55);
+    const wallTops = wall.map(top).sort((a, b) => a - b);
+    expect(wallTops[Math.floor(wallTops.length * 0.1)]).toBeGreaterThan(0.7);
   });
 
   it('keeps trees out of the bed', async () => {

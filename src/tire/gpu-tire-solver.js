@@ -21,7 +21,7 @@ import { GRAVEL_HASH_WGSL, GRAVEL_HEIGHT_WGSL } from '../terrain/gravel.js';
 
 export const MAX_TIRES = 4;
 export const MAX_STEPS = 4; // physics steps per dispatch
-export const MAX_ROCKS = 128; // rocks near the car the tyres collide with (the dry river bed is full of them)
+export const MAX_ROCKS = 192; // rocks near the car the tyres collide with (the dry river bed is full of them)
 export const ROCK_FACES = 80;
 export const GROUND_N = 129; // ground height samples per side (16 m at 12.5 cm)
 const WG = 256;
@@ -41,6 +41,7 @@ const Params = d.struct({
   beadPull: d.f32,
   damping: d.f32,
   friction: d.f32,
+  rockFriction: d.f32, // rubber on bare rock (grippier than on dusty ground)
   radius: d.f32,
   relaxation: d.f32,
   soilStiffness: d.f32, // N/m per particle; 0 = hard ground
@@ -272,7 +273,7 @@ export class GpuTireSolver {
           let vRel = vTrial + f * (dt / m);
           let vt = vRel - n * dot(vRel, n);
           let speed = length(vt);
-          if (speed > 1e-6) { f -= (vt / speed) * min(speed * m / dt, params.friction * push); }
+          if (speed > 1e-6) { f -= (vt / speed) * min(speed * m / dt, params.rockFriction * push); }
           f += n * push;
         }
       }
@@ -616,6 +617,7 @@ export class GpuTireSolver {
       beadPull: s.beadPull,
       damping: s.damping,
       friction: s.friction,
+      rockFriction: s.rockFriction ?? s.friction,
       radius: s.contactRadius,
       relaxation: s.relaxation,
       // Soft ground is an explicit soil spring, capped below the stability limit for this substep.
