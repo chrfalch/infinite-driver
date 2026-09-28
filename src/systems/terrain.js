@@ -16,6 +16,8 @@ import { CHUNK_RES, CHUNK_SIZE, chunkKey, sampleChunk } from '../terrain/chunk.j
 import { generateRocks } from '../terrain/rocks.js';
 import { generatePlants } from '../terrain/vegetation.js';
 import { createVegetationMesh } from '../render/vegetation-mesh.js';
+import { createRockSheetMesh } from '../render/rock-surface.js';
+import { ROCK_COLLIDER_BANDS, rockSheetData, rockSheetTrimesh } from '../terrain/rock-sheet.js';
 import { timed } from '../perf.js';
 
 // ?rocks=<count per chunk> (default 70); ?rocks=0 gives an empty test ground.
@@ -102,6 +104,13 @@ function addGroundCollider(physics, chunk) {
   const desc = rapier.ColliderDesc.trimesh(chunkVertices(chunk.heights, chunk.cx, chunk.cz), chunkIndices()).setFriction(1.0);
   chunk.collider = world.createCollider(desc);
   chunk.collidersEnabled = true;
+  // The dry river's rock sheet lies on top of the ground (all bands at once here; the physics
+  // worker spreads them out).
+  chunk.sheet = [];
+  for (let band = 0; band < ROCK_COLLIDER_BANDS; band++) {
+    const mesh = rockSheetTrimesh(chunk.heightAt, chunk.cx, chunk.cz, band);
+    if (mesh) chunk.sheet.push(world.createCollider(rapier.ColliderDesc.trimesh(mesh.vertices, mesh.indices).setFriction(1.3)));
+  }
 }
 
 // Bushes and trees are generated on first need (with the rock mesh or the rock colliders), so a new
@@ -111,17 +120,22 @@ function plantsOf(field) {
   return field.plants;
 }
 
-function addRockColliders(physics, field) {
+// Rock hulls are built ROCK_BATCH per call (the dry river has several hundred per chunk); the
+// tree trunks come with the last batch. `all` builds everything now.
+const ROCK_BATCH = 150;
+function addRockColliders(physics, field, all = false) {
   const { rapier, world } = physics;
-  field.colliders = [];
-  for (const rock of field.rocks) {
-    const desc = rapier.ColliderDesc.convexHull(rock.vertices);
-    if (desc) field.colliders.push(world.createCollider(desc.setFriction(0.9)));
+  field.nextRock ??= 0;
+  const end = all ? field.rocks.length : Math.min(field.rocks.length, field.nextRock + ROCK_BATCH);
+  for (; field.nextRock < end; field.nextRock++) {
+    const desc = rapier.ColliderDesc.convexHull(field.rocks[field.nextRock].vertices);
+    if (desc) field.colliders.push(world.createCollider(desc.setFriction(1.3)));
   }
+  if (field.nextRock < field.rocks.length) return;
   // Tree trunks are solid (a thin cylinder); bushes are only drawn, the car drives through them.
   for (const p of plantsOf(field)) {
     if (p.kind !== 'tree') continue;
-    const r = 0.05 * p.height;
+    const r = p.trunk ?? 0.05 * p.height;
     const half = 0.3 * p.height;
     const desc = rapier.ColliderDesc.cylinder(half, r).setTranslation(p.x, p.y + half, p.z).setFriction(0.7);
     field.colliders.push(world.createCollider(desc));
@@ -134,16 +148,20 @@ function setCollidersEnabled(chunk, field, enabled) {
   chunk.collidersEnabled = enabled;
   if (!chunk.collider && !field.colliders.length) return;
   chunk.collider?.setEnabled(enabled);
+  for (const c of chunk.sheet ?? []) c.setEnabled(enabled);
   for (const c of field.colliders) c.setEnabled(enabled);
 }
 
 function removeColliders(physics, chunk, field) {
   if (!physics.world) return;
   if (chunk.collider) physics.world.removeCollider(chunk.collider, false);
+  for (const c of chunk.sheet ?? []) physics.world.removeCollider(c, false);
   for (const c of field.colliders) physics.world.removeCollider(c, false);
   chunk.collider = null;
+  chunk.sheet = null;
   field.colliders = [];
   field.collidersBuilt = false;
+  field.nextRock = 0;
 }
 
 function disposeView(object) {
@@ -196,7 +214,7 @@ export function streamTerrain(world, { force = false } = {}) {
       setCollidersEnabled(chunk, field, true);
       if (force) {
         if (!chunk.collider) addGroundCollider(physics, chunk);
-        if (!field.collidersBuilt) addRockColliders(physics, field);
+        if (!field.collidersBuilt) addRockColliders(physics, field, true);
       } else if (!chunk.collider && dist < groundDist) {
         groundJob = chunk;
         groundDist = dist;
@@ -267,7 +285,7 @@ export function streamTerrain(world, { force = false } = {}) {
 // `data`: the chunk as built by the chunk worker, or null to build it here.
 function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, near }, data = null) {
   const heights = data?.heights ?? timed('terrain.heights', () => sampleChunk(heightAt, cx, cz));
-  const chunk = { cx, cz, heights, collider: null, collidersEnabled: true };
+  const chunk = { cx, cz, heights, heightAt, collider: null, sheet: null, collidersEnabled: true };
   const field = {
     rocks: data?.rocks ?? timed('terrain.genRocks', () => generateRocks(heightAt, cx, cz, { count: ROCK_COUNT })),
     colliders: [],
@@ -279,10 +297,12 @@ function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, ne
     cz,
   };
   if (physics.world && near && ground) addGroundCollider(physics, chunk);
-  if (physics.world && near && rocks) addRockColliders(physics, field);
+  if (physics.world && near && rocks) addRockColliders(physics, field, true);
   const object = new Group();
   object.name = `chunk ${cx},${cz}`;
   object.add(data ? createChunkMeshFromData(data.mesh, cx, cz) : timed('terrain.chunkMesh', () => createChunkMesh(heightAt, heights, cx, cz)));
+  const sheet = createRockSheetMesh(data ? data.sheet : timed('terrain.rockSheet', () => rockSheetData(heightAt, cx, cz)));
+  if (sheet) object.add(sheet);
   scene.add(object);
   const entity = world.spawn(TerrainChunk(chunk), RockField(field), View({ object }));
   // The worker's chunk comes with its rock mesh data and plants, so it is finished right away.

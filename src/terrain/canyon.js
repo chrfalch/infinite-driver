@@ -159,5 +159,6 @@ export function createCanyonField(seed = 2024) {
     return dx >= 0 ? Math.atan2(-dz, dx) : Math.atan2(dz, -dx);
   };
   heightAt.canyon = true;
+  heightAt.world = 'canyon';
   return heightAt;
 }

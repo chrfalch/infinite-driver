@@ -190,12 +190,13 @@ const HALF_LENGTH = 2.5;
 const HALF_WIDTH = 1.25;
 
 // Heights over the car's footprint at (x, z) facing yaw: corners, edge midpoints and centre.
-function footprint(heightAt, x, z, yaw) {
+export function footprint(heightAt, x, z, yaw) {
   const c = Math.cos(yaw);
   const s = Math.sin(yaw);
   const hs = [];
-  for (const a of [-1, 0, 1]) {
-    for (const b of [-1, 0, 1]) {
+  // A 5 x 5 grid, fine enough for the dry river's rock humps.
+  for (const a of [-1, -0.5, 0, 0.5, 1]) {
+    for (const b of [-1, -0.5, 0, 0.5, 1]) {
       const lx = a * HALF_LENGTH;
       const lz = b * HALF_WIDTH;
       // Local +x is forward (world (cos, -sin) for a yaw about +y), local +z to the right.
@@ -222,9 +223,11 @@ function obstaclesNear(world, x, z, radius) {
 // has roads, otherwise the nearest level patch, clear of rocks and trees. The car faces along the
 // road (whichever way is closer to its old heading). Falls back to the old spot.
 export function findSpawnSpot(world, heightAt, x0, z0, yaw0) {
+  // The dry river's rock bed is never level: allow its humps.
+  const tolerance = heightAt.rockAt ? 0.8 : 0.35;
   const level = (x, z, yaw) => {
     const f = footprint(heightAt, x, z, yaw);
-    return f.max - f.min < 0.35;
+    return f.max - f.min < tolerance;
   };
   const clear = (x, z) => obstaclesNear(world, x, z, 6).every((o) => Math.hypot(o.x - x, o.z - z) > o.r + HALF_LENGTH + 0.3);
   const facing = (h) => {

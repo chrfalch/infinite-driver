@@ -20,8 +20,9 @@ export function updateSoil(world) {
   const cellArea = deformation ? deformation.cell * deformation.cell : 1;
   const soilPerClump = 0.35; // share of a clump's volume that is moved in the height map
 
+  // Soil landing on bare rock (the dry river's rock sheet) does not pile up.
   const land = (x, z, size) => {
-    if (deformation) deformation.add(x, z, (size * size * size * 2 * soilPerClump) / cellArea);
+    if (deformation && !heightAt.rockAt?.(x, z)) deformation.add(x, z, (size * size * size * 2 * soilPerClump) / cellArea);
   };
   particles.update(delta, surfaceAt, land);
 
@@ -44,7 +45,8 @@ export function updateSoil(world) {
 
   for (let i = 0; i < 4; i++) {
     const contact = contacts[i];
-    if (!contact) {
+    // Bare rock throws no soil.
+    if (!contact || heightAt.rockAt?.(contact.x, contact.z)) {
       soil.carry[i] = 0;
       continue;
     }

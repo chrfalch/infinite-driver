@@ -90,10 +90,16 @@ export function updateTracks(world) {
       contact = p && { x: p.x, z: p.z, depth: 0 };
       width = CAR.wheelWidth * 0.9;
     }
+    // Bare rock takes no tracks and cannot be compacted.
+    const onRock = contact && heightAt.rockAt?.(contact.x, contact.z);
     trackState.contacts[i] = contact;
     if (i === 0) {
       if (contact && lastC0) sample('tracks.segM', Math.hypot(contact.x - lastC0.x, contact.z - lastC0.z));
       lastC0 = contact;
+    }
+    if (onRock) {
+      tracks.lift(i);
+      continue;
     }
     if (!contact) {
       if (tracks.state[i].last) count('tracks.breakNoContact');
@@ -104,8 +110,9 @@ export function updateTracks(world) {
     const strength = Math.min(1, 0.25 + contact.depth * 5 + softness * 0.5);
     if (GROUND.tracks) tracks.add(i, heightAt, contact, right, width, strength, maxGap);
   }
-  if (deformation && pressed.length) {
-    compactSoil(deformation, pressed, {
+  const soilPressed = heightAt.rockAt ? pressed.filter((p) => !heightAt.rockAt(p.x, p.z)) : pressed;
+  if (deformation && soilPressed.length) {
+    compactSoil(deformation, soilPressed, {
       softness,
       dt: delta,
       right,

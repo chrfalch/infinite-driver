@@ -96,9 +96,13 @@ export function effectiveTire(tire, performance) {
   if (!performance) return tire;
   return { ...tire, pgsIterations: 1, substeps: 1, segmentsAround: 20, segmentsAcross: 6 };
 }
+// Tyre friction on rock, as a multiple of the tyre's friction setting.
+export const ROCK_GRIP = 2;
+
 export function effectiveGpuTire(gpu, performance, ground = GROUND) {
   // Loose soil grips less than firm ground.
-  const withSoil = { ...gpu, soilStiffness: soilStiffness(ground.softness), friction: gpu.friction * (1 - 0.4 * ground.softness), gravel: ground.gravel };
+  // Bare rock grips better than dusty ground (rubber on sandstone), and soil does not soften it.
+  const withSoil = { ...gpu, soilStiffness: soilStiffness(ground.softness), friction: gpu.friction * (1 - 0.4 * ground.softness), rockFriction: gpu.friction * ROCK_GRIP, gravel: ground.gravel };
   if (!performance) return withSoil;
   return { ...withSoil, substeps: Math.min(gpu.substeps, 3), iterations: Math.min(gpu.iterations, 6), segmentsAround: 32, segmentsAcross: 8 };
 }

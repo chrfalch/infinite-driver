@@ -1,5 +1,6 @@
 import { createNoise2D } from 'simplex-noise';
 import { createCanyonField } from './canyon.js';
+import { createRiverField } from './riverbed.js';
 
 // Small seeded PRNG so the world is the same on every load.
 export function mulberry32(seed) {
@@ -16,6 +17,7 @@ export function mulberry32(seed) {
 export function createHeightField({ seed = 1337, mode = 'flat' } = {}) {
   if (mode === 'flat') return () => 0;
   if (mode === 'canyon') return createCanyonField(seed);
+  if (mode === 'river') return createRiverField();
   // Test slope ('ramp:20'): flat for x < 6 m, then a steady climb of that many degrees along +x.
   if (mode.startsWith('ramp')) {
     const grade = Math.tan(((Number(mode.split(':')[1]) || 20) * Math.PI) / 180);

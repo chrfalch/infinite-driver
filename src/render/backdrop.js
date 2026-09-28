@@ -9,15 +9,25 @@ import { mulberry32 } from '../terrain/height.js';
 export const HORIZON = new Color('#e3cfb4');
 const SKY_TOP = new Color('#4f94d8');
 
+// Per world: sky colours and the two mountain rings' foot and top colours.
+const LOOKS = {
+  canyon: { horizon: HORIZON, skyTop: SKY_TOP, far: ['#8a3f24', '#e08a52'], near: ['#8a3f24', '#e08a52'], steps: 4, scale: 1 },
+  // Dry river: a deeper blue sky, blue-grey forested hills far off and a yellow sandstone escarpment.
+  river: { horizon: new Color('#d3dde2'), skyTop: new Color('#2f78cf'), far: ['#56675e', '#8d9c93'], near: ['#5d6148', '#b59a66'], steps: 3, scale: 0.5 },
+};
+export function worldLook(world) {
+  return LOOKS[world] ?? LOOKS.canyon;
+}
+
 // One ring of mountains: a strip of flat-shaded quads around the target at radius ~r, with a
 // mesa-like skyline (terraced noise), coloured from shadowed red at the foot to lit sandstone.
-function mountainRing({ radius, height, seed, haze, segments = 180 }) {
+function mountainRing({ radius, height, seed, haze, colors: [footColor, topColor], horizon, steps: terraces = 4, segments = 180 }) {
   const noise = createNoise2D(mulberry32(seed));
   const rows = 4;
   const positions = [];
   const colors = [];
-  const foot = new Color('#8a3f24');
-  const top = new Color('#e08a52');
+  const foot = new Color(footColor);
+  const top = new Color(topColor);
   const c = new Color();
   const profile = [];
   for (let i = 0; i <= segments; i++) {
@@ -26,7 +36,7 @@ function mountainRing({ radius, height, seed, haze, segments = 180 }) {
     const z = Math.sin(a);
     const n = 0.5 + 0.5 * noise(x * 1.6, z * 1.6) * 0.7 + 0.5 * noise(x * 5, z * 5) * 0.3;
     // Terrace the skyline into mesas and buttes.
-    const steps = 4;
+    const steps = terraces;
     const t = Math.floor(n * steps) / steps + Math.max(0, (n * steps) % 1 - 0.75) * 4 / steps;
     const r = radius * (1 + 0.08 * noise(x * 3 + 9, z * 3));
     profile.push({ x: x * r, z: z * r, h: height * (0.25 + t) });
@@ -34,7 +44,7 @@ function mountainRing({ radius, height, seed, haze, segments = 180 }) {
   const vertex = (p, row) => {
     const f = row / (rows - 1);
     positions.push(p.x, -30 + (p.h + 30) * f, p.z);
-    c.copy(foot).lerp(top, f * 0.9).lerp(HORIZON, haze);
+    c.copy(foot).lerp(top, f * 0.9).lerp(horizon, haze);
     colors.push(c.r, c.g, c.b);
   };
   for (let i = 0; i < segments; i++) {
@@ -57,22 +67,24 @@ function mountainRing({ radius, height, seed, haze, segments = 180 }) {
   return new Mesh(geometry, material);
 }
 
-export function createBackdrop(scene) {
+export function createBackdrop(scene, world = 'canyon') {
+  const look = worldLook(world);
   const group = new Group();
   group.name = 'backdrop';
   const skyMaterial = new MeshBasicNodeMaterial({ side: BackSide, fog: false, depthWrite: false });
   const up = normalize(positionLocal).y;
-  skyMaterial.colorNode = mix(vec3(HORIZON.r, HORIZON.g, HORIZON.b), vec3(SKY_TOP.r, SKY_TOP.g, SKY_TOP.b), smoothstep(-0.02, 0.45, up));
+  skyMaterial.colorNode = mix(vec3(look.horizon.r, look.horizon.g, look.horizon.b), vec3(look.skyTop.r, look.skyTop.g, look.skyTop.b), smoothstep(-0.02, 0.45, up));
   const sky = new Mesh(new SphereGeometry(1500, 32, 16), skyMaterial);
   sky.renderOrder = -2;
   group.add(sky);
-  const far = mountainRing({ radius: 900, height: 170, seed: 5, haze: 0.55 });
-  const near = mountainRing({ radius: 520, height: 110, seed: 11, haze: 0.28 });
+  const far = mountainRing({ radius: 900, height: 170 * look.scale, seed: 5, haze: 0.55, colors: look.far, horizon: look.horizon, steps: look.steps });
+  const near = mountainRing({ radius: 520, height: 110 * look.scale, seed: 11, haze: 0.28, colors: look.near, horizon: look.horizon, steps: look.steps });
   group.add(far, near);
   group.visible = false;
   scene.add(group);
   return {
     group,
+    horizon: look.horizon,
     // Keep the sky centred on the camera and the mountains around the car.
     update(camera, target, visible) {
       group.visible = visible;

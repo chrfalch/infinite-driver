@@ -1,5 +1,5 @@
 import { CameraTarget, HeightField, Render, Time, Transform, Vehicle } from '../ecs/traits.js';
-import { HORIZON, createBackdrop } from '../render/backdrop.js';
+import { createBackdrop } from '../render/backdrop.js';
 import { VIEW_HEIGHT } from '../render/scene.js';
 
 // True isometric by default: the camera looks down the (-1, -1, -1) diagonal (azimuth 45°,
@@ -157,7 +157,7 @@ export function followCamera(world) {
   // the car), kept above the ground, with haze and the backdrop on the horizon.
   const render = world.get(Render);
   const low = view.elevation < PERSPECTIVE_BELOW;
-  backdrop ??= createBackdrop(render.scene);
+  backdrop ??= createBackdrop(render.scene, world.get(HeightField)?.heightAt?.world);
   orthoFog ??= { color: render.scene.fog.color.clone(), near: render.scene.fog.near, far: render.scene.fog.far, background: render.scene.background };
   if (low) {
     const persp = render.perspective;
@@ -171,10 +171,10 @@ export function followCamera(world) {
     persp.position.set(px, py, pz);
     persp.lookAt(state.x, state.y + 0.6, state.z);
     render.activeCamera = persp;
-    render.scene.fog.color.copy(HORIZON);
+    render.scene.fog.color.copy(backdrop.horizon);
     render.scene.fog.near = 80;
     render.scene.fog.far = 210;
-    render.scene.background = HORIZON;
+    render.scene.background = backdrop.horizon;
   } else {
     render.activeCamera = camera;
     render.scene.fog.color.copy(orthoFog.color);

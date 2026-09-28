@@ -41,6 +41,7 @@ const Params = d.struct({
   beadPull: d.f32,
   damping: d.f32,
   friction: d.f32,
+  rockFriction: d.f32, // rubber on bare rock (grippier than on dusty ground)
   radius: d.f32,
   relaxation: d.f32,
   soilStiffness: d.f32, // N/m per particle; 0 = hard ground
@@ -101,14 +102,16 @@ export class GpuTireSolver {
     // Uniform, to stay within the default 8 storage buffers per shader stage (Safari included).
     this.hubs = root.createUniform(d.arrayOf(Hub, MAX_TIRES));
     this.params = root.createUniform(Params);
-    this.ground = root.createReadonly(d.arrayOf(d.f32, GROUND_N * GROUND_N));
+    // Ground grid: GROUND_N² heights, then GROUND_N² bare-rock flags (1 = rock: grippy, hard, no
+    // gravel), in one buffer to stay within the storage buffer limit.
+    this.ground = root.createReadonly(d.arrayOf(d.f32, GROUND_N * GROUND_N * 2));
     // Rocks: MAX_ROCKS bounding spheres followed by MAX_ROCKS × ROCK_FACES face planes.
     this.rocks = root.createReadonly(d.arrayOf(d.vec4f, MAX_ROCKS * (ROCK_FACES + 1)));
 
     const restData = new Float32Array(this.perTire * 4);
     for (let i = 0; i < this.perTire; i++) restData.set([restLocal[i * 3], restLocal[i * 3 + 1], restLocal[i * 3 + 2], 0], i * 4);
     this.rest.write(restData);
-    this.ground.write(new Float32Array(GROUND_N * GROUND_N));
+    this.ground.write(new Float32Array(GROUND_N * GROUND_N * 2));
     this.groundOrigin = { x: -8, z: -8 };
     this.groundCell = 0.125;
     this.rockCount = 0;
@@ -189,13 +192,22 @@ export class GpuTireSolver {
       let fx = gx - f32(ix);
       let fz = gz - f32(iz);
       let n = ${GROUND_N}u;
+      // No loose gravel on bare rock.
+      let stonesHere = stones * (1.0 - ground[n * n + iz * n + ix]);
       let h00 = ground[iz * n + ix];
       let h10 = ground[iz * n + ix + 1u];
       let h01 = ground[(iz + 1u) * n + ix];
       let h11 = ground[(iz + 1u) * n + ix + 1u];
-      if (fx + fz <= 1.0) { return h00 + (h10 - h00) * fx + (h01 - h00) * fz + stones; }
-      return h11 + (h01 - h11) * (1.0 - fx) + (h10 - h11) * (1.0 - fz) + stones;
+      if (fx + fz <= 1.0) { return h00 + (h10 - h00) * fx + (h01 - h00) * fz + stonesHere; }
+      return h11 + (h01 - h11) * (1.0 - fx) + (h10 - h11) * (1.0 - fz) + stonesHere;
     }`.$uses({ params: this.params, ground: this.ground, gravelHeight });
+    // 1 on bare rock (the nearest grid cell's flag), else 0.
+    const groundRock = tgpu.fn([d.f32, d.f32], d.f32)/* wgsl */ `(x, z) {
+      let last = f32(${GROUND_N - 1});
+      let ix = u32(clamp(round((x - params.groundOriginX) / params.groundCell), 0.0, last));
+      let iz = u32(clamp(round((z - params.groundOriginZ) / params.groundCell), 0.0, last));
+      return ground[${GROUND_N * GROUND_N}u + iz * ${GROUND_N}u + ix];
+    }`.$uses({ params: this.params, ground: this.ground });
 
     // Distance constraints for particle k of tyre t (one Jacobi pass).
     const constrain = tgpu.fn([d.u32, d.u32, d.u32], d.vec3f)/* wgsl */ `(t, k, src) {
@@ -237,7 +249,8 @@ export class GpuTireSolver {
     // vTrial is the particle velocity after all other forces this substep.
     const contactForce = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32], d.vec3f)/* wgsl */ `(x, vTrial, m, dt) {
       var f = vec3f(0.0);
-      let soft = params.soilStiffness > 0.0;
+      // Bare rock does not give like soil.
+      let soft = params.soilStiffness > 0.0 && groundRock(x.x, x.z) < 0.5;
       let depth = groundHeight(x.x, x.z) + params.radius - x.y;
       if (depth > 0.0) {
         var push = select(params.groundStiffness, params.soilStiffness, soft) * depth;
@@ -272,22 +285,22 @@ export class GpuTireSolver {
           let vRel = vTrial + f * (dt / m);
           let vt = vRel - n * dot(vRel, n);
           let speed = length(vt);
-          if (speed > 1e-6) { f -= (vt / speed) * min(speed * m / dt, params.friction * push); }
+          if (speed > 1e-6) { f -= (vt / speed) * min(speed * m / dt, params.rockFriction * push); }
           f += n * push;
         }
       }
       return f;
-    }`.$uses({ params: this.params, rocks: this.rocks, groundHeight });
+    }`.$uses({ params: this.params, rocks: this.rocks, groundHeight, groundRock });
 
     // Safety floor: if a particle is ever driven deep into the ground, put it back (rare; the
     // contact springs normally hold it).
     const floorClamp = tgpu.fn([d.vec3f], d.vec3f)/* wgsl */ `(pIn) {
       var p = pIn;
-      let floorDepth = select(0.06, params.maxSink, params.soilStiffness > 0.0);
+      let floorDepth = select(0.06, params.maxSink, params.soilStiffness > 0.0 && groundRock(p.x, p.z) < 0.5);
       let floor = groundHeight(p.x, p.z) + params.radius - floorDepth;
       if (p.y < floor) { p.y = floor; }
       return p;
-    }`.$uses({ params: this.params, groundHeight });
+    }`.$uses({ params: this.params, groundHeight, groundRock });
 
     // How far a particle must move to get out of any rock, back to 1 cm inside the contact skin
     // (the contact spring's own working depth). The rock contact is a penalty force in the
@@ -453,7 +466,8 @@ export class GpuTireSolver {
           if (push > 0.0) {
             let slide = vec2f(p.x - pr.x, p.z - pr.z);
             let len = length(slide);
-            let limit = params.friction * push * dt * dt / m;
+            let mu = select(params.friction, params.rockFriction, groundRock(p.x, p.z) > 0.5);
+            let limit = mu * push * dt * dt / m;
             var cut = slide;
             if (len > limit) { cut = slide * (limit / len); }
             p.x -= cut.x;
@@ -553,6 +567,7 @@ export class GpuTireSolver {
       params: this.params,
       hubs: this.hubs,
       groundHeight,
+      groundRock,
       pos: this.pos,
       prev: this.prev,
       vel: this.vel,
@@ -616,6 +631,7 @@ export class GpuTireSolver {
       beadPull: s.beadPull,
       damping: s.damping,
       friction: s.friction,
+      rockFriction: s.rockFriction ?? s.friction,
       radius: s.contactRadius,
       relaxation: s.relaxation,
       // Soft ground is an explicit soil spring, capped below the stability limit for this substep.
@@ -649,8 +665,9 @@ export class GpuTireSolver {
   }
 
   // Ground heights on a GROUND_N² grid starting at (originX, originZ) with the given spacing.
-  setGround(heights, originX, originZ, cell) {
-    this.ground.write(heights);
+  // `grid`: GROUND_N² heights followed by GROUND_N² bare-rock flags.
+  setGround(grid, originX, originZ, cell) {
+    this.ground.write(grid);
     this.groundOrigin = { x: originX, z: originZ };
     this.groundCell = cell;
     if (this.settings) this.setParams(this.settings, this.dt);

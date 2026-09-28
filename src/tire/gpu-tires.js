@@ -30,7 +30,8 @@ const RECENTRE = 1; // metres the car may drift from the grid centre before it i
 // Samples the ground (terrain plus ruts) on the solver's grid around (x, z). The grid spacing
 // matches the deformation map, so ruts are read cell for cell. The grid only moves when the car is
 // RECENTRE metres off its centre (terrain heights of the overlap are kept), and rut changes are
-// patched in from the deformation's dirty rectangle, so most frames do little or nothing.
+// patched in from the deformation's dirty rectangle, so most frames do little or nothing. Each cell
+// also carries a bare-rock flag (heightAt.rockAt; the dry river's rock sheet) for the solver.
 export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell = 0.125) {
   const N = GROUND_N;
   const half = ((N - 1) * cell) / 2;
@@ -42,9 +43,19 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
   if (!recentre && g.version === version) return;
 
   if (!g) {
-    g = solver.groundCache = { base: new Float32Array(N * N), heights: new Float32Array(N * N), spare: new Float32Array(N * N) };
+    // grid: the heights (terrain plus ruts) then the rock flags, as the solver takes them.
+    const grid = new Float32Array(N * N * 2);
+    g = solver.groundCache = {
+      base: new Float32Array(N * N),
+      spare: new Float32Array(N * N),
+      rock: new Float32Array(N * N),
+      spareRock: new Float32Array(N * N),
+      grid,
+      heights: grid.subarray(0, N * N),
+    };
   }
   const { heights } = g;
+  const rockAt = heightAt.rockAt;
   if (recentre) {
     const ix0 = Math.round((x - half) / cell);
     const iz0 = Math.round((z - half) / cell);
@@ -52,6 +63,7 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
     const oz = iz0 * cell;
     // Terrain heights: keep the overlap with the previous grid, sample the rest.
     const base = g.spare;
+    const rock = g.spareRock;
     const reuse = compatible && g.cell === cell;
     const sx = reuse ? ix0 - g.ix0 : N;
     const sz = reuse ? iz0 - g.iz0 : N;
@@ -60,11 +72,20 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
       const rowReuse = pz >= 0 && pz < N;
       for (let ix = 0; ix < N; ix++) {
         const px = ix + sx;
-        base[iz * N + ix] = rowReuse && px >= 0 && px < N ? g.base[pz * N + px] : heightAt(ox + ix * cell, oz + iz * cell);
+        if (rowReuse && px >= 0 && px < N) {
+          base[iz * N + ix] = g.base[pz * N + px];
+          rock[iz * N + ix] = g.rock[pz * N + px];
+        } else {
+          base[iz * N + ix] = heightAt(ox + ix * cell, oz + iz * cell);
+          rock[iz * N + ix] = rockAt?.(ox + ix * cell, oz + iz * cell) ? 1 : 0;
+        }
       }
     }
     g.spare = g.base;
     g.base = base;
+    g.spareRock = g.rock;
+    g.rock = rock;
+    g.grid.set(rock, N * N);
     g.ix0 = ix0;
     g.iz0 = iz0;
     g.cell = cell;
@@ -96,7 +117,7 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
     deformation.accumulate(g.ix0 + x0, g.iz0 + z0, nx, z1 - z0 + 1, heights, N, z0 * N + x0);
   }
   g.version = version;
-  solver.setGround(heights, g.ix0 * cell, g.iz0 * cell, cell);
+  solver.setGround(g.grid, g.ix0 * cell, g.iz0 * cell, cell);
   solver.groundReady = true;
   solver.groundVersion = version;
 }

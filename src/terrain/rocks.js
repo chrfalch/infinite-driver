@@ -1,6 +1,7 @@
 import { createNoise3D } from 'simplex-noise';
 import { mulberry32 } from './height.js';
 import { CHUNK_SIZE } from './chunk.js';
+import { ROCK_REACH } from './riverbed.js';
 
 const SPAWN_CLEAR_RADIUS = 10;
 
@@ -86,6 +87,7 @@ export function makeRock(heightAt, x, z, size, rand, noise) {
 
 // Deterministic rocks for one chunk. Each rock has a world transform baked into its vertices.
 export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) {
+  if (heightAt.world === 'river') return generateRiverRocks(heightAt, cx, cz, { seed, count });
   const rand = mulberry32(hashChunk(seed, cx, cz));
   const noise = createNoise3D(rand);
   const rocks = [];
@@ -99,6 +101,27 @@ export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) 
     if (heightAt.canyon && Math.abs(heightAt(x + 1, z) - heightAt(x - 1, z)) + Math.abs(heightAt(x, z + 1) - heightAt(x, z - 1)) > 1.6) continue;
     const rock = makeRock(heightAt, x, z, size, rand, noise);
     if (heightAt.canyon) rock.red = true;
+    rocks.push(rock);
+  }
+  return rocks;
+}
+
+// Dry river: the bed and its walls are one rock sheet in the ground itself (terrain/riverbed.js),
+// so the only loose rocks are a few in the forest beyond. Yellow-grey sandstone.
+function generateRiverRocks(heightAt, cx, cz, { seed, count }) {
+  const rand = mulberry32(hashChunk(seed, cx, cz));
+  const noise = createNoise3D(rand);
+  const rocks = [];
+  for (let k = 0; k < count; k++) {
+    const x = (cx + rand()) * CHUNK_SIZE;
+    const z = (cz + rand()) * CHUNK_SIZE;
+    const keep = rand();
+    const size = 0.3 + rand() * rand() * 1.2;
+    const dist = heightAt.roadDistance(x, z);
+    if (dist < ROCK_REACH + 1.5 || keep > (dist < 30 ? 0.15 : 0.05)) continue;
+    if (Math.abs(heightAt(x + 1, z) - heightAt(x - 1, z)) + Math.abs(heightAt(x, z + 1) - heightAt(x, z - 1)) > 1.2) continue;
+    const rock = makeRock(heightAt, x, z, size, rand, noise);
+    rock.sand = true;
     rocks.push(rock);
   }
   return rocks;

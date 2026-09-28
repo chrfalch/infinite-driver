@@ -20,6 +20,7 @@ import { DRIVETRAIN, resetDrivetrain, saveDrivetrain } from '../vehicle/config.j
 import { requestRebuild, requestRespawn } from '../vehicle/spawn.js';
 import { setGravelAmount } from '../render/terrain-mesh.js';
 import { toggleFollowCamera } from '../systems/camera.js';
+import { WORLDS, saveWorld, worldMode } from '../world.js';
 
 // [path, label, min, max, step, apply] — apply is 'live' (read every step), 'wheels' (pushed to
 // the Rapier controller), or 'rebuild' (shape or mass: the car is rebuilt in place).
@@ -153,6 +154,17 @@ export function createTuningPanel(world, { heightAt }) {
     respawn: () => requestRespawn(world, heightAt),
   };
 
+  // World picker: a new world needs a fresh start (both workers build their terrain at load).
+  const worldChoice = { mode: worldMode() };
+  gui
+    .add(worldChoice, 'mode', WORLDS)
+    .name('World')
+    .onChange((mode) => {
+      saveWorld(mode);
+      const url = new URL(location.href);
+      url.searchParams.delete('terrain');
+      location.href = url.href;
+    });
   const copyButton = gui.add(actions, 'copy').name('Copy settings');
   gui.add(actions, 'reset').name('Reset to defaults');
   gui.add(actions, 'respawn').name('Respawn car (R)');
