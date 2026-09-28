@@ -3,7 +3,7 @@ import { MAX_TIRES } from '../tire/gpu-tire-solver.js';
 import { GROUP, createSoftTire, groups } from '../tire/soft-tire.js';
 import { CAR, DRIVETRAIN } from './config.js';
 import { WHEELS, frameStretch, wheelMount } from './physics.js';
-import { DESIGN_WHEEL_MOUNT_Y, IFS_ARM_LIMIT, IFS_RACK, ifsCorner, ifsRack, ifsSpindleLift, ifsSpringOffset } from './frame-geometry.js';
+import { DESIGN_WHEEL_MOUNT_Y, IFS_ARM_LIMIT, IFS_RACK, ifsCorner, ifsRack, ifsSpindleLift, ifsSpringOffset, spindleAlignment } from './frame-geometry.js';
 
 const DOWN = { x: 0, y: -1, z: 0 };
 const UP = { x: 0, y: 1, z: 0 };
@@ -149,9 +149,11 @@ export class JointedVehicle {
         knuckle = ifs.upright;
       }
 
-      // Hub on the axle; the tyre's bead is pinned to it.
+      // Hub on the axle; the tyre's bead is pinned to it. With independent suspension it turns
+      // with its upright's spindle (camber and toe).
+      const hubRotation = this.solid ? q : multiply(q, spindleAlignment(i, car));
       const hub = world.createRigidBody(
-        this.RAPIER.RigidBodyDesc.dynamic().setTranslation(at.x, at.y, at.z).setRotation(q).setCanSleep(false),
+        this.RAPIER.RigidBodyDesc.dynamic().setTranslation(at.x, at.y, at.z).setRotation(hubRotation).setCanSleep(false),
       );
       // The rim only meets the ground if the tyre is squashed flat.
       world.createCollider(
@@ -208,10 +210,11 @@ export class JointedVehicle {
     this.applySpringSettings();
   }
 
-  // A dynamic link body at chassis-local point `local` (turned with the chassis).
-  createLink(local, mass, inertia) {
+  // A dynamic link body at chassis-local point `local`, turned with the chassis (and by `turn`,
+  // a chassis-frame rotation).
+  createLink(local, mass, inertia, turn = IDENTITY) {
     const { RAPIER, world, body: chassis } = this;
-    const q = chassis.rotation();
+    const q = multiply(chassis.rotation(), turn);
     const p = chassis.translation();
     const w = rotate(q, local);
     const body = world.createRigidBody(
@@ -249,7 +252,11 @@ export class JointedVehicle {
     const G = ifsCorner(i, this.car);
     const lower = this.createLink(G.lowerBall, 8, 0.6);
     const upper = this.createLink(G.upperBall, 5, 0.4);
-    const upright = this.createLink(G.wheel, 10, 0.6);
+    // The upright is built turned by the spindle's camber and toe; its ball joints and steering
+    // arm stay where they are, so their anchors on it are turned back by the same amount.
+    const align = spindleAlignment(i, this.car);
+    const upright = this.createLink(G.wheel, 10, 0.6, align);
+    const onUpright = (p) => rotate(conjugate(align), sub(p, G.wheel));
     const hinge = (inner, ball, arm) => {
       const pivot = midpoint(inner[0], inner[1]);
       const d = sub(inner[0], inner[1]);
@@ -263,17 +270,18 @@ export class JointedVehicle {
     const upperHinge = hinge(G.upperInner, G.upperBall, upper);
     // Upper arm travel is limited by the lower arm; give it room so it never binds first.
     upperHinge.joint.setLimits(-IFS_ARM_LIMIT * 1.6, IFS_ARM_LIMIT * 1.6);
-    this.joint(RAPIER.JointData.spherical(ORIGIN, sub(G.lowerBall, G.wheel)), lower, upright);
-    this.joint(RAPIER.JointData.spherical(ORIGIN, sub(G.upperBall, G.wheel)), upper, upright);
+    this.joint(RAPIER.JointData.spherical(ORIGIN, onUpright(G.lowerBall)), lower, upright);
+    this.joint(RAPIER.JointData.spherical(ORIGIN, onUpright(G.upperBall)), upper, upright);
     const tieMid = midpoint(G.tieInner, G.tieOuter);
     const tie = this.createLink(tieMid, 2, 0.08);
-    this.joint(RAPIER.JointData.spherical(sub(G.tieOuter, tieMid), sub(G.tieOuter, G.wheel)), tie, upright);
+    const tieOnUpright = onUpright(G.tieOuter);
+    this.joint(RAPIER.JointData.spherical(sub(G.tieOuter, tieMid), tieOnUpright), tie, upright);
     if (G.front) {
       this.joint(RAPIER.JointData.spherical(sub(G.tieInner, this.rackGeo.center), sub(G.tieInner, tieMid)), this.rack.body, tie);
     } else {
       this.joint(RAPIER.JointData.spherical(G.tieInner, sub(G.tieInner, tieMid)), chassis, tie);
     }
-    return { G, lower, upper, upright, tie, lowerHinge, upperHinge, shockLocal: sub(G.shockBottom, G.lowerBall) };
+    return { G, lower, upper, upright, tie, tieOnUpright, lowerHinge, upperHinge, shockLocal: sub(G.shockBottom, G.lowerBall) };
   }
 
   // Coil-over force for one double A-arm corner. The wheel rate (and bump/rebound damping) is the
@@ -452,7 +460,7 @@ export class JointedVehicle {
       lowerBall: local(c.lower.translation()),
       upperBall: local(c.upper.translation()),
       tieInner: G.front ? local(worldPoint(this.rack.body, sub(G.tieInner, this.rackGeo.center))) : G.tieInner,
-      tieOuter: local(worldPoint(c.upright, sub(G.tieOuter, G.wheel))),
+      tieOuter: local(worldPoint(c.upright, c.tieOnUpright)),
       shockTop: G.shockTop,
       shockBottom: local(worldPoint(c.lower, c.shockLocal)),
       spindle: local(c.upright.translation()),
