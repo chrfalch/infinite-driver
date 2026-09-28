@@ -67,6 +67,8 @@ const Params = d.struct({
   iterations: d.u32,
   steps: d.u32, // physics steps in this dispatch (1..MAX_STEPS)
   stepDt: d.f32, // one physics step (s)
+  hubRubberMass: d.f32, // rubber mass the hub's rigid body carries (kg; see the hub force below)
+  hubRubberInertia: d.f32, // the rubber's spin inertia about the axle the hub carries (kg·m²)
 });
 
 const Hub = d.struct({
@@ -76,6 +78,8 @@ const Hub = d.struct({
   angvel: d.vec4f,
   spin: d.vec4f, // xyz: spin axis (world), w: hub inertia about it (kg·m²)
   drive: d.vec4f, // x: drive torque about the axis, y: brake torque limit, z: knuckle spin rate
+  prevLin: d.vec4f, // xyz: the hub velocity sent with the previous dispatch
+  prevAng: d.vec4f, // xyz: the hub angular velocity sent with the previous dispatch
 });
 
 export class GpuTireSolver {
@@ -94,6 +98,9 @@ export class GpuTireSolver {
     let maxR = 0;
     for (let i = 0; i < this.perTire; i++) maxR = Math.max(maxR, Math.hypot(restLocal[i * 3], restLocal[i * 3 + 1]));
     this.treadRadius = maxR - 0.06;
+    // Σ r² about the axle over the rest shape (times a particle's mass: the rubber's spin inertia).
+    this.restSpinMoment = 0;
+    for (let i = 0; i < this.perTire; i++) this.restSpinMoment += restLocal[i * 3] ** 2 + restLocal[i * 3 + 1] ** 2;
 
     const root = this.root;
     this.pos = root.createMutable(d.arrayOf(d.vec4f, this.count));
@@ -118,7 +125,9 @@ export class GpuTireSolver {
     this.groundCell = 0.125;
     this.rockCount = 0;
 
-    this.hubData = new Float32Array(MAX_TIRES * 24);
+    this.hubData = new Float32Array(MAX_TIRES * 32);
+    this.sentLinvel = []; // per tyre: the hub velocities sent with the last dispatch
+    this.sentAngvel = [];
     this.raw = {
       pos: root.unwrap(this.pos),
       hubOut: root.unwrap(this.hubOut),
@@ -364,6 +373,8 @@ export class GpuTireSolver {
       }
       workgroupBarrier();
 
+      // The hub's spin going into each step (the kernel turns the hub on between steps).
+      var spinBefore = hubs[t].prevAng.xyz;
       for (var ps = 0u; ps < params.steps; ps++) {
       // The hub's force and torque on the tyre follow from momentum balance: the tyre's change
       // of momentum minus the external forces (gravity, ground, rocks). That is exact however well
@@ -538,8 +549,21 @@ export class GpuTireSolver {
         workgroupBarrier();
       }
       if (lid == 0u) {
-        let force = getP(1u, 0u);
-        let torque = getP(0u, 0u);
+        var force = getP(1u, 0u);
+        // Added mass: the hub's rigid body carries the rubber's mass (hubRubberMass), so the part of
+        // the force that only drags the rubber along with a change in the hub's velocity is left
+        // out. Otherwise the rubber's inertia reaches the hub only as a force a step late, and the
+        // loop diverges once the rubber is heavy next to the hub (30 kg rubber on the 22 kg hub),
+        // or the hub is moved on for several steps per dispatch. Within a dispatch the hub keeps
+        // its velocity, so the change is only at the first step.
+        if (ps == 0u) { force += params.hubRubberMass * (hsLin.xyz - hubs[t].prevLin.xyz) / params.stepDt; }
+        // The same about the axle: the rubber's spin inertia belongs to the hub (whose spin
+        // inertia already stands for the whole wheel), so its pull from a change in spin is left
+        // out. Between steps the kernel turns the hub on itself (below), so compare with that.
+        var torque = getP(0u, 0u);
+        let dSpin = dot(hsAng.xyz - spinBefore, hsSpin.xyz);
+        torque += hsSpin.xyz * (params.hubRubberInertia * dSpin / params.stepDt);
+        spinBefore = hsAng.xyz;
         let o = (ps * ${MAX_TIRES}u + t) * 2u;
         hubOut[o] = vec4f(force, dbgA[0]);
         hubOut[o + 1u] = vec4f(torque, dbgB[0]);
@@ -603,6 +627,8 @@ export class GpuTireSolver {
 
   // Places every particle on its tyre's moulded shape around the given hubs, at rest.
   reset(hubs) {
+    this.sentLinvel = [];
+    this.sentAngvel = [];
     this.writeHubs(hubs);
     const data = new Float32Array(this.count * 4);
     // The rubber starts moving with its hub (a respawn or rebuild can happen at speed).
@@ -673,6 +699,8 @@ export class GpuTireSolver {
       iterations: this.iterations,
       steps: this.paramValues?.steps ?? 1,
       stepDt: dt,
+      hubRubberMass: s.rubberOnHub === false ? 0 : s.rubberMass,
+      hubRubberInertia: s.rubberOnHub === false ? 0 : (s.rubberMass / this.perTire) * this.restSpinMoment,
     };
     this.params.write(this.paramValues);
     this.settings = settings;
@@ -706,7 +734,7 @@ export class GpuTireSolver {
     const h = this.hubData;
     h.fill(0);
     hubs.forEach((hub, t) => {
-      const o = t * 24;
+      const o = t * 32;
       h.set([hub.position.x, hub.position.y, hub.position.z, hub.mirror], o);
       const q = hub.rotation;
       h.set([q.x, q.y, q.z, q.w], o + 4);
@@ -716,6 +744,12 @@ export class GpuTireSolver {
       const axis = hub.spinAxis ?? rotateObj(q, { x: 0, y: 0, z: 1 });
       h.set([axis.x, axis.y, axis.z, hub.inertia ?? 1], o + 16);
       h.set([hub.driveTorque ?? 0, hub.brakeTorque ?? 0, hub.knuckleSpin ?? 0, 0], o + 20);
+      const prev = this.sentLinvel[t] ?? hub.linvel;
+      h.set([prev.x, prev.y, prev.z, 0], o + 24);
+      this.sentLinvel[t] = { x: hub.linvel.x, y: hub.linvel.y, z: hub.linvel.z };
+      const prevW = this.sentAngvel[t] ?? hub.angvel;
+      h.set([prevW.x, prevW.y, prevW.z, 0], o + 28);
+      this.sentAngvel[t] = { x: hub.angvel.x, y: hub.angvel.y, z: hub.angvel.z };
     });
     this.device.queue.writeBuffer(this.raw.hubs, 0, h);
   }
