@@ -78,7 +78,10 @@ export function syncWheels(world) {
       span(f.lower[1], V(pose.lowerInner[1], a), bj, Y);
       span(f.upper[0], V(pose.upperInner[0], a), ub, Y);
       span(f.upper[1], V(pose.upperInner[1], a), ub, Y);
-      span(f.upright, bj, ub, Y);
+      // A lift spindle reaches below the lower ball joint: the upright carries on down the kingpin
+      // line to the wheel centre's height.
+      const drop = bj.y - pose.spindle.y - 0.03;
+      span(f.upright, drop > 0 ? b.subVectors(bj, ub).multiplyScalar(drop / Math.max(1e-3, ub.y - bj.y)).add(bj) : bj, ub, Y);
       const to = V(pose.tieOuter, new Vector3());
       // Steering arm from the middle of the upright out to the tie rod end.
       span(f.steeringArm, a.lerpVectors(bj, ub, 0.5), to, Y);
