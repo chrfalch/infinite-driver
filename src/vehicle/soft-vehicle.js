@@ -13,8 +13,6 @@ const ORIGIN = { x: 0, y: 0, z: 0 };
 const HUB_INERTIA = { x: 0.5, y: 0.5, z: 0.7 };
 const HUB_INERTIA_GPU = { x: 2.5, y: 2.5, z: Number(globalThis.location ? new URLSearchParams(globalThis.location.search).get('hubI') ?? 3.5 : 3.5) };
 const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
-// Rubber mass per tyre that the GPU tyres leave to the hub's rigid body (0 without GPU tyres).
-const hubRubberMass = (gpuTires) => gpuTires?.solver.paramValues?.hubRubberMass ?? 0;
 // Rotational inertia (kg·m²) of the strut and knuckle links. A point-like link is far lighter
 // than the hub and tyre it carries, and the joint solver then cannot pass the steering torque
 // through it: the knuckle slips and one front wheel barely steers. Realistic uprights fix that.
@@ -159,9 +157,8 @@ export class JointedVehicle {
         this.RAPIER.ColliderDesc.cylinder(tire.width / 2 - 0.03, tire.rimRadius - 0.02)
           .setRotation({ x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 })
           // GPU tyres carry their rubber outside Rapier, so the hub holds a whole wheel's spin
-          // inertia; that also keeps the once-per-step torque exchange with the GPU stable. The hub
-          // also carries the rubber's mass (see hubRubberMass in gpu-tire-solver.js).
-          .setMassProperties(22 + hubRubberMass(gpuTires), ORIGIN, gpuTires ? HUB_INERTIA_GPU : HUB_INERTIA, { x: 0, y: 0, z: 0, w: 1 })
+          // inertia; that also keeps the once-per-step torque exchange with the GPU stable.
+          .setMassProperties(22, ORIGIN, gpuTires ? HUB_INERTIA_GPU : HUB_INERTIA, { x: 0, y: 0, z: 0, w: 1 })
           .setFriction(0.6)
           .setCollisionGroups(groups(GROUP.RIM, GROUP.WORLD)),
         hub,
@@ -704,7 +701,7 @@ export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIR
   // The jointed car's axles, hubs, knuckles, and tyres add mass; the chassis gets the rest so the
   // whole car weighs car.mass.
   // Independent: per corner lower arm 8, upper 5, upright 10, tie rod 2, hub 22 kg, plus the rack.
-  const unsprung = (car.solidAxles ? 292 : 192) + 4 * hubRubberMass(options.gpuTires);
+  const unsprung = car.solidAxles ? 292 : 192;
   const m = Math.max(600, car.mass - unsprung);
   const inertia = {
     x: (m / 12) * (4 * hy * hy + 4 * hz * hz) * 1.6,

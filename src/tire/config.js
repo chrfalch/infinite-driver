@@ -77,10 +77,6 @@ export const DEFAULT_GPU_TIRE = Object.freeze({
   stepsPerTrip: 4,
   pressureLead: 1.0, // substeps of spin the pressure normal is turned ahead (cancels spin drag)
   rubberMass: 12,
-  // The hub's rigid body carries the rubber's mass, and the GPU leaves the rubber's pull from a change
-  // in hub velocity out of the tyre force (see the hub force in gpu-tire-solver.js). Off: the old
-  // coupling, which goes unstable with heavier rubber or more substeps.
-  rubberOnHub: true,
 });
 
 const GPU_STORAGE_KEY = 'drift.gputire.v2';
