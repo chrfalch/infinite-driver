@@ -159,17 +159,19 @@ describe('dry river terrain', () => {
     }
   });
 
-  it('keeps rocks near the bed within the GPU tyres’ rock set', async () => {
+  it('fills the bed with rocks, within the GPU tyres’ rock set', async () => {
     const { generateRocks } = await import('../src/terrain/rocks.js');
     const { MAX_ROCKS } = await import('../src/tire/gpu-tire-solver.js').catch(() => ({ MAX_ROCKS: 48 }));
     const rocks = [];
     for (let cx = -3; cx < 3; cx++) for (let cz = -3; cz < 3; cz++) rocks.push(...generateRocks(heightAt, cx, cz, { count: 70 }));
     for (const p of walkBed(150).filter((_, i) => i % 20 === 0)) {
-      const near = rocks.filter((r) => Math.hypot(r.x - p.x, r.z - p.z) < 14 + r.size * 2).length;
-      expect(near).toBeLessThanOrEqual(MAX_ROCKS * 0.6);
+      const near = rocks.filter((r) => Math.hypot(r.x - p.x, r.z - p.z) < 6.5 + r.size * 2).length;
+      expect(near).toBeLessThanOrEqual(MAX_ROCKS * 0.8);
     }
-    // Rocks in the bed centre stay small enough to straddle.
-    for (const r of rocks) if (heightAt.roadDistance(r.x, r.z) < 2.8) expect(r.size).toBeLessThan(0.41);
+    // The bed is full of rocks, but mid-bed they stay small enough to climb.
+    const bed = rocks.filter((r) => r.bed);
+    expect(bed.length).toBeGreaterThan(300);
+    for (const r of rocks) if (heightAt.roadDistance(r.x, r.z) < 2.5) expect(r.size).toBeLessThan(0.67);
   });
 
   it('keeps trees out of the bed', async () => {

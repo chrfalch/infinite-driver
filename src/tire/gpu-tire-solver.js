@@ -21,7 +21,7 @@ import { GRAVEL_HASH_WGSL, GRAVEL_HEIGHT_WGSL } from '../terrain/gravel.js';
 
 export const MAX_TIRES = 4;
 export const MAX_STEPS = 4; // physics steps per dispatch
-export const MAX_ROCKS = 48;
+export const MAX_ROCKS = 128; // rocks near the car the tyres collide with (the dry river bed is full of them)
 export const ROCK_FACES = 80;
 export const GROUND_N = 129; // ground height samples per side (16 m at 12.5 cm)
 const WG = 256;

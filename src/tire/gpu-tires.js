@@ -125,8 +125,11 @@ export function gpuGroundHeight(solver, x, z) {
   return h11 + (h01 - h11) * (1 - fx) + (h10 - h11) * (1 - fz);
 }
 
-// Picks the rocks nearest to (x, z) and uploads them as convex shapes.
-export function updateGpuRocks(solver, rocks, x, z, range = 14) {
+// Picks the rocks nearest to (x, z) and uploads them as convex shapes. The set is refreshed every
+// 3 m the car moves, and a wheel is at most about 1.7 m from the car's centre, so a tyre stays
+// within about 5.2 m of (x, z) (with its radius) until the next refresh; 6.5 m plus the rock's own
+// size leaves margin.
+export function updateGpuRocks(solver, rocks, x, z, range = 6.5) {
   const near = rocks
     .map((rock) => ({ rock, dist: Math.hypot(rock.x - x, rock.z - z) }))
     .filter((r) => r.dist < range + r.rock.size * 2)

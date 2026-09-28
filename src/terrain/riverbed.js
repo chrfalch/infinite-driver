@@ -114,8 +114,8 @@ export function createRiverField(seed = 4711) {
     const bankRise = 0.6 + 0.9 * (0.5 + 0.5 * bankNoise(x * 0.018, z * 0.018));
     const bank = smoothstep(BED_HALF_WIDTH, BED_HALF_WIDTH + 4.5, dist);
     h += bank * bankRise;
-    // Slabs in the bed and on the banks, fading out into the forest.
-    const slabs = 1 - smoothstep(9, 13, dist);
+    // Slabs: bedrock showing along the bank foot (the bed itself is loose rock, see rocks.js).
+    const slabs = smoothstep(BED_HALF_WIDTH - 0.5, BED_HALF_WIDTH + 1.5, dist) * (1 - smoothstep(8, 11, dist));
     const slab = slabs > 0 ? slabAt(x, z) * slabs : 0;
     h += slab;
     // Forest floor: rolling ground, with small bumps.
