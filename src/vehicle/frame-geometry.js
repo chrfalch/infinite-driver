@@ -91,6 +91,20 @@ export function ifsTrackOffset(car = CAR) {
 }
 const OUTBOARD = { wheel: 1, lowerBall: 1, upperBall: 1, tieOuter: 1, shockBottom: 0.65 };
 
+// Wheel height with independent suspension. Lowering the wheels (a higher ride, wheelMountY below
+// the design value) uses taller uprights, like lift spindles on an off-road truck: the wheel centre
+// moves down the upright while the arms, ball joints and coil-overs stay where they are, so the car
+// keeps its full suspension travel. Raising the wheels (a lower ride) moves the springs' rest
+// position instead, at most 10 cm so the arms stay clear of their bump stops.
+export const DESIGN_WHEEL_MOUNT_Y = -0.08;
+export const IFS_MAX_LIFT = 0.32;
+export function ifsSpindleLift(car = CAR) {
+  return Math.max(0, Math.min(IFS_MAX_LIFT, DESIGN_WHEEL_MOUNT_Y - car.wheelMountY));
+}
+export function ifsSpringOffset(car = CAR) {
+  return Math.max(0, Math.min(0.1, car.wheelMountY - DESIGN_WHEEL_MOUNT_Y));
+}
+
 // The double A-arm points of one corner (wheel index 0 FL, 1 FR, 2 RL, 3 RR), chassis-local.
 export function ifsCorner(i, car = CAR) {
   const front = i < 2;
@@ -98,9 +112,10 @@ export function ifsCorner(i, car = CAR) {
   const base = front ? IFS_FRONT_RIGHT : IFS_REAR_RIGHT;
   const sx = front ? 1 : -1;
   const dz = ifsTrackOffset(car);
+  const lift = ifsSpindleLift(car);
   const out = { front, side };
   for (const [key, value] of Object.entries(base)) {
-    const P = (p) => ({ x: sx * p[0], y: p[1], z: side * (p[2] + dz * (OUTBOARD[key] ?? 0)) });
+    const P = (p) => ({ x: sx * p[0], y: p[1] - (key === 'wheel' ? lift : 0), z: side * (p[2] + dz * (OUTBOARD[key] ?? 0)) });
     out[key] = Array.isArray(value[0]) ? value.map(P) : P(value);
   }
   return out;
@@ -127,5 +142,6 @@ export function ifsPoseFromHub(i, hub) {
     tieOuter: move(G.tieOuter),
     shockTop: G.shockTop,
     shockBottom: { x: G.shockBottom.x, y: pivot.y + (lowerBall.y - pivot.y) * t, z: pivot.z + (lowerBall.z - pivot.z) * t },
+    spindle: hub,
   };
 }

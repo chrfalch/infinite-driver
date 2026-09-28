@@ -3,7 +3,7 @@ import { MAX_TIRES } from '../tire/gpu-tire-solver.js';
 import { GROUP, createSoftTire, groups } from '../tire/soft-tire.js';
 import { CAR, DRIVETRAIN } from './config.js';
 import { WHEELS, wheelMount } from './physics.js';
-import { IFS_ARM_LIMIT, IFS_RACK, ifsCorner } from './frame-geometry.js';
+import { DESIGN_WHEEL_MOUNT_Y, IFS_ARM_LIMIT, IFS_RACK, ifsCorner, ifsSpindleLift, ifsSpringOffset } from './frame-geometry.js';
 
 const DOWN = { x: 0, y: -1, z: 0 };
 const UP = { x: 0, y: 1, z: 0 };
@@ -74,13 +74,6 @@ function axleLoadFactor(front, car) {
   return 2 * (front ? share : 1 - share);
 }
 
-// How far (m) the wheel height setting moves an independent wheel's rest position from the design
-// point: the same as the solid-axle mount offset from the default, limited to the arms' travel.
-const DEFAULT_WHEEL_MOUNT_Y = -0.08;
-export function ifsHeightOffset(car) {
-  return Math.max(-0.1, Math.min(0.1, car.wheelMountY - DEFAULT_WHEEL_MOUNT_Y));
-}
-
 export class JointedVehicle {
   constructor(RAPIER, world, chassis, car = CAR, tire = TIRE, { gpuTires = null } = {}) {
     this.RAPIER = RAPIER;
@@ -103,11 +96,12 @@ export class JointedVehicle {
     this.rack = this.solid ? null : this.createRack();
     for (let i = 0; i < WHEELS.length; i++) {
       const mount = wheelMount(i, car);
-      // Independent suspension: the wheel height setting moves the wheel's rest position up or down
-      // (limited so it stays well inside the arms' travel; beyond that the arms would sit on their
-      // stops and bounce). The car is built at the design point and settles to the new height, so
-      // the arms and coil-overs follow instead of the springs starting preloaded (bouncy).
-      if (!this.solid) mount.y = DEFAULT_WHEEL_MOUNT_Y + ifsHeightOffset(car);
+      // Independent suspension (see ifsSpindleLift): taller uprights put the wheel centre lower, and
+      // the spring offset raises the wheel's rest position. The car is built at the design point
+      // and settles to the new height, so the arms and coil-overs follow instead of the springs
+      // starting preloaded (bouncy). Suspension length is measured from the wheel centre, so the
+      // mount moves down with the spindle lift.
+      if (!this.solid) mount.y = DESIGN_WHEEL_MOUNT_Y + ifsSpringOffset(car) - ifsSpindleLift(car);
       const front = WHEELS[i].front;
       const localHub = this.solid
         ? { x: mount.x, y: mount.y - car.suspensionRestLength, z: mount.z }
@@ -460,6 +454,7 @@ export class JointedVehicle {
       tieOuter: local(worldPoint(c.upright, sub(G.tieOuter, G.wheel))),
       shockTop: G.shockTop,
       shockBottom: local(worldPoint(c.lower, c.shockLocal)),
+      spindle: local(c.upright.translation()),
       rack: this.rack ? local(this.rack.body.translation()) : null,
     };
   }
@@ -743,6 +738,6 @@ export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIR
 // Height of the chassis origin above the ground for a car standing on soft tyres.
 export function softCarRideHeight(car = CAR, tire = TIRE) {
   // Independent: the car is built with its wheels at the design point (see JointedVehicle).
-  if (!car.solidAxles) return tire.outerRadius - ifsCorner(0).wheel.y + 0.05;
+  if (!car.solidAxles) return tire.outerRadius - ifsCorner(0, car).wheel.y + 0.05;
   return tire.outerRadius + car.suspensionRestLength - car.wheelMountY + 0.05;
 }
