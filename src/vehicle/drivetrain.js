@@ -123,6 +123,17 @@ export class Drivetrain {
     return g;
   }
 
+  // Acceleration (m/s²) full throttle would give in a gear at a road speed, against the slope's
+  // pull (input.climb, m/s²) and some rolling loss, for a vehicle of input.mass kg.
+  pull(gear, speed, radius, input) {
+    const p = this.params;
+    const ratio = Math.abs(this.ratio(gear));
+    const rpm = Math.max(p.idleRpm, radToRpm(Math.abs(speed / radius) * ratio));
+    if (rpm > p.limiterRpm) return -Infinity;
+    const wheelForce = (Math.min(engineTorque(p, rpm), p.clutchTorque) * ratio * p.efficiency) / radius;
+    return wheelForce / input.mass - input.climb - 0.3;
+  }
+
   shiftUp() {
     this.shiftTo(this.gear < 0 ? 0 : this.gear + 1);
   }
@@ -132,7 +143,9 @@ export class Drivetrain {
   }
 
   // One physics step.
-  // input: { throttle 0..1, reverseRequest bool } — the vehicle decides when the driver wants reverse.
+  // input: { throttle 0..1, reverseRequest bool, climb, mass } — the vehicle decides when the driver
+  // wants reverse; climb is the slope's pull against the direction of travel (m/s², optional) and
+  // mass the vehicle's, so the automatic holds a gear that can pull up a hill.
   // spins: wheel spin rates (rad/s, forward positive). speed: forward vehicle speed (m/s).
   update(dt, input, spins, speed, radius = 0.46) {
     const p = this.params;
@@ -167,7 +180,11 @@ export class Drivetrain {
         const now = gearboxRpm(this.gear);
         // Upshift on road speed, or on engine speed when the wheels are spinning up with the clutch in.
         const revving = this.clutch > 0.95 && this.rpm > p.upshiftRpm + 300;
-        if ((now > p.upshiftRpm || revving) && this.gear < p.gears.length && throttle > 0) this.shiftUp();
+        const atLimiter = now > p.limiterRpm - 150;
+        const climbing = throttle > 0 && input.climb > 0.4 && input.mass > 0; // from about 2.3°
+        if ((now > p.upshiftRpm || revving) && this.gear < p.gears.length && throttle > 0 && (atLimiter || !climbing || this.pull(this.gear + 1, speed - Math.sign(speed) * input.climb * p.shiftTime, radius, input) > 0.3)) this.shiftUp();
+        // Climbing and slowing in this gear: take the lower one if it does not over-rev.
+        else if (climbing && this.gear > 1 && this.pull(this.gear, speed, radius, input) < -0.2 && gearboxRpm(this.gear - 1) < p.upshiftRpm) this.shiftDown();
         else if (this.gear > 1 && now < (throttle > 0 ? p.downshiftRpm : coast.coastDownshiftRpm)) {
           // Only if the lower gear would not over-rev.
           if (gearboxRpm(this.gear - 1) < Math.max(p.upshiftRpm, coast.coastDownshiftRpm + 400)) this.shiftDown();
