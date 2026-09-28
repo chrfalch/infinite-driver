@@ -113,8 +113,10 @@ export function readCityTile(tile, toWorld) {
     const size = layer.extent;
     for (let i = 0; i < layer.length; i++) {
       const f = layer.feature(i);
-      // hide_3d: an outline whose building:part pieces are drawn instead.
-      if (f.properties.hide_3d) continue;
+      // hide_3d: an outline that also has building:part pieces. Its height comes from its own
+      // tags (building:levels), while untagged parts fall back to about 5 m, so the outline is
+      // drawn too (city/buildings.js sets it back a little so shared walls do not flicker).
+      const outline = Boolean(f.properties.hide_3d);
       const height = Number(f.properties.render_height) || 8;
       const minHeight = Number(f.properties.render_min_height) || 0;
       const colour = f.properties.colour ?? null;
@@ -133,7 +135,7 @@ export function readCityTile(tile, toWorld) {
         const walls = clipped.map((p, k) => !onTileEdge(p, clipped[(k + 1) % clipped.length], size));
         const points = clipped.map(([u, v]) => toWorld(u, v));
         if (area > 0) {
-          current = { outer: points, outerWalls: walls, holes: [], holeWalls: [], height, minHeight, colour };
+          current = { outer: points, outerWalls: walls, holes: [], holeWalls: [], height, minHeight, colour, outline };
           buildings.push(current);
         } else if (current) {
           current.holes.push(points);

@@ -82,7 +82,10 @@ export function buildBuildings(buildings, heightAt) {
     const cz = (minZ + maxZ) / 2;
     ground = Math.min(ground, heightAt(cx, cz));
     const rnd = hash(cx, cz);
-    const top = ground + b.height;
+    // Outlines drawn under their building:parts are set back a little (walls 3 cm in, roof 5 cm
+    // down), so where a part has the same wall or roof, the part is drawn without flicker.
+    const inset = b.outline ? 0.03 : 0;
+    const top = ground + b.height - (b.outline ? 0.05 : 0);
     // Building parts that start higher up (bridges, overhangs) have a floor; the rest go a
     // little into the ground so slopes do not show a gap under the wall.
     const bottom = b.minHeight > 0 ? ground + b.minHeight : ground - 1.5;
@@ -118,12 +121,14 @@ export function buildBuildings(buildings, heightAt) {
         if (hasWall[i]) {
           const nx = (side * dz) / len;
           const nz = (-side * dx) / len;
+          const ix = -nx * inset;
+          const iz = -nz * inset;
           const v0 = bottom - ground;
           const v1 = top - ground;
-          const a0 = [p.x, bottom, p.z, nx, 0, nz, u, v0, 0];
-          const b0 = [q.x, bottom, q.z, nx, 0, nz, u + len, v0, 0];
-          const a1 = [p.x, top, p.z, nx, 0, nz, u, v1, 0];
-          const b1 = [q.x, top, q.z, nx, 0, nz, u + len, v1, 0];
+          const a0 = [p.x + ix, bottom, p.z + iz, nx, 0, nz, u, v0, 0];
+          const b0 = [q.x + ix, bottom, q.z + iz, nx, 0, nz, u + len, v0, 0];
+          const a1 = [p.x + ix, top, p.z + iz, nx, 0, nz, u, v1, 0];
+          const b1 = [q.x + ix, top, q.z + iz, nx, 0, nz, u + len, v1, 0];
           // Counter-clockwise seen from outside: (a1 - a0) x (b0 - a0) = h * (dz, 0, -dx),
           // which is along the normal when side is 1.
           walls.push({ first: position.length / 3, ax: p.x, az: p.z, bx: q.x, bz: q.z, bottom, top, nx, nz, length: len });

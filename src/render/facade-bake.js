@@ -42,6 +42,19 @@ facadeTarget.texture.magFilter = LinearFilter;
 facadeTarget.texture.minFilter = LinearFilter;
 facadeTarget.texture.generateMipmaps = false;
 
+const MEASURE_PER_FRAME = 12; // buildings whose height is measured per frame
+const HEIGHT_TOLERANCE = 2.5; // m: OSM heights closer than this to the photos are kept
+
+function insideRing(ring, x, z) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i];
+    const b = ring[j];
+    if (a.z > z !== b.z > z && x < ((b.x - a.x) * (z - a.z)) / (b.z - a.z) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
 const GAP_COLOUR = new Color('#8a8a86'); // where a wall's photo has holes
 const clearColor = new Color();
 
@@ -115,6 +128,43 @@ export function createFacadeBaker({ key, place, renderer, heightAt }) {
     holder.position.y += gap;
     holder.updateMatrixWorld(true);
     return true;
+  }
+
+  // A building's wall height as photographed: roof hits 1.5 m inside the middle of its longest
+  // edges, over the lowest ground under it (the same ground city/buildings.js builds on). The
+  // median of these is about the eaves: it leaves out a pitched roof's ridge and a tower.
+  // Null when too few hits.
+  const INSIDE = 1.5;
+  const down = new Vector3(0, -1, 0);
+  function measureHeight(b) {
+    const ring = b.outer;
+    let ground = Infinity;
+    let area = 0;
+    for (let i = 0; i < ring.length; i++) {
+      const p = ring[i];
+      const q = ring[(i + 1) % ring.length];
+      ground = Math.min(ground, heightAt(p.x, p.z));
+      area += p.x * q.z - q.x * p.z;
+    }
+    const side = area > 0 ? 1 : -1; // as in city/buildings.js: outward normal = side * (dz, -dx)
+    const edges = ring
+      .map((p, i) => ({ p, q: ring[(i + 1) % ring.length] }))
+      .map((e) => ({ ...e, len: Math.hypot(e.q.x - e.p.x, e.q.z - e.p.z) }))
+      .filter((e) => e.len > INSIDE * 3)
+      .sort((a, c) => c.len - a.len)
+      .slice(0, 6);
+    const heights = [];
+    for (const { p, q, len } of edges) {
+      const x = (p.x + q.x) / 2 - (side * (q.z - p.z) * INSIDE) / len;
+      const z = (p.z + q.z) / 2 + (side * (q.x - p.x) * INSIDE) / len;
+      if (!insideRing(ring, x, z)) continue;
+      raycaster.set(from.set(x, 3000, z), down);
+      const hit = raycaster.intersectObject(tiles.group, true)[0];
+      if (hit) heights.push(hit.point.y - ground);
+    }
+    if (heights.length < 2) return null;
+    heights.sort((a, c) => a - c);
+    return heights[Math.floor(heights.length / 2)];
   }
 
   // Only the walls whose photo was found use the layer.
@@ -229,23 +279,18 @@ export function createFacadeBaker({ key, place, renderer, heightAt }) {
     get busy() {
       return Boolean(job);
     },
-    // Bakes a little each frame: pick a group, load the tiles around it, then draw its walls.
-    update(groups, target) {
+    // Bakes a little each frame: pick a group, load the tiles around it, measure its buildings'
+    // heights, then draw its walls. rebuild(group, heights) is city/city.js rebuildGroup.
+    update(groups, target, rebuild) {
       if (!job) {
         const next = nearest(groups, target);
         if (!next) return;
         const b = next.group.bounds;
-        const packed = packWalls(next.group.walls, FACADE_SIZE, { minDensity: 2, maxDensity: 14 });
-        if (!packed) {
-          next.group.facadeFailed = true;
-          owners[next.layer] = null;
-          return;
-        }
         const centre = new Vector3((b.x0 + b.x1) / 2, heightAt((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2), (b.z0 + b.z1) / 2);
         const radius = Math.hypot(b.x1 - b.x0, b.z1 - b.z0) / 2 + 15;
         region.sphere = new Sphere(new Vector3(), radius);
         if (!regions.hasRegion(region)) regions.addRegion(region);
-        job = { ...next, rects: packed.rects, next: 0, stage: 'loading', started: performance.now(), quiet: 0, loadEnded: false, centre, baked: new Set() };
+        job = { ...next, rects: null, next: 0, stage: 'loading', started: performance.now(), quiet: 0, loadEnded: false, centre, baked: new Set(), heights: new Map(), measured: 0 };
       }
       if (job.stage === 'loading') {
         // The region is in the tiles' own frame, which is only set once the root tileset has
@@ -273,7 +318,31 @@ export function createFacadeBaker({ key, place, renderer, heightAt }) {
           job = null;
           return;
         }
+        job.stage = 'measuring';
+      }
+      // Real heights from the photos where OSM's are off (untagged buildings default to a
+      // couple of storeys), then the group is rebuilt with them and its walls packed.
+      if (job.stage === 'measuring') {
+        const list = job.group.buildings;
+        const end = Math.min(list.length, job.measured + MEASURE_PER_FRAME);
+        for (; job.measured < end; job.measured++) {
+          const b = list[job.measured];
+          if (b.minHeight > 0) continue;
+          const h = measureHeight(b);
+          if (h !== null && h > 2.5 && h < 200 && Math.abs(h - b.height) > HEIGHT_TOLERANCE) job.heights.set(b, h);
+        }
+        if (job.measured < list.length) return;
+        if (job.heights.size) rebuild(job.group, job.heights);
+        const packed = packWalls(job.group.walls, FACADE_SIZE, { minDensity: 2, maxDensity: 14 });
+        if (!packed) {
+          job.group.facadeFailed = true;
+          owners[job.layer] = null;
+          job = null;
+          return;
+        }
+        job.rects = packed.rects;
         job.stage = 'drawing';
+        return;
       }
       // Draw a batch of walls into the group's layer.
       const current = renderer.getRenderTarget();

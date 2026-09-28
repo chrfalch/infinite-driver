@@ -127,6 +127,7 @@ export function createCity({ projection, heightAt, scene, facades = null }) {
     for (const [key, buildings] of cells) {
       const group = buildGroup(buildings);
       if (!group) continue;
+      group.tile = tile;
       group.mesh.name = `buildings ${key}`;
       scene.add(group.mesh);
       tile.groups.push(group);
@@ -138,15 +139,19 @@ export function createCity({ projection, heightAt, scene, facades = null }) {
     }
   }
 
-  function buildGroup(buildings) {
+  // Mesh arrays, walls and colliders of a group's buildings. `bounds` is the box the roof
+  // imagery maps into (kept when a group is rebuilt).
+  function groupGeometry(buildings, bounds = null) {
     const built = buildBuildings(buildings, heightAt);
     if (!built.solids.length) return null;
-    const bounds = { x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity };
-    for (const s of built.solids) {
-      bounds.x0 = Math.min(bounds.x0, s.min.x);
-      bounds.z0 = Math.min(bounds.z0, s.min.z);
-      bounds.x1 = Math.max(bounds.x1, s.max.x);
-      bounds.z1 = Math.max(bounds.z1, s.max.z);
+    if (!bounds) {
+      bounds = { x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity };
+      for (const s of built.solids) {
+        bounds.x0 = Math.min(bounds.x0, s.min.x);
+        bounds.z0 = Math.min(bounds.z0, s.min.z);
+        bounds.x1 = Math.max(bounds.x1, s.max.x);
+        bounds.z1 = Math.max(bounds.z1, s.max.z);
+      }
     }
     // Roof vertices map into the group's box for the roof imagery: (u, v, layer = -1 for none).
     const count = built.positions.length / 3;
@@ -171,10 +176,39 @@ export function createCity({ projection, heightAt, scene, facades = null }) {
     for (let i = 0; i < count; i++) wallMap[i * 3 + 2] = -1;
     geometry.setAttribute('wallMap', new BufferAttribute(wallMap, 3));
     geometry.computeBoundingSphere();
-    const mesh = new Mesh(geometry, facadeMaterial);
+    return { geometry, bounds, roofVertices, walls: built.walls, solids: built.solids };
+  }
+
+  function buildGroup(buildings) {
+    const g = groupGeometry(buildings);
+    if (!g) return null;
+    const mesh = new Mesh(g.geometry, facadeMaterial);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    return { mesh, bounds, roofVertices, layer: -1, walls: built.walls, facadeLayer: -1, solids: built.solids };
+    return { mesh, buildings, bounds: g.bounds, roofVertices: g.roofVertices, layer: -1, walls: g.walls, facadeLayer: -1, solids: g.solids };
+  }
+
+  // Rebuilds a group with new heights (Map building -> height in m), e.g. measured from the 3D
+  // tiles (render/facade-bake.js). Its colliders are rebuilt near the car as usual.
+  function rebuildGroup(group, heights) {
+    const buildings = group.buildings.map((b) => (heights.has(b) ? { ...b, height: heights.get(b), osmHeight: b.osmHeight ?? b.height } : b));
+    const g = groupGeometry(buildings, group.bounds);
+    if (!g) return;
+    for (const s of group.solids) {
+      removeCollider(s);
+      solids.delete(s);
+    }
+    const tileSolids = group.tile.solids;
+    group.tile.solids = tileSolids.filter((s) => !group.solids.includes(s)).concat(g.solids);
+    for (const s of g.solids) solids.add(s);
+    group.mesh.geometry.dispose();
+    group.mesh.geometry = g.geometry;
+    Object.assign(group, { buildings, roofVertices: g.roofVertices, walls: g.walls, solids: g.solids, facadeLayer: -1 });
+    // Keep the roof imagery the group already had.
+    if (group.layer >= 0) {
+      const attr = g.geometry.getAttribute('roofMap');
+      for (const i of group.roofVertices) attr.array[i * 3 + 2] = group.layer;
+    }
   }
 
   function dropTile(key, tile) {
@@ -296,7 +330,7 @@ export function createCity({ projection, heightAt, scene, facades = null }) {
         }
       }
       if (frame % 10 === 0) roofs.update(groups, target);
-      facades?.update(groups, target);
+      facades?.update(groups, target, rebuildGroup);
       // Colliders: add the nearest few missing ones each frame, remove far ones.
       const { rapier, world: rapierWorld } = physics;
       let added = 0;
@@ -308,6 +342,7 @@ export function createCity({ projection, heightAt, scene, facades = null }) {
         } else if (s.collider && d > COLLIDER_FAR) removeCollider(s);
       }
     },
+    rebuildGroup,
     // Building groups of built tiles (for debugging from the console).
     get groups() {
       return groups;
