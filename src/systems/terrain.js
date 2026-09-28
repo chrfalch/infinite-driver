@@ -16,6 +16,8 @@ import { CHUNK_RES, CHUNK_SIZE, chunkKey, sampleChunk } from '../terrain/chunk.j
 import { generateRocks } from '../terrain/rocks.js';
 import { generatePlants } from '../terrain/vegetation.js';
 import { createVegetationMesh } from '../render/vegetation-mesh.js';
+import { createRockSheetMesh } from '../render/rock-surface.js';
+import { ROCK_COLLIDER_BANDS, rockSheetData, rockSheetTrimesh } from '../terrain/rock-sheet.js';
 import { timed } from '../perf.js';
 
 // ?rocks=<count per chunk> (default 70); ?rocks=0 gives an empty test ground.
@@ -102,6 +104,13 @@ function addGroundCollider(physics, chunk) {
   const desc = rapier.ColliderDesc.trimesh(chunkVertices(chunk.heights, chunk.cx, chunk.cz), chunkIndices()).setFriction(1.0);
   chunk.collider = world.createCollider(desc);
   chunk.collidersEnabled = true;
+  // The dry river's rock sheet lies on top of the ground (all bands at once here; the physics
+  // worker spreads them out).
+  chunk.sheet = [];
+  for (let band = 0; band < ROCK_COLLIDER_BANDS; band++) {
+    const mesh = rockSheetTrimesh(chunk.heightAt, chunk.cx, chunk.cz, band);
+    if (mesh) chunk.sheet.push(world.createCollider(rapier.ColliderDesc.trimesh(mesh.vertices, mesh.indices).setFriction(1.3)));
+  }
 }
 
 // Bushes and trees are generated on first need (with the rock mesh or the rock colliders), so a new
@@ -139,14 +148,17 @@ function setCollidersEnabled(chunk, field, enabled) {
   chunk.collidersEnabled = enabled;
   if (!chunk.collider && !field.colliders.length) return;
   chunk.collider?.setEnabled(enabled);
+  for (const c of chunk.sheet ?? []) c.setEnabled(enabled);
   for (const c of field.colliders) c.setEnabled(enabled);
 }
 
 function removeColliders(physics, chunk, field) {
   if (!physics.world) return;
   if (chunk.collider) physics.world.removeCollider(chunk.collider, false);
+  for (const c of chunk.sheet ?? []) physics.world.removeCollider(c, false);
   for (const c of field.colliders) physics.world.removeCollider(c, false);
   chunk.collider = null;
+  chunk.sheet = null;
   field.colliders = [];
   field.collidersBuilt = false;
   field.nextRock = 0;
@@ -273,7 +285,7 @@ export function streamTerrain(world, { force = false } = {}) {
 // `data`: the chunk as built by the chunk worker, or null to build it here.
 function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, near }, data = null) {
   const heights = data?.heights ?? timed('terrain.heights', () => sampleChunk(heightAt, cx, cz));
-  const chunk = { cx, cz, heights, collider: null, collidersEnabled: true };
+  const chunk = { cx, cz, heights, heightAt, collider: null, sheet: null, collidersEnabled: true };
   const field = {
     rocks: data?.rocks ?? timed('terrain.genRocks', () => generateRocks(heightAt, cx, cz, { count: ROCK_COUNT })),
     colliders: [],
@@ -289,6 +301,8 @@ function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, ne
   const object = new Group();
   object.name = `chunk ${cx},${cz}`;
   object.add(data ? createChunkMeshFromData(data.mesh, cx, cz) : timed('terrain.chunkMesh', () => createChunkMesh(heightAt, heights, cx, cz)));
+  const sheet = createRockSheetMesh(data ? data.sheet : timed('terrain.rockSheet', () => rockSheetData(heightAt, cx, cz)));
+  if (sheet) object.add(sheet);
   scene.add(object);
   const entity = world.spawn(TerrainChunk(chunk), RockField(field), View({ object }));
   // The worker's chunk comes with its rock mesh data and plants, so it is finished right away.

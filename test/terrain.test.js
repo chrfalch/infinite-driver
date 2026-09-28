@@ -122,17 +122,15 @@ describe('dry river terrain', () => {
     expect(heightAt.sample(0, 0).road).toBe(1);
   });
 
-  it('keeps the bed gentle: under 10.5° over any 10 m, bumps of at most ~35 cm per metre', () => {
+  it('keeps the bed gentle along its length: under 10.5° over any 10 m (the ground under the rock)', () => {
     const points = walkBed(2000);
     let steepest = 0;
-    let worstBump = 0;
     for (let i = 20; i < points.length; i++) {
-      steepest = Math.max(steepest, Math.abs(points[i].h - points[i - 20].h) / 10);
-      worstBump = Math.max(worstBump, Math.abs(points[i].h - points[i - 2].h));
+      const under = (p) => heightAt.sample(p.x, p.z).under;
+      steepest = Math.max(steepest, Math.abs(under(points[i]) - under(points[i - 20])) / 10);
       expect(heightAt.roadDistance(points[i].x, points[i].z)).toBeLessThan(1.5);
     }
     expect(Math.atan(steepest)).toBeLessThan((10.5 * Math.PI) / 180);
-    expect(worstBump).toBeLessThan(0.36);
   });
 
   it('goes up and down along the bed', () => {
@@ -159,29 +157,41 @@ describe('dry river terrain', () => {
     }
   });
 
-  it('floors the bed with boulders and walls it in, within the GPU tyres’ rock set', async () => {
-    const { generateRocks } = await import('../src/terrain/rocks.js');
-    const { MAX_ROCKS } = await import('../src/tire/gpu-tire-solver.js').catch(() => ({ MAX_ROCKS: 48 }));
-    const rocks = [];
-    for (let cx = -3; cx < 3; cx++) for (let cz = -3; cz < 3; cz++) rocks.push(...generateRocks(heightAt, cx, cz, { count: 70 }));
-    for (const p of walkBed(150).filter((_, i) => i % 20 === 0)) {
-      const near = rocks.filter((r) => Math.hypot(r.x - p.x, r.z - p.z) < 6.5 + r.size * 2).length;
-      expect(near).toBeLessThanOrEqual(MAX_ROCKS * 0.8);
+  it('floors the bed with one rock sheet, rising into boulder walls', () => {
+    const points = walkBed(600).filter((_, i) => i % 4 === 0);
+    let bedMax = 0;
+    let wallSum = 0;
+    let walls = 0;
+    for (const p of points) {
+      const side = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
+      for (let d = -3.5; d <= 3.5; d += 0.5) {
+        const s = heightAt.sample(p.x + side[0] * d, p.z + side[1] * d);
+        // All rock, no ground showing between the humps, and bare rock for the tyres.
+        expect(s.stone).toBeGreaterThanOrEqual(0.04 - 1e-9);
+        expect(heightAt.rockAt(p.x + side[0] * d, p.z + side[1] * d)).toBe(true);
+        bedMax = Math.max(bedMax, s.stone);
+      }
+      for (const sgn of [1, -1]) {
+        let top = 0;
+        for (let d = 5; d <= 8; d += 0.25) top = Math.max(top, heightAt.sample(p.x + side[0] * d * sgn, p.z + side[1] * d * sgn).stone);
+        wallSum += top;
+        walls++;
+      }
     }
-    // The bed is floored with boulders whose tops stand at most about half a metre proud, and each
-    // bank is walled in by taller ones.
-    const top = (r) => {
-      let t = -Infinity;
-      for (let i = 1; i < r.vertices.length; i += 3) t = Math.max(t, r.vertices[i]);
-      return t - heightAt(r.x, r.z);
-    };
-    const bed = rocks.filter((r) => r.bed);
-    const wall = rocks.filter((r) => r.wall);
-    expect(bed.length).toBeGreaterThan(100);
-    expect(wall.length).toBeGreaterThan(100);
-    for (const r of bed) expect(top(r)).toBeLessThan(0.55);
-    const wallTops = wall.map(top).sort((a, b) => a - b);
-    expect(wallTops[Math.floor(wallTops.length * 0.1)]).toBeGreaterThan(0.7);
+    expect(bedMax).toBeLessThan(1.2); // the big slabs in the bed stand at most about a metre
+    expect(wallSum / walls).toBeGreaterThan(1.0); // the walls stand over a metre
+    // The forest beyond has only a few loose rocks.
+  });
+
+  it('builds a connected rock mesh and collider for chunks on the bed', async () => {
+    const { rockSheetData, rockSheetTrimesh, ROCK_COLLIDER_BANDS } = await import('../src/terrain/rock-sheet.js');
+    const data = rockSheetData(heightAt, 0, -1);
+    expect(data.positions.length).toBeGreaterThan(9 * 1000);
+    let tris = 0;
+    for (let band = 0; band < ROCK_COLLIDER_BANDS; band++) tris += (rockSheetTrimesh(heightAt, 0, -1, band)?.indices.length ?? 0) / 3;
+    expect(tris).toBeGreaterThan(1000);
+    // Far from any bed: nothing.
+    expect(rockSheetData(heightAt, 3, 3)).toBeNull();
   });
 
   it('keeps trees out of the bed', async () => {

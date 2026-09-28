@@ -194,8 +194,9 @@ export function footprint(heightAt, x, z, yaw) {
   const c = Math.cos(yaw);
   const s = Math.sin(yaw);
   const hs = [];
-  for (const a of [-1, 0, 1]) {
-    for (const b of [-1, 0, 1]) {
+  // A 5 x 5 grid, fine enough for the dry river's rock humps.
+  for (const a of [-1, -0.5, 0, 0.5, 1]) {
+    for (const b of [-1, -0.5, 0, 0.5, 1]) {
       const lx = a * HALF_LENGTH;
       const lz = b * HALF_WIDTH;
       // Local +x is forward (world (cos, -sin) for a yaw about +y), local +z to the right.
@@ -210,8 +211,7 @@ function obstaclesNear(world, x, z, radius) {
   const out = [];
   world.query(RockField).forEach((e) => {
     const field = e.get(RockField);
-    // The dry river's bed rocks are the ground there: the car is dropped onto them instead.
-    for (const r of field.rocks) if (!r.bed && Math.hypot(r.x - x, r.z - z) < radius) out.push({ x: r.x, z: r.z, r: r.size * 1.2 });
+    for (const r of field.rocks) if (Math.hypot(r.x - x, r.z - z) < radius) out.push({ x: r.x, z: r.z, r: r.size * 1.2 });
     for (const p of field.plants ?? []) {
       if (p.kind === 'tree' && Math.hypot(p.x - x, p.z - z) < radius) out.push({ x: p.x, z: p.z, r: 0.5 });
     }
@@ -219,29 +219,15 @@ function obstaclesNear(world, x, z, radius) {
   return out;
 }
 
-// The highest top of the dry river's bed rocks within the car's footprint around (x, z).
-function bedRockTop(world, x, z) {
-  let top = -Infinity;
-  world.query(RockField).forEach((e) => {
-    for (const r of e.get(RockField).rocks) {
-      if (!r.bed || Math.hypot(r.x - x, r.z - z) > HALF_LENGTH + r.size) continue;
-      if (r.top === undefined) {
-        r.top = -Infinity;
-        for (let i = 1; i < r.vertices.length; i += 3) r.top = Math.max(r.top, r.vertices[i]);
-      }
-      top = Math.max(top, r.top);
-    }
-  });
-  return top;
-}
-
 // A good place to put the car back on its wheels near (x, z): on the nearest road if the terrain
 // has roads, otherwise the nearest level patch, clear of rocks and trees. The car faces along the
 // road (whichever way is closer to its old heading). Falls back to the old spot.
 export function findSpawnSpot(world, heightAt, x0, z0, yaw0) {
+  // The dry river's rock bed is never level: allow its humps.
+  const tolerance = heightAt.rockAt ? 0.8 : 0.35;
   const level = (x, z, yaw) => {
     const f = footprint(heightAt, x, z, yaw);
-    return f.max - f.min < 0.35;
+    return f.max - f.min < tolerance;
   };
   const clear = (x, z) => obstaclesNear(world, x, z, 6).every((o) => Math.hypot(o.x - x, o.z - z) > o.r + HALF_LENGTH + 0.3);
   const facing = (h) => {
@@ -286,9 +272,8 @@ export function findSpawnSpot(world, heightAt, x0, z0, yaw0) {
 // Puts the car on its wheels at (x, z), facing `yaw` (radians about +y; 0 faces +x).
 export function respawnCarAt(world, heightAt, x, z, yaw = 0) {
   const car = world.queryFirst(IsPlayer, Vehicle);
-  // Drop from just above the highest ground (or bed rock) under the car, so no wheel starts inside
-  // a slope or a rock.
-  const ground = Math.max(footprint(heightAt, x, z, yaw).max, bedRockTop(world, x, z));
+  // Drop from just above the highest ground under the car, so no wheel starts inside a slope.
+  const ground = footprint(heightAt, x, z, yaw).max;
   const pose = {
     position: { x, y: ground + startHeight(), z },
     rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },

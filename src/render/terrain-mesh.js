@@ -169,7 +169,7 @@ export function chunkMeshData(heightAt, heights, cx, cz, size = CHUNK_SIZE, res 
   for (let iz = -1; iz <= n; iz++) {
     for (let ix = -1; ix <= n; ix++) {
       const inside = ix >= 0 && ix < n && iz >= 0 && iz < n;
-      grid[ix + 1 + (iz + 1) * m] = inside ? heights[ix + iz * n] : heightAt(x0 + ix * step, z0 + iz * step);
+      grid[ix + 1 + (iz + 1) * m] = inside ? heights[ix + iz * n] : (heightAt.coarse ?? heightAt)(x0 + ix * step, z0 + iz * step);
     }
   }
   const at = (ix, iz) => grid[ix + 1 + (iz + 1) * m];

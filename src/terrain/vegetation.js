@@ -3,7 +3,7 @@
 import { CHUNK_SIZE } from './chunk.js';
 import { mulberry32 } from './height.js';
 import { ROAD_HALF_WIDTH } from './canyon.js';
-import { BED_HALF_WIDTH } from './riverbed.js';
+import { ROCK_REACH } from './riverbed.js';
 
 const CELL = 3; // m, jittered candidate grid
 
@@ -68,7 +68,7 @@ function generateRiverPlants(heightAt, cx, cz) {
       const shade = rand();
       if (roll > 0.3) continue;
       const dist = heightAt.roadDistance(x, z);
-      if (dist < BED_HALF_WIDTH + 4.5) continue; // the bed and its boulder walls
+      if (dist < ROCK_REACH) continue; // the bed's rock sheet and its walls
       const slope = Math.abs(heightAt(x + 0.8, z) - heightAt(x - 0.8, z)) / 1.6 + Math.abs(heightAt(x, z + 0.8) - heightAt(x, z - 0.8)) / 1.6;
       if (slope > 0.7) continue;
       let pBush;

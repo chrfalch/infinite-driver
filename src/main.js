@@ -45,7 +45,7 @@ import { updateInstanceBatchers } from './render/instance-batcher.js';
 import { createPhysicsClient, workerGpuSupported } from './physics/client.js';
 import { ROCK_COUNT, startChunkWorker } from './systems/terrain.js';
 import { CAR } from './vehicle/config.js';
-import { ROCK_REFRESH, updateGpuGround, updateGpuRocks } from './tire/gpu-tires.js';
+import { updateGpuGround, updateGpuRocks } from './tire/gpu-tires.js';
 import { createTouchControls } from './ui/touch-controls.js';
 import { count, reportError, sample, startOverlay, timed } from './perf.js';
 
@@ -285,7 +285,7 @@ function syncRemoteSolver(world) {
   const p = vehicle.body.translation();
   updateGpuGround(solver, world.get(HeightField).heightAt, p.x, p.z, world.get(Deformation).map);
   const last = solver.rockCentre;
-  if (!last || Math.hypot(last.x - p.x, last.z - p.z) > ROCK_REFRESH) {
+  if (!last || Math.hypot(last.x - p.x, last.z - p.z) > 3) {
     const rocks = [];
     world.query(RockField).forEach((e) => rocks.push(...e.get(RockField).rocks));
     updateGpuRocks(solver, rocks, p.x, p.z);

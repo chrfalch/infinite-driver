@@ -25,7 +25,7 @@ import { Fn, If, Loop, attribute, cross, float, int, ivec2, normalize, textureLo
 
 // Rocks near a tyre, for the vertex shader: up to DRAW_ROCKS rocks, each a bounding sphere and
 // DRAW_FACES face planes (the same convex hulls the tyre solver collides with).
-const DRAW_ROCKS = 5;
+const DRAW_ROCKS = 3;
 const DRAW_FACES = 80;
 
 export const LUG_HEIGHT = 0.022; // m, matches the solver's contact radius (0.02) plus a little

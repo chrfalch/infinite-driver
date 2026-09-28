@@ -3,6 +3,7 @@
 // ground, rocks and tree trunks, so both threads agree on where everything is.
 import { CHUNK_RES, CHUNK_SIZE, chunkKey, sampleChunk } from '../terrain/chunk.js';
 import { generateRocks } from '../terrain/rocks.js';
+import { ROCK_COLLIDER_BANDS, rockSheetTrimesh } from '../terrain/rock-sheet.js';
 import { generatePlants } from '../terrain/vegetation.js';
 
 let indices = null;
@@ -78,8 +79,15 @@ export function createColliderStreamer({ rapier, world: physicsWorld, ecs, RockF
     }
   }
 
+  // One band of the dry river's rock sheet (on top of the ground).
+  function buildSheetBand(c) {
+    const mesh = rockSheetTrimesh(heightAt, c.cx, c.cz, c.sheet.length);
+    c.sheet.push(mesh ? physicsWorld.createCollider(rapier.ColliderDesc.trimesh(mesh.vertices, mesh.indices).setFriction(1.3)) : null);
+  }
+
   function remove(key, c) {
     if (c.ground) physicsWorld.removeCollider(c.ground, false);
+    for (const col of c.sheet) if (col) physicsWorld.removeCollider(col, false);
     for (const col of c.colliders ?? []) physicsWorld.removeCollider(col, false);
     c.entity?.destroy();
     chunks.delete(key);
@@ -99,15 +107,17 @@ export function createColliderStreamer({ rapier, world: physicsWorld, ecs, RockF
         const cz = ccz + dz;
         const key = chunkKey(cx, cz);
         let c = chunks.get(key);
-        if (!c) chunks.set(key, (c = { cx, cz, ground: null, colliders: null, rocks: null }));
-        if (!c.ground || !c.done) jobs.push([dx * dx + dz * dz, c]);
+        if (!c) chunks.set(key, (c = { cx, cz, ground: null, sheet: [], colliders: null, rocks: null }));
+        if (!c.ground || c.sheet.length < ROCK_COLLIDER_BANDS || !c.done) jobs.push([dx * dx + dz * dz, c]);
       }
     }
     jobs.sort((a, b) => a[0] - b[0]);
     for (const [, c] of force ? jobs : jobs.slice(0, 1)) {
       if (!c.ground) buildGround(c);
+      else if (c.sheet.length < ROCK_COLLIDER_BANDS) buildSheetBand(c);
       else if (!c.rocks) c.rocks = generateRocks(heightAt, c.cx, c.cz, { count: rockCount });
       else buildRocks(c);
+      while (force && c.sheet.length < ROCK_COLLIDER_BANDS) buildSheetBand(c);
       if (force && !c.done) {
         c.rocks ??= generateRocks(heightAt, c.cx, c.cz, { count: rockCount });
         buildRocks(c, true);

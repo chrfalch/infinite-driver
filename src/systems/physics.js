@@ -1,5 +1,5 @@
 import { Deformation, HeightField, Input, Physics, RigidBody, RockField, Time, Transform, Vehicle } from '../ecs/traits.js';
-import { ROCK_REFRESH, updateGpuGround, updateGpuRocks } from '../tire/gpu-tires.js';
+import { updateGpuGround, updateGpuRocks } from '../tire/gpu-tires.js';
 import { GPU_TIRE } from '../tire/config.js';
 import { MAX_STEPS } from '../tire/gpu-tire-solver.js';
 import { applyDriverInput } from '../vehicle/physics.js';
@@ -14,9 +14,9 @@ function updateGpuTyreWorld(world, vehicle) {
   const p = vehicle.body.translation();
   const { heightAt } = world.get(HeightField);
   updateGpuGround(solver, heightAt, p.x, p.z, world.get(Deformation)?.map);
-  // Refresh the rock set when the car has moved a little.
+  // Refresh the rock set when the car has moved a few metres.
   const last = solver.rockCentre;
-  if (!last || Math.hypot(last.x - p.x, last.z - p.z) > ROCK_REFRESH) {
+  if (!last || Math.hypot(last.x - p.x, last.z - p.z) > 3) {
     const rocks = [];
     world.query(RockField).forEach((e) => rocks.push(...e.get(RockField).rocks));
     updateGpuRocks(solver, rocks, p.x, p.z);

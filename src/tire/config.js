@@ -97,7 +97,7 @@ export function effectiveTire(tire, performance) {
   return { ...tire, pgsIterations: 1, substeps: 1, segmentsAround: 20, segmentsAcross: 6 };
 }
 // Tyre friction on rock, as a multiple of the tyre's friction setting.
-export const ROCK_GRIP = 1.5;
+export const ROCK_GRIP = 2;
 
 export function effectiveGpuTire(gpu, performance, ground = GROUND) {
   // Loose soil grips less than firm ground.
