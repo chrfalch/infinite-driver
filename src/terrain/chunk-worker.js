@@ -20,6 +20,13 @@ self.onmessage = (e) => {
     rockCount = msg.rockCount;
     return;
   }
+  // Just the dry river's rock sheet, for a chunk the main thread built itself (it costs ~90 ms).
+  if (msg.type === 'sheet') {
+    const sheet = rockSheetData(heightAt, msg.cx, msg.cz);
+    const transfer = sheet ? [sheet.positions.buffer, sheet.normals.buffer, sheet.colors.buffer, sheet.indices.buffer] : [];
+    postMessage({ type: 'sheet', cx: msg.cx, cz: msg.cz, sheet }, transfer);
+    return;
+  }
   if (msg.type !== 'chunk') return;
   try {
     const { cx, cz } = msg;
@@ -30,7 +37,7 @@ self.onmessage = (e) => {
     const plants = generatePlants(heightAt, cx, cz);
     const sheet = rockSheetData(heightAt, cx, cz);
     const transfer = [heights.buffer, ...Object.values(mesh).map((a) => a.buffer)];
-    if (sheet) transfer.push(sheet.positions.buffer, sheet.normals.buffer, sheet.colors.buffer);
+    if (sheet) transfer.push(sheet.positions.buffer, sheet.normals.buffer, sheet.colors.buffer, sheet.indices.buffer);
     if (rocksMesh) transfer.push(rocksMesh.positions.buffer, rocksMesh.colors.buffer, rocksMesh.normals.buffer);
     postMessage({ type: 'chunk', cx, cz, heights, mesh, rocks, rocksMesh, plants, sheet }, transfer);
   } catch (error) {
