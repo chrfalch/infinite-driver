@@ -11,8 +11,9 @@ function simulate(seconds, inputFn, { dt: drive = new Drivetrain({ ...DEFAULT_DR
   const log = [];
   for (let t = 0; t < seconds; t += DT) {
     const spins = [v / R, v / R, v / R, v / R];
-    const torques = drive.update(DT, inputFn(t, v), spins, v, R);
-    const force = torques.reduce((a, b) => a + b, 0) / R - drag * v * Math.abs(v) - Math.sign(v) * 0.018 * MASS * 9.81 * (Math.abs(v) > 0.05 ? 1 : 0);
+    const input = inputFn(t, v);
+    const torques = drive.update(DT, input, spins, v, R);
+    const force = torques.reduce((a, b) => a + b, 0) / R - (input.climb ?? 0) * MASS - drag * v * Math.abs(v) - Math.sign(v) * 0.018 * MASS * 9.81 * (Math.abs(v) > 0.05 ? 1 : 0);
     // The engine's reflected inertia is felt through the clutch torque already; wheels add a little.
     v += (force / (MASS + (4 * 3.5) / (R * R))) * DT;
     log.push({ t, v, rpm: drive.rpm, gear: drive.gear });
@@ -44,6 +45,17 @@ describe('drivetrain', () => {
     expect(t100).toBeLessThan(16);
     expect(maxGear).toBeGreaterThanOrEqual(4);
     expect(maxRpm).toBeLessThan(DEFAULT_DRIVETRAIN.limiterRpm + 300);
+  });
+
+  it('holds a gear that can pull up a steep hill instead of hunting', () => {
+    // 30°: the slope pulls back at 4.9 m/s², more than 2nd gear can overcome.
+    const climb = 9.81 * Math.sin((30 * Math.PI) / 180);
+    const { log } = simulate(15, () => ({ throttle: 1, reverseRequest: false, climb, mass: MASS }));
+    let shifts = 0;
+    for (let i = 1; i < log.length; i++) if (log[i].gear !== log[i - 1].gear) shifts++;
+    console.log('30° climb: speed at 15 s', (log.at(-1).v * 3.6).toFixed(0), 'km/h, gear', log.at(-1).gear, ',', shifts, 'gear changes');
+    expect(log.at(-1).v).toBeGreaterThan(5);
+    expect(shifts).toBeLessThanOrEqual(2);
   });
 
   it('brakes with the engine when lifting off in gear, and downshifts', () => {

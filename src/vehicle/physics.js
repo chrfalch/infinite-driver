@@ -135,12 +135,29 @@ export function applyDriverInput(state, input, dt, car = CAR) {
   const radius = controller.tire?.outerRadius ?? car.wheelRadius;
   const rolling = controller.rollingRadius ? controller.rollingRadius() : radius;
   const spins = [0, 1, 2, 3].map((i) => (controller.wheelSpin ? controller.wheelSpin(i) : speed / rolling));
-  const torques = drivetrain.update(dt, { throttle, reverseRequest }, spins, speed, rolling);
+
+  // Share of gravity along the car's nose (positive = nose up), and the force it pulls the car back
+  // down a slope with (the chassis plus some for wheels, hubs and links).
+  const q = body.rotation();
+  const noseUp = 2 * (q.x * q.y + q.w * q.z);
+  const slopeForce = car.mass * 1.15 * 9.81 * Math.abs(noseUp);
+  const dir = inReverse || reverseRequest ? -1 : 1;
+  const climb = 9.81 * noseUp * dir;
+  const torques = drivetrain.update(dt, { throttle, reverseRequest, climb, mass: car.mass * 1.15 }, spins, speed, rolling);
 
   // With nothing pressed at walking pace, the clutch is out and there is no engine braking left, so
-  // roll gently to a stop and hold there (like a light touch on the brake).
+  // roll gently to a stop and hold there (like a light touch on the brake), also on a slope.
   const idleInput = input.throttle === 0 && input.brake === 0;
-  const hold = idleInput && absSpeed < 2 ? car.mass * (absSpeed < 0.4 ? 3 : 1.2) : 0;
+  let hold = idleInput && absSpeed < 2 ? car.mass * (absSpeed < 0.4 ? 3 : 1.2) + slopeForce * 1.3 : 0;
+
+  // Hill-start assist: pulling away up a slope, the brakes hold the car until the clutch carries
+  // enough torque to hold it on the slope, then let go as the drive takes over. Without it, the car
+  // rolls back before the clutch bites, and rolling back turns the pedal into a brake.
+  const uphill = noseUp * dir > 0.03;
+  if (throttle > 0 && uphill && speed * dir < 1.5) {
+    const driveForce = (torques.reduce((a, b) => a + b, 0) / rolling) * dir;
+    hold = Math.max(hold, (slopeForce - driveForce) * 1.3);
+  }
 
   // Rapier applies brake as an impulse per step, so convert from force.
   const frontBrake = (brake * 0.35 + hold * 0.25) * dt;

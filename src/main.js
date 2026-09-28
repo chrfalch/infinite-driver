@@ -54,8 +54,11 @@ async function main() {
   // The frame updates world matrices itself, before the instanced parts read them (see draw).
   render.scene.matrixWorldAutoUpdate = false;
   const world = createWorld();
-  // Red-rock canyon with gravel roads by default; ?terrain=flat (tests) or ?terrain=hills.
-  const mode = new URLSearchParams(location.search).get('terrain') ?? 'canyon';
+  // Red-rock canyon with gravel roads by default; ?terrain=flat (tests), ?terrain=hills, or
+  // ?terrain=ramp&slope=20 (a straight climb for hill-start tests).
+  const terrainParams = new URLSearchParams(location.search);
+  let mode = terrainParams.get('terrain') ?? 'canyon';
+  if (mode === 'ramp') mode = `ramp:${terrainParams.get('slope') ?? 20}`;
   const heightAt = createHeightField({ mode });
   const deformation = new GroundDeformation();
 

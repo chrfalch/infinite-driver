@@ -10,11 +10,18 @@ beforeAll(async () => {
   await RAPIER.init();
 });
 
-function setup() {
+function setup({ ground = null, rotation = null } = {}) {
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   world.timestep = DT;
-  world.createCollider(RAPIER.ColliderDesc.cuboid(5000, 1, 5000).setTranslation(0, -1, 0));
+  const floor = RAPIER.ColliderDesc.cuboid(5000, 1, 5000).setTranslation(0, -1, 0);
+  // A rotated ground turns about its top face's centre (the origin), so the car still starts on it.
+  if (ground) {
+    const { x, y, z, w } = ground;
+    floor.setTranslation(-2 * (x * y - w * z), -(1 - 2 * (x * x + z * z)), -2 * (y * z + w * x)).setRotation(ground);
+  }
+  world.createCollider(floor);
   const car = createCarBody(RAPIER, world, { x: 0, y: 1.2, z: 0 });
+  if (rotation) car.body.setRotation(rotation, true);
   const state = { ...car, steer: 0, drivetrain: new Drivetrain({ ...DEFAULT_DRIVETRAIN }) };
   const run = (seconds, input, onStep) => {
     for (let t = 0; t < seconds; t += DT) {
@@ -103,6 +110,22 @@ describe('car physics', () => {
     expect(t).toBeGreaterThan(3);
     expect(t).toBeLessThan(10);
     expect(Math.abs(state.body.linvel().x)).toBeLessThan(0.05);
+  });
+
+  it('holds still on a 20° slope and pulls away uphill without rolling back', () => {
+    // A ground plane tilted 20° about z, rising along +x, with the car sitting on it nose uphill.
+    const a = (20 * Math.PI) / 180;
+    const tilt = { x: 0, y: 0, z: Math.sin(a / 2), w: Math.cos(a / 2) };
+    const { state, run } = setup({ ground: tilt, rotation: tilt });
+    run(4, idle);
+    const x0 = state.body.translation().x;
+    expect(Math.abs(state.body.linvel().x)).toBeLessThan(0.1);
+    let minV = 0;
+    run(8, { ...idle, throttle: 1 }, () => (minV = Math.min(minV, state.body.linvel().x)));
+    const climbed = state.body.translation().x - x0;
+    console.log('20° hill start: climbed', climbed.toFixed(1), 'm in 8 s; worst rollback', minV.toFixed(2), 'm/s; gear', state.drivetrain.label);
+    expect(minV).toBeGreaterThan(-0.3);
+    expect(climbed).toBeGreaterThan(20);
   });
 
   it('turns and holds plausible lateral grip', () => {

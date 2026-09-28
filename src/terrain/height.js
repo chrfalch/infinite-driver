@@ -16,6 +16,11 @@ export function mulberry32(seed) {
 export function createHeightField({ seed = 1337, mode = 'flat' } = {}) {
   if (mode === 'flat') return () => 0;
   if (mode === 'canyon') return createCanyonField(seed);
+  // Test slope ('ramp:20'): flat for x < 6 m, then a steady climb of that many degrees along +x.
+  if (mode.startsWith('ramp')) {
+    const grade = Math.tan(((Number(mode.split(':')[1]) || 20) * Math.PI) / 180);
+    return (x) => Math.max(0, x - 6) * grade;
+  }
 
   const rand = mulberry32(seed);
   const continents = createNoise2D(rand);
