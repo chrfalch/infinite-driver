@@ -42,6 +42,7 @@ import { createWater } from './render/water.js';
 import { createPhotoTiles } from './render/photo-tiles.js';
 import { createCity } from './city/city.js';
 import { createFacadeBaker, facadeTarget } from './render/facade-bake.js';
+import { initRoofs } from './render/roofs.js';
 import { setFacadeFocus } from './render/facade.js';
 import { applyPendingCarAction, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
@@ -74,6 +75,8 @@ async function main() {
   const city =
     place && tilesMode === 'city' ? createCity({ projection: heightAt.real.projection, heightAt, scene: render.scene, facades }) : null;
   if (city) {
+    // Pitched roofs need the straight skeleton module (flat roofs if it fails to load).
+    if (facades) await initRoofs().catch((error) => console.warn('pitched roofs off', error));
     heightAt.real.city = city;
     // ?ground=photo: satellite imagery under the OSM city instead of the procedural ground.
     heightAt.real.groundPhoto = params.get('ground') === 'photo';

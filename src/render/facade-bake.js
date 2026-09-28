@@ -43,7 +43,7 @@ facadeTarget.texture.minFilter = LinearFilter;
 facadeTarget.texture.generateMipmaps = false;
 
 const MEASURE_PER_FRAME = 12; // buildings whose height is measured per frame
-const HEIGHT_TOLERANCE = 2.5; // m: OSM heights closer than this to the photos are kept
+const HEIGHT_TOLERANCE = 2.5; // m: OSM wall heights closer than this to the photos are kept
 
 function insideRing(ring, x, z) {
   let inside = false;
@@ -130,21 +130,33 @@ export function createFacadeBaker({ key, place, renderer, heightAt }) {
     return true;
   }
 
-  // A building's wall height as photographed: roof hits 1.5 m inside the middle of its longest
-  // edges, over the lowest ground under it (the same ground city/buildings.js builds on). The
-  // median of these is about the eaves: it leaves out a pitched roof's ridge and a tower.
-  // Null when too few hits.
+  // A building's wall and roof heights as photographed, over the lowest ground under it (the
+  // same ground city/buildings.js builds on): the eaves are the median roof hit 1.5 m inside the
+  // middle of its longest edges, the ridge a high percentile of hits on a grid inside it (so a
+  // chimney or a tower does not count). Null when too few hits.
   const INSIDE = 1.5;
   const down = new Vector3(0, -1, 0);
+  function roofHit(x, z) {
+    raycaster.set(from.set(x, 3000, z), down);
+    return raycaster.intersectObject(tiles.group, true)[0]?.point.y ?? null;
+  }
   function measureHeight(b) {
     const ring = b.outer;
     let ground = Infinity;
     let area = 0;
+    let minX = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxZ = -Infinity;
     for (let i = 0; i < ring.length; i++) {
       const p = ring[i];
       const q = ring[(i + 1) % ring.length];
       ground = Math.min(ground, heightAt(p.x, p.z));
       area += p.x * q.z - q.x * p.z;
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minZ = Math.min(minZ, p.z);
+      maxZ = Math.max(maxZ, p.z);
     }
     const side = area > 0 ? 1 : -1; // as in city/buildings.js: outward normal = side * (dz, -dx)
     const edges = ring
@@ -153,18 +165,31 @@ export function createFacadeBaker({ key, place, renderer, heightAt }) {
       .filter((e) => e.len > INSIDE * 3)
       .sort((a, c) => c.len - a.len)
       .slice(0, 6);
-    const heights = [];
+    const eaves = [];
     for (const { p, q, len } of edges) {
       const x = (p.x + q.x) / 2 - (side * (q.z - p.z) * INSIDE) / len;
       const z = (p.z + q.z) / 2 + (side * (q.x - p.x) * INSIDE) / len;
       if (!insideRing(ring, x, z)) continue;
-      raycaster.set(from.set(x, 3000, z), down);
-      const hit = raycaster.intersectObject(tiles.group, true)[0];
-      if (hit) heights.push(hit.point.y - ground);
+      const y = roofHit(x, z);
+      if (y !== null) eaves.push(y - ground);
     }
-    if (heights.length < 2) return null;
-    heights.sort((a, c) => a - c);
-    return heights[Math.floor(heights.length / 2)];
+    if (eaves.length < 2) return null;
+    eaves.sort((a, c) => a - c);
+    const eave = eaves[Math.floor(eaves.length / 2)];
+    const tops = [];
+    const n = 4;
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const x = minX + ((i + 0.5) / n) * (maxX - minX);
+        const z = minZ + ((j + 0.5) / n) * (maxZ - minZ);
+        if (!insideRing(ring, x, z)) continue;
+        const y = roofHit(x, z);
+        if (y !== null) tops.push(y - ground);
+      }
+    }
+    tops.sort((a, c) => a - c);
+    const ridge = tops.length >= 3 ? tops[Math.floor(tops.length * 0.8)] : eave;
+    return { eave, ridge };
   }
 
   // Only the walls whose photo was found use the layer.
@@ -328,8 +353,16 @@ export function createFacadeBaker({ key, place, renderer, heightAt }) {
         for (; job.measured < end; job.measured++) {
           const b = list[job.measured];
           if (b.minHeight > 0) continue;
-          const h = measureHeight(b);
-          if (h !== null && h > 2.5 && h < 200 && Math.abs(h - b.height) > HEIGHT_TOLERANCE) job.heights.set(b, h);
+          const m = measureHeight(b);
+          if (m === null || m.eave < 2.5 || m.eave > 200) continue;
+          // A roof rising 1.5 m or more over the eaves (but not more than the building is wide)
+          // is pitched.
+          const width = Math.min(...['x', 'z'].map((k) => Math.max(...b.outer.map((p) => p[k])) - Math.min(...b.outer.map((p) => p[k]))));
+          const roof = m.ridge - m.eave;
+          const roofHeight = roof > 1.5 && roof < width * 0.8 ? roof : 0;
+          if (Math.abs(m.eave - b.height) > HEIGHT_TOLERANCE || roofHeight) {
+            job.heights.set(b, { height: Math.abs(m.eave - b.height) > HEIGHT_TOLERANCE ? m.eave : b.height, roofHeight });
+          }
         }
         if (job.measured < list.length) return;
         if (job.heights.size) rebuild(job.group, job.heights);

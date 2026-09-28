@@ -159,7 +159,7 @@ export function createCity({ projection, heightAt, scene, facades = null }) {
     const roofVertices = [];
     for (let i = 0; i < count; i++) {
       roofMap[i * 3 + 2] = -1;
-      if (built.facade[i * 4 + 3] < 0.5 || built.normals[i * 3 + 1] < 0.5) continue;
+      if (built.facade[i * 4 + 3] < 0.5 || built.normals[i * 3 + 1] <= 0.05) continue; // roof faces, not raised floors
       roofMap[i * 3] = (built.positions[i * 3] - bounds.x0) / (bounds.x1 - bounds.x0);
       roofMap[i * 3 + 1] = (built.positions[i * 3 + 2] - bounds.z0) / (bounds.z1 - bounds.z0);
       roofVertices.push(i);
@@ -188,10 +188,11 @@ export function createCity({ projection, heightAt, scene, facades = null }) {
     return { mesh, buildings, bounds: g.bounds, roofVertices: g.roofVertices, layer: -1, walls: g.walls, facadeLayer: -1, solids: g.solids };
   }
 
-  // Rebuilds a group with new heights (Map building -> height in m), e.g. measured from the 3D
-  // tiles (render/facade-bake.js). Its colliders are rebuilt near the car as usual.
+  // Rebuilds a group with new heights (Map building -> { height, roofHeight } in m), e.g.
+  // measured from the 3D tiles (render/facade-bake.js). Its colliders are rebuilt near the car
+  // as usual.
   function rebuildGroup(group, heights) {
-    const buildings = group.buildings.map((b) => (heights.has(b) ? { ...b, height: heights.get(b), osmHeight: b.osmHeight ?? b.height } : b));
+    const buildings = group.buildings.map((b) => (heights.has(b) ? { ...b, ...heights.get(b), osmHeight: b.osmHeight ?? b.height } : b));
     const g = groupGeometry(buildings, group.bounds);
     if (!g) return;
     for (const s of group.solids) {

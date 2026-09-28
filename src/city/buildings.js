@@ -8,6 +8,14 @@
 //   tint   = wall colour; seed = per-building random number (window layout, glass tint).
 import { Color, ShapeUtils, Vector2 } from 'three/webgpu';
 
+// Straight skeleton for pitched roofs: (rings of [x, z], outer counter-clockwise and closed) ->
+// { vertices: [x, z, distance from the edge], polygons: [vertex indices] } or null. Set by
+// render/roofs.js once its Wasm module is loaded; until then (and in tests) roofs are flat.
+let skeleton = null;
+export function setRoofSkeleton(fn) {
+  skeleton = fn;
+}
+
 // Oslo facade colours: ochre, cream, terracotta, brick, pale yellow, salmon, greys.
 const PALETTE = ['#d8b27a', '#e6dac0', '#b8674a', '#8f4d3d', '#e2cf92', '#d69c80', '#c8c5be', '#e8e4dc', '#a9a49a', '#c7a57f'].map(
   (c) => new Color(c),
@@ -138,10 +146,64 @@ export function buildBuildings(buildings, heightAt) {
       }
     }
 
-    // Flat roof (and a floor for raised parts), triangulated with its holes.
+    // Pitched roof: with a measured roof height (b.roofHeight, from render/facade-bake.js), a
+    // hipped roof over the straight skeleton of the footprint: each face rises from one wall's
+    // top edge at the slope that puts the highest ridge at top + roofHeight.
     const outer = area(b.outer) > 0 ? b.outer : [...b.outer].reverse();
+    const holeRings = b.holes.map((h) => (area(h) < 0 ? h : [...h].reverse()));
+    let pitched = false;
+    let ridge = top;
+    if (b.roofHeight > 0.5 && skeleton && b.minHeight <= 0) {
+      const ring = (r) => [...r.map((p) => [p.x, p.z]), [r[0].x, r[0].z]];
+      let result = null;
+      try {
+        result = skeleton([ring(outer), ...holeRings.map(ring)]);
+      } catch {
+        result = null;
+      }
+      const maxT = result ? Math.max(...result.vertices.map((v) => v[2])) : 0;
+      if (result && maxT > 0.1) {
+        const slope = b.roofHeight / maxT;
+        const at = (k) => {
+          const [x, z, t] = result.vertices[k];
+          return { x, y: top + t * slope, z };
+        };
+        for (const face of result.polygons) {
+          const pts = face.map(at);
+          const flat = pts.map((p) => new Vector2(p.x, p.z));
+          let tris;
+          try {
+            tris = ShapeUtils.triangulateShape(flat, []);
+          } catch {
+            continue;
+          }
+          // Face normal from its first triangle, facing up.
+          const [a0, b0, c0] = tris[0] ? tris[0].map((k) => pts[k]) : [pts[0], pts[1], pts[2]];
+          let nx = (b0.y - a0.y) * (c0.z - a0.z) - (b0.z - a0.z) * (c0.y - a0.y);
+          let ny = (b0.z - a0.z) * (c0.x - a0.x) - (b0.x - a0.x) * (c0.z - a0.z);
+          let nz = (b0.x - a0.x) * (c0.y - a0.y) - (b0.y - a0.y) * (c0.x - a0.x);
+          const flip = ny < 0 ? -1 : 1;
+          const nl = Math.hypot(nx, ny, nz) || 1;
+          nx = (nx * flip) / nl;
+          ny = (ny * flip) / nl;
+          nz = (nz * flip) / nl;
+          for (const tri of tris) {
+            const [p, q, r] = tri.map((k) => pts[k]);
+            // Counter-clockwise seen from above the face.
+            const up = (q.z - p.z) * (r.x - p.x) - (q.x - p.x) * (r.z - p.z) > 0;
+            for (const v of up ? [p, q, r] : [p, r, q]) {
+              vertex(v.x, v.y, v.z, nx, ny, nz, v.x, v.z, 1);
+              ridge = Math.max(ridge, v.y);
+            }
+          }
+        }
+        pitched = true;
+      }
+    }
+
+    // Flat roof (and a floor for raised parts), triangulated with its holes.
     const contour = outer.map((p) => new Vector2(p.x, p.z));
-    const holes = b.holes.map((h) => (area(h) < 0 ? h : [...h].reverse()).map((p) => new Vector2(p.x, p.z)));
+    const holes = holeRings.map((h) => h.map((p) => new Vector2(p.x, p.z)));
     const all = [...contour, ...holes.flat()];
     let faces = [];
     try {
@@ -154,7 +216,7 @@ export function buildBuildings(buildings, heightAt) {
       // Up-facing when counter-clockwise seen from above (+y): (c - a) x (d - a) has +y.
       const up = (d.x - a.x) * (c.y - a.y) - (c.x - a.x) * (d.y - a.y) > 0;
       const tri = up ? [a, c, d] : [a, d, c];
-      for (const p of tri) vertex(p.x, top, p.y, 0, 1, 0, p.x, p.y, 1);
+      if (!pitched) for (const p of tri) vertex(p.x, top, p.y, 0, 1, 0, p.x, p.y, 1);
       if (b.minHeight > 0) for (const p of [...tri].reverse()) vertex(p.x, bottom, p.y, 0, -1, 0, p.x, p.y, 1);
     }
 
@@ -164,7 +226,7 @@ export function buildBuildings(buildings, heightAt) {
       first,
       count,
       min: { x: minX, y: bottom, z: minZ },
-      max: { x: maxX, y: top, z: maxZ },
+      max: { x: maxX, y: ridge, z: maxZ },
     });
   }
 
