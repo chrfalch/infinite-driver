@@ -38,6 +38,8 @@ const Params = d.struct({
   shapeStiffness: d.f32,
   treadShapeRadial: d.f32, // 0..1: share of shape memory kept radially on the tread (0 lets it dent)
   treadRadius: d.f32, // rest radius (in the wheel plane) above which a particle counts as tread
+  beltStretch: d.f32, // growth past its rest radius a particle may have, as a fraction (0 = off)
+  beltPull: d.f32, // fraction of the growth past beltStretch taken back per pass
   beadPull: d.f32,
   damping: d.f32,
   friction: d.f32,
@@ -451,6 +453,17 @@ export class GpuTireSolver {
             p += shape;
             let vv = k % params.nv;
             if (vv >= params.beadLow && vv <= params.beadHigh) { p += params.beadPull * (seat - p); }
+            // Belt: the cords alone let the pressure balloon the tyre (more with higher pressure and
+            // a bigger tyre), so a particle that grows more than beltStretch past its rest radius is
+            // pulled back, as the steel belt and plies of a real tyre hold it. Moving in (a dent)
+            // stays free. Part of the excess per pass: a hard limit makes the hub bounce.
+            if (params.beltStretch > 0.0) {
+              let relB = p - center;
+              let radB = relB - axleDir * dot(relB, axleDir);
+              let rNow = length(radB);
+              let rMax = length(r0.xy) * (1.0 + params.beltStretch);
+              if (rNow > rMax) { p -= params.beltPull * treadW * (1.0 - rMax / rNow) * radB; }
+            }
             setP(1u - src, k, floorClamp(p));
           }
           workgroupBarrier();
@@ -628,6 +641,8 @@ export class GpuTireSolver {
       shapeStiffness: s.shapeStiffness,
       treadShapeRadial: s.treadShapeRadial ?? 1,
       treadRadius: this.treadRadius,
+      beltStretch: s.beltStretch ?? 0,
+      beltPull: s.beltPull ?? 0.3,
       beadPull: s.beadPull,
       damping: s.damping,
       friction: s.friction,

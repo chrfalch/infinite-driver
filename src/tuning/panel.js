@@ -349,6 +349,8 @@ function addTireFolder(gui, world, scheduleRebuild) {
     ['bendStiffness', 'Bending (per pass)', 0, 1, 0.01],
     ['shapeStiffness', 'Shape memory (per pass)', 0, 0.3, 0.005],
     ['beadPull', 'Bead grip on rim (per pass)', 0.05, 1, 0.05],
+    ['beltStretch', 'Belt stretch limit (0 = off)', 0, 0.2, 0.005],
+    ['beltPull', 'Belt pull (per pass)', 0.05, 1, 0.05],
     ['damping', 'Damping (1/s)', 0, 30, 0.5],
     ['contactRadius', 'Tread thickness (m)', 0.005, 0.06, 0.005],
     ['segmentsAround', 'Segments around', 16, 48, 1],

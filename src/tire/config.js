@@ -59,6 +59,11 @@ export const DEFAULT_GPU_TIRE = Object.freeze({
   bendStiffness: 0.3,
   shapeStiffness: 0.1, // pull toward the moulded shape per pass (across the tread)
   treadShapeRadial: 0, // share of that pull kept radially on the tread (0 lets rocks dent it)
+  // The belt: rubber that grows more than beltStretch past its moulded radius is pulled back by
+  // beltPull of the excess per pass. Without it the pressure balloons the tyre (7 % at 45 kPa and
+  // the default size, 30 % at 165 kPa on a 0.55 x 0.6 m tyre), so few particles touch the ground.
+  beltStretch: 0.02, // 0 = off
+  beltPull: 0.3,
   beadPull: 0.5, // fraction of the gap to the rim seat closed per pass
   damping: 2, // 1/s, relative to the wheel's rigid motion
   friction: 1.1,
