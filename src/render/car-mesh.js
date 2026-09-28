@@ -11,7 +11,7 @@ import {
   Vector3,
 } from 'three/webgpu';
 import { CAR } from '../vehicle/config.js';
-import { wheelMount } from '../vehicle/physics.js';
+import { frameStretch, stretchX, wheelMount } from '../vehicle/physics.js';
 import { createAxleRig } from './axles.js';
 import { createBeadlockWheel } from './beadlock-wheel.js';
 import { LUG_HEIGHT, createStaticMtTyre } from './mt-tyre.js';
@@ -19,7 +19,7 @@ import { TIRE } from '../tire/config.js';
 import { torusMesh } from '../tire/soft-tire.js';
 import { createTubeChassis } from './tube-chassis.js';
 import { mergeByMaterial } from './merge-geometry.js';
-import { IFS_RACK, frameGeometry, suspensionMounts } from '../vehicle/frame-geometry.js';
+import { frameGeometry, ifsRack, suspensionMounts } from '../vehicle/frame-geometry.js';
 import { rimInnerFace } from './wheel-inset.js';
 
 const frame = new MeshStandardMaterial({ color: '#2d2f31', roughness: 0.7, metalness: 0.3 });
@@ -60,8 +60,9 @@ export function steeringGeometry({ independent = !CAR.solidAxles } = {}) {
   const columnAxis = faceNormal.clone().negate(); // from the wheel toward the dash
   const joint1 = wheelCenter.clone().addScaledVector(columnAxis, 0.5);
   // Solid axles: a steering box inside the nose box. Independent: the pinion on the rack.
-  const rack = new Vector3(IFS_RACK.center.x, IFS_RACK.center.y, 0);
-  const box = independent ? new Vector3(rack.x - 0.02, rack.y + 0.06, -0.3) : new Vector3(1.0, -0.28, -0.4);
+  const rackCenter = ifsRack().center;
+  const rack = new Vector3(rackCenter.x, rackCenter.y, 0);
+  const box = independent ? new Vector3(rack.x - 0.02, rack.y + 0.06, -0.3) : new Vector3(stretchX(1.0), -0.28, -0.4);
   // The box's input shaft points up and back toward the driver, a little steeper than the
   // intermediate shaft, so both joints share the bend.
   const toJoint1 = joint1.clone().sub(box).normalize();
@@ -87,7 +88,7 @@ export function createCarMesh() {
   // Parts fixed to the chassis go into `body`, merged into one mesh per material at the end.
   const body = new Group();
   body.name = 'tube chassis';
-  body.add(createTubeChassis(0, { independent: !CAR.solidAxles }).group);
+  body.add(createTubeChassis(0, { independent: !CAR.solidAxles, stretch: frameStretch() }).group);
 
   // Bucket seats on the floor, driver on the left (-z): cushion, back, and side bolsters.
   for (const z of [-0.3, 0.3]) {

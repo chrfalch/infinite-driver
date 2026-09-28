@@ -18,6 +18,8 @@ import {
   Vector3,
 } from 'three/webgpu';
 import { PICKUPS as SAND_BUGGY_PICKUPS, ifsCorner } from '../vehicle/frame-geometry.js';
+import { CAR } from '../vehicle/config.js';
+import { DESIGN_HALF_WHEELBASE, stretchX } from '../vehicle/physics.js';
 
 const MAIN = 0.024; // 48 mm OD main hoops and rails
 const SEC = 0.019; // 38 mm OD bracing
@@ -49,11 +51,23 @@ function tubePath(points, bend) {
   return path;
 }
 
+// Designs are drawn for a 2.7 m wheelbase; `stretch` (see frameStretch) moves every point ahead of
+// the cab forward and every point behind it back, so the frame follows the wheelbase.
 class Builder {
-  constructor(paint) {
+  constructor(paint, stretch = 0) {
     this.group = new Group();
     this.paint = paint;
     this.joints = new Map();
+    this.stretch = stretch;
+  }
+
+  // A design x (or point) on the stretched frame.
+  x(x) {
+    return stretchX(x, null, this.stretch);
+  }
+
+  at(p) {
+    return [this.x(p[0]), p[1], p[2]];
   }
 
   mesh(geometry, material) {
@@ -72,6 +86,7 @@ class Builder {
   }
 
   tube(points, r = MAIN, bend = 0.1) {
+    points = points.map((p) => this.at(p));
     const path = tubePath(points, bend);
     const length = path.getLength();
     this.mesh(new TubeGeometry(path, Math.max(2, Math.ceil(length / 0.05)), r, 12, false), this.paint);
@@ -106,6 +121,7 @@ class Builder {
       g.computeVertexNormals();
       this.mesh(g, this.paint);
     };
+    [p, a, b] = [p, a, b].map((q) => this.at(q));
     make(p, a, b);
     if (both) make(mirror(p), mirror(a), mirror(b));
   }
@@ -120,13 +136,14 @@ class Builder {
         if (along !== 'x') m.position.x += s * 0.03;
       }
     };
+    p = this.at(p);
     make(p);
     if (both) make(mirror(p));
   }
 
   // Flat sheet (skid plate, floor) through four corners.
   plate(corners, material = skid, thickness = 0.006) {
-    const [a, b, c, d] = corners.map(V);
+    const [a, b, c, d] = corners.map((p) => V(this.at(p)));
     const n = new Vector3().subVectors(b, a).cross(new Vector3().subVectors(d, a)).normalize().multiplyScalar(thickness / 2);
     const verts = [];
     for (const s of [1, -1]) for (const q of [a, b, c, d]) verts.push(q.x + n.x * s, q.y + n.y * s, q.z + n.z * s);
@@ -270,7 +287,8 @@ const sandBuggy = {
       if (independent) {
         // Double A-arm pivots: a pivot rail under each side for the lower arm, hung from the nose
         // box (front) or the rear rails, a cross member between them, and tabs for the upper arm.
-        const G = ifsCorner(f > 0 ? 1 : 3);
+        // The design points (the builder stretches them with the rest of the frame).
+        const G = ifsCorner(f > 0 ? 1 : 3, { ...CAR, wheelBase: 2 * DESIGN_HALF_WHEELBASE });
         const arr = (p) => [p.x, p.y, p.z];
         const [l0, l1] = G.lowerInner.map(arr);
         const [u0, u1] = G.upperInner.map(arr);
@@ -300,22 +318,22 @@ const sandBuggy = {
     // game dims and brightens it (see brakeLightMaterial).
     for (const s of [1, -1]) {
       const housing = b.mesh(new BoxGeometry(0.05, 0.1, 0.16), lampBody);
-      housing.position.set(-2.45, -0.02, s * 0.36);
+      housing.position.set(b.x(-2.45), -0.02, s * 0.36);
       const lens = b.mesh(new BoxGeometry(0.012, 0.08, 0.14), brakeLightMaterial);
-      lens.position.set(-2.478, -0.02, s * 0.36);
+      lens.position.set(b.x(-2.478), -0.02, s * 0.36);
       const bracket = b.mesh(new BoxGeometry(0.06, 0.02, 0.04), lampBody);
-      bracket.position.set(-2.42, 0.04, s * 0.4);
+      bracket.position.set(b.x(-2.42), 0.04, s * 0.4);
     }
     // Round lamps on top of the nose box, facing forward.
     for (const s of [1, -1]) {
       const body = b.mesh(new CylinderGeometry(0.075, 0.06, 0.08, 20), lampBody);
       body.rotation.z = Math.PI / 2;
-      body.position.set(2.11, 0.22, s * 0.32);
+      body.position.set(b.x(2.11), 0.22, s * 0.32);
       const lens = b.mesh(new CylinderGeometry(0.066, 0.066, 0.01, 20), lampMat);
       lens.rotation.z = Math.PI / 2;
-      lens.position.set(2.155, 0.22, s * 0.32);
+      lens.position.set(b.x(2.155), 0.22, s * 0.32);
       const stem = b.mesh(new CylinderGeometry(0.012, 0.012, 0.08, 8), lampBody);
-      stem.position.set(2.07, 0.16, s * 0.34);
+      stem.position.set(b.x(2.07), 0.16, s * 0.34);
     }
   },
 };
@@ -448,7 +466,7 @@ export const DESIGNS = [
 
 export function createTubeChassis(index = 0, options = {}) {
   const design = DESIGNS[index % DESIGNS.length];
-  const b = new Builder(new MeshStandardMaterial({ color: design.paint, roughness: 0.4, metalness: 0.3 }));
+  const b = new Builder(new MeshStandardMaterial({ color: design.paint, roughness: 0.4, metalness: 0.3 }), options.stretch ?? 0);
   design.build(b, options);
   return { group: b.finish(), design };
 }

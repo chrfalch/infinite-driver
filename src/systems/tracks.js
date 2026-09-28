@@ -10,7 +10,10 @@ const CONTACT = 0.035; // tread within this of the ground surface counts as touc
 
 // Contact centre and depth from tyre particles (vec stride 3 or 4), or null when airborne.
 // With `pressed`, every particle below the surface is also collected for soil compaction.
-function particleContact(positions, stride, start, count, heightAt, radius, pressed = null) {
+// Each particle counts by how far it is inside the CONTACT band, so a row that joins or leaves
+// the patch fades in and out. A plain average jumps by up to a row (about 7 cm) when the patch is
+// short, as on a hard tyre, and the tracks zig-zag.
+export function particleContact(positions, stride, start, count, heightAt, radius, pressed = null) {
   let sx = 0;
   let sz = 0;
   let n = 0;
@@ -23,9 +26,10 @@ function particleContact(positions, stride, start, count, heightAt, radius, pres
     const depth = heightAt(x, z) + radius - y;
     if (pressed && depth > 0) pressed.push({ x, z, depth });
     if (depth > -CONTACT) {
-      sx += x;
-      sz += z;
-      n++;
+      const w = depth + CONTACT;
+      sx += x * w;
+      sz += z * w;
+      n += w;
       deepest = Math.max(deepest, depth);
     }
   }

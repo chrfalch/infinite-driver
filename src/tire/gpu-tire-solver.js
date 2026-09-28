@@ -38,6 +38,11 @@ const Params = d.struct({
   shapeStiffness: d.f32,
   treadShapeRadial: d.f32, // 0..1: share of shape memory kept radially on the tread (0 lets it dent)
   treadRadius: d.f32, // rest radius (in the wheel plane) above which a particle counts as tread
+  beltStretch: d.f32, // growth past its rest radius a particle may have, as a fraction (0 = off)
+  beltPull: d.f32, // fraction of the growth past beltStretch taken back per pass
+  treadBend: d.f32, // per pass: how much the tread keeps its moulded curve (around and across)
+  sidewallBulge: d.f32, // sidewall push out per metre the tread there is pushed in (at its widest)
+  halfWidth: d.f32, // the tyre's rest half-width (m)
   beadPull: d.f32,
   damping: d.f32,
   friction: d.f32,
@@ -50,6 +55,7 @@ const Params = d.struct({
   groundDamping: d.f32, // N·s/m per particle
   soilRebound: d.f32, // fraction of soil push kept while the tread lifts off
   maxSink: d.f32,
+  rockFloor: d.f32, // how far below bare rock (m) a particle may be pushed before it is stopped
   gravel: d.f32, // 0..1: amount of loose gravel stones on the ground (see terrain/gravel.js)
   groundOriginX: d.f32,
   groundOriginZ: d.f32,
@@ -92,6 +98,8 @@ export class GpuTireSolver {
     let maxR = 0;
     for (let i = 0; i < this.perTire; i++) maxR = Math.max(maxR, Math.hypot(restLocal[i * 3], restLocal[i * 3 + 1]));
     this.treadRadius = maxR - 0.06;
+    this.halfWidth = 0;
+    for (let i = 0; i < this.perTire; i++) this.halfWidth = Math.max(this.halfWidth, Math.abs(restLocal[i * 3 + 2]));
 
     const root = this.root;
     this.pos = root.createMutable(d.arrayOf(d.vec4f, this.count));
@@ -296,7 +304,7 @@ export class GpuTireSolver {
     // contact springs normally hold it).
     const floorClamp = tgpu.fn([d.vec3f], d.vec3f)/* wgsl */ `(pIn) {
       var p = pIn;
-      let floorDepth = select(0.06, params.maxSink, params.soilStiffness > 0.0 && groundRock(p.x, p.z) < 0.5);
+      let floorDepth = select(params.rockFloor, params.maxSink, params.soilStiffness > 0.0 && groundRock(p.x, p.z) < 0.5);
       let floor = groundHeight(p.x, p.z) + params.radius - floorDepth;
       if (p.y < floor) { p.y = floor; }
       return p;
@@ -448,9 +456,50 @@ export class GpuTireSolver {
             let rel = p - center;
             let radial = normalize(rel - axleDir * dot(rel, axleDir) + vec3f(0.0, 1e-6, 0.0));
             shape -= radial * dot(shape, radial) * treadW * (1.0 - params.treadShapeRadial);
+            // Sidewall bulge: the cords across keep their length, so where the tread is pushed in the
+            // sidewalls bow out, as a real tyre's do. The pull toward the moulded shape then aims
+            // sidewallBulge times the tread's inward travel (at this point around the wheel) out
+            // sideways, most at the sidewall's widest.
+            if (params.sidewallBulge > 0.0 && treadW < 1.0) {
+              let crown = u32(i32(k / params.nv)) * params.nv;
+              let relC = getP(src, crown) - center;
+              let rCrown = length(relC - axleDir * dot(relC, axleDir));
+              let pushedIn = max(0.0, length(restOf(t, crown).xy) - rCrown);
+              let widest = clamp(abs(r0.z) / params.halfWidth, 0.0, 1.0);
+              let out = axleDir * sign(r0.z) * (params.sidewallBulge * pushedIn * widest * (1.0 - treadW));
+              shape += params.shapeStiffness * out;
+            }
             p += shape;
+            // Belt bending: the tread keeps its moulded curve with its neighbours around the wheel
+            // and across it, so the ground or a rock flattens a longer piece of the tread instead of
+            // pressing a small dent into it like a rubber sheet.
+            if (params.treadBend > 0.0 && treadW > 0.0) {
+              let ub = i32(k / params.nv);
+              let vb = i32(k % params.nv);
+              let ua = nb(ub - 1, vb);
+              let uc = nb(ub + 1, vb);
+              let va = nb(ub, vb - 1);
+              let vc = nb(ub, vb + 1);
+              let x0 = getP(src, k);
+              let lapU0 = seat - 0.5 * (hubPoint(t, ua, st) + hubPoint(t, uc, st));
+              let lapU = x0 - 0.5 * (getP(src, ua) + getP(src, uc));
+              let lapV0 = seat - 0.5 * (hubPoint(t, va, st) + hubPoint(t, vc, st));
+              let lapV = x0 - 0.5 * (getP(src, va) + getP(src, vc));
+              p += params.treadBend * treadW * 0.5 * ((lapU0 - lapU) + (lapV0 - lapV));
+            }
             let vv = k % params.nv;
             if (vv >= params.beadLow && vv <= params.beadHigh) { p += params.beadPull * (seat - p); }
+            // Belt: the cords alone let the pressure balloon the tyre (more with higher pressure and
+            // a bigger tyre), so a particle that grows more than beltStretch past its rest radius is
+            // pulled back, as the steel belt and plies of a real tyre hold it. Moving in (a dent)
+            // stays free. Part of the excess per pass: a hard limit makes the hub bounce.
+            if (params.beltStretch > 0.0) {
+              let relB = p - center;
+              let radB = relB - axleDir * dot(relB, axleDir);
+              let rNow = length(radB);
+              let rMax = length(r0.xy) * (1.0 + params.beltStretch);
+              if (rNow > rMax) { p -= params.beltPull * treadW * (1.0 - rMax / rNow) * radB; }
+            }
             setP(1u - src, k, floorClamp(p));
           }
           workgroupBarrier();
@@ -628,6 +677,11 @@ export class GpuTireSolver {
       shapeStiffness: s.shapeStiffness,
       treadShapeRadial: s.treadShapeRadial ?? 1,
       treadRadius: this.treadRadius,
+      beltStretch: s.beltStretch ?? 0,
+      beltPull: s.beltPull ?? 0.3,
+      treadBend: s.treadBend ?? 0,
+      sidewallBulge: s.sidewallBulge ?? 0,
+      halfWidth: this.halfWidth,
       beadPull: s.beadPull,
       damping: s.damping,
       friction: s.friction,
@@ -643,6 +697,7 @@ export class GpuTireSolver {
       // Critically damped contact (2·√(k·m)); the kernel integrates it implicitly.
       groundDamping: 2 * Math.sqrt(((3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)) * (s.rubberMass / this.perTire)),
       maxSink: s.maxSink ?? 0.25,
+      rockFloor: s.rockFloor ?? 0.06,
       gravel: s.gravel ?? 0,
       groundOriginX: this.groundOrigin.x,
       groundOriginZ: this.groundOrigin.z,
