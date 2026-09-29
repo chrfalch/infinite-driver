@@ -13,6 +13,7 @@ const ORIGIN = { x: 0, y: 0, z: 0 };
 const HUB_INERTIA = { x: 0.5, y: 0.5, z: 0.7 };
 const HUB_INERTIA_GPU = { x: 2.5, y: 2.5, z: Number(globalThis.location ? new URLSearchParams(globalThis.location.search).get('hubI') ?? 3.5 : 3.5) };
 const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
+const MAX_DRIVE_INERTIA = 60; // kg·m² per hub, see setDriveInertia
 // Rotational inertia (kg·m²) of the strut and knuckle links. A point-like link is far lighter
 // than the hub and tyre it carries, and the joint solver then cannot pass the steering torque
 // through it: the knuckle slips and one front wheel barely steers. Realistic uprights fix that.
@@ -467,6 +468,20 @@ export class JointedVehicle {
       rack: this.rack ? local(this.rack.body.translation()) : null,
     };
   }
+
+  // Extra spin inertia per wheel from the engine's flywheel while the clutch is locked (see
+  // Drivetrain.coupledInertia), on the Rapier hub and in the GPU tyres' hub step alike. Capped at
+  // MAX_DRIVE_INERTIA: the full share in low first (about 250 kg·m²) on a hub jointed to a ~10 kg
+  // knuckle was more than Rapier's joint solver could hold steady, and the hub shook.
+  setDriveInertia(share) {
+    const perWheel = Math.min(MAX_DRIVE_INERTIA, share);
+    for (const w of this.wheels) {
+      if (Math.abs(perWheel - (w.driveInertia ?? 0)) <= 0.02 * Math.max(1, perWheel)) continue;
+      w.driveInertia = perWheel;
+      w.hub.setAdditionalMassProperties(1e-4, ORIGIN, { x: 0, y: 0, z: perWheel }, IDENTITY, true);
+    }
+  }
+
   setWheelEngineForce(i, force) {
     this.wheels[i].engineForce = force;
   }
@@ -643,7 +658,7 @@ export class JointedVehicle {
       return {
         ...state,
         spinAxis: axis,
-        inertia: HUB_INERTIA_GPU.z,
+        inertia: HUB_INERTIA_GPU.z + (w.driveInertia ?? 0),
         driveTorque: -(w.engineForce ?? 0) * radius,
         brakeTorque: ((w.brakeImpulse ?? 0) / dt) * radius,
         knuckleSpin: wk.x * axis.x + wk.y * axis.y + wk.z * axis.z,

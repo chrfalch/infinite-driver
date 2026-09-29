@@ -22,6 +22,7 @@ export const DEFAULT_DRIVETRAIN = Object.freeze({
   idleRpm: 850,
   limiterRpm: 5400,
   engineInertia: 0.28, // kg·m², flywheel and crank
+  wheelInertia: 3.5, // kg·m² per wheel about its axle (the GPU tyres' hub carries the whole wheel)
   frictionTorque: 30, // N·m at rest; with the rpm term this is the engine braking
   frictionPerRpm: 0.014, // N·m per rpm (a real diesel's internal friction)
   // Off-throttle slowing, 0 = realistic engine braking (a long coast, about 0.06–0.1 g),
@@ -86,6 +87,7 @@ export class Drivetrain {
     this.pendingGear = null;
     this.throttle = 0;
     this.torques = [0, 0, 0, 0];
+    this.coupledInertia = 0; // kg·m² at the wheels, see update()
   }
 
   get rpm() {
@@ -223,7 +225,9 @@ export class Drivetrain {
     // Engine torque: throttle blends the full-load curve; above the limiter fuel is cut.
     const rpmNow = this.rpm;
     let drive = throttle * engineTorque(p, rpmNow);
-    if (rpmNow > p.limiterRpm) drive = 0;
+    // Fuel is cut over the last 100 rpm to the limiter and 100 past it (a hard cut made the drive
+    // torque switch on and off every step at the limiter).
+    drive *= Math.min(1, Math.max(0, (p.limiterRpm + 100 - rpmNow) / 200));
     // Idle governor keeps the engine running.
     if (rpmNow < p.idleRpm) drive = Math.max(drive, (p.idleRpm - rpmNow) * 0.8 + frictionTorque(p, rpmNow));
     // During a shift the engine is blipped (or held back) to the speed the new gear will need, so
@@ -236,8 +240,11 @@ export class Drivetrain {
       matching = true;
     }
     const offThrottle = throttle === 0 && !matching;
+    // The quick-stop brake is tuned for high range; low range multiplies it at the wheels by the
+    // range ratio, past what the tyres can hold (they locked and let go every few steps), so it is
+    // divided back out.
     const brake = offThrottle
-      ? coast.exhaustBrake * Math.min(1, Math.max(0, (rpmNow - p.idleRpm) / 600)) + coast.extraFriction * rpmNow
+      ? (coast.exhaustBrake * Math.min(1, Math.max(0, (rpmNow - p.idleRpm) / 600)) + coast.extraFriction * rpmNow) / (p.low ? p.lowRange : 1)
       : 0;
     const engineNet = drive - frictionTorque(p, rpmNow) - brake;
 
@@ -249,20 +256,42 @@ export class Drivetrain {
     // Locked: the clutch is fully in and the two sides turn together. The engine then simply
     // follows the gearbox and passes its net torque through. (Locking it with a stiff torque every
     // step made the light wheels and the heavy engine fight each other.)
-    const locked = this.clutch > 0.98 && Math.abs(slipW) < rpmToRad(120) && ratio !== 0 && Math.abs(engineNet) <= capacity;
+    // It locks when the speeds come close (within 120 rpm, or 1.5 rad/s at the wheels in a low gear,
+    // where wheel speed ripple on rough ground is multiplied by the ratio), or cross, and then stays
+    // locked however fast the wheels change speed (free-spinning wheels change the gearbox speed by
+    // more than that in one step, which unlocked it, and the slipping clutch then yanked them
+    // back: a chatter every few steps).
+    const canLock = this.clutch > 0.98 && ratio !== 0 && Math.abs(engineNet) <= capacity;
+    const close = Math.abs(slipW) < Math.max(rpmToRad(120), 1.5 * Math.abs(ratio));
+    const crossed = this.lastSlipW !== undefined && Math.sign(slipW) !== Math.sign(this.lastSlipW);
+    const locked = canLock && (this.locked || close || crossed);
+    this.locked = locked;
+    this.lastSlipW = slipW;
+    const wheelsI = ratio !== 0 ? (4 * (p.wheelInertia ?? 3.5)) / (ratio * ratio) : 0;
     if (locked) {
       clutchT = engineNet;
       this.engineW = Math.max(rpmToRad(200), gearboxEngineW);
     } else {
       if (ratio !== 0 && capacity > 0) {
         // Slipping: the clutch pulls the two speeds together with at most its capacity, and never
-        // more than it takes to match them this step.
-        const lockT = (slipW * p.engineInertia) / dt + engineNet;
+        // more than it takes to match them this step. Both sides move: the engine, and the four
+        // wheels as the engine sees them through the gears (their inertia over the ratio squared,
+        // far lighter than the engine in a low gear). Matching with the engine's inertia alone
+        // overshot the light wheel side, so wheels and clutch chattered back and forth every step,
+        // and worse in low range.
+        const pairI = (p.engineInertia * wheelsI) / (p.engineInertia + wheelsI);
+        const lockT = (slipW * pairI) / dt + (engineNet * pairI) / p.engineInertia;
         clutchT = Math.max(-capacity, Math.min(capacity, lockT));
       }
       this.engineW += ((engineNet - clutchT) / p.engineInertia) * dt;
       this.engineW = Math.max(rpmToRad(200), this.engineW);
     }
+
+    // Locked, the engine's flywheel turns with the wheels: through the gears it weighs its inertia
+    // times the ratio squared (about 1,000 kg·m² in low first), shared by the wheels. The vehicle
+    // adds it to the wheel hubs, so a wheel that lifts off revs up and slows at the engine's pace
+    // instead of flying up and back each step.
+    this.coupledInertia = locked ? p.engineInertia * ratio * ratio : 0;
 
     // Torque into the gearbox output; reverse flips the sign via the ratio.
     const shaftT = clutchT * ratio * p.efficiency;
