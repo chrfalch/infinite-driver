@@ -1,10 +1,11 @@
 import { createNoise2D } from 'simplex-noise';
 import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, dot, exp, fract, fwidth, mix, positionWorld, sin, smoothstep, uniform, vec2, vec3, vec4 } from 'three/tsl';
+import { attribute, dot, exp, float, floor, fract, fwidth, max, mix, positionLocal, positionWorld, sin, smoothstep, step, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import { gravelShade } from '../terrain/gravel.js';
 import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
 import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
+import { COVER_DEPTH, LAKE, ROAD as SNOW_ROAD } from '../terrain/snow.js';
 
 // Ground colour from the vertex colours, with the gravel stones drawn on top (the same stones the
 // GPU tyres roll over; see terrain/gravel.js).
@@ -50,9 +51,97 @@ const strata = mix(redStrata, yellowStrata, sandstone);
 const seam = smoothstep(0.86, 0.97, fract(layer)).mul(0.25);
 const rock = strata.mul(seam.oneMinus());
 const ground = mix(attribute('color', 'vec3'), rock, attribute('steep', 'float'));
+// Fresh snow, per pixel: bright, faintly blue, with wind ripples and a fine sparkle of grains. The
+// snow surface near the car (render/snow-surface.js) uses the same, so the two meet unseen.
+const snowHash = (p) => fract(sin(dot(p, vec2(12.9898, 78.233))).mul(43758.5453));
+const snowRipple = sin(positionWorld.x.mul(2.3).add(sin(positionWorld.z.mul(0.7)).mul(1.8))).mul(0.5).add(0.5);
+const snowGrain = snowHash(positionWorld.xz.div(0.04).floor());
+export const freshSnowColor = mix(vec3(0.86, 0.9, 0.95), vec3(0.93, 0.95, 0.98), snowRipple.mul(0.6).add(snowGrain.mul(0.4)));
+
+// The snowfield's road, per pixel from the distance to its centre line: how much snow covers the
+// asphalt (0 bare .. 1), the same as roadSnowDepth in terrain/snow.js (the tyres' bare asphalt), so
+// the spots of snow are where they are drawn. `side`: signed distance (interpolated between
+// vertices; |d| would dip across the centre line).
+const snowHash2 = (ix, iz) => {
+  const a = fract(ix.mul(0.1031));
+  const b = fract(iz.mul(0.1031));
+  const d = a.mul(b.add(33.33)).add(b.mul(a.add(33.33))).add(a.mul(a.add(33.33)));
+  return fract(a.add(d).add(b.add(d)).mul(a.add(d)));
+};
+const valueNoise = (x, z) => {
+  const ix = floor(x);
+  const iz = floor(z);
+  const fx = x.sub(ix);
+  const fz = z.sub(iz);
+  const ux = fx.mul(fx).mul(fx.mul(-2).add(3));
+  const uz = fz.mul(fz).mul(fz.mul(-2).add(3));
+  const a = mix(snowHash2(ix, iz), snowHash2(ix.add(1), iz), ux);
+  const b = mix(snowHash2(ix, iz.add(1)), snowHash2(ix.add(1), iz.add(1)), ux);
+  return mix(a, b, uz);
+};
+export function snowCover(side) {
+  const dist = side.abs();
+  const x = positionWorld.x;
+  const z = positionWorld.z;
+  const patch = sin(x.mul(0.21).add(sin(z.mul(0.17)).mul(2))).mul(sin(z.mul(0.23).add(x.mul(0.05))));
+  const spots = valueNoise(x.div(1.7), z.div(1.7)).mul(0.6).add(valueNoise(x.div(0.6).add(17), z.div(0.6).add(5)).mul(0.4));
+  const track = (t) => exp(dist.sub(t).div(SNOW_ROAD.trackWidth).pow(2).negate());
+  const tracks = track(SNOW_ROAD.tracks[0]).add(track(SNOW_ROAD.tracks[1]));
+  const edge = smoothstep(SNOW_ROAD.halfWidth - 1.2, SNOW_ROAD.halfWidth - 0.2, dist);
+  const threshold = float(0.6).sub(patch.mul(0.12)).add(tracks.mul(0.08)).sub(edge.mul(0.22));
+  const depth = smoothstep(threshold, threshold.add(0.1), spots).mul(SNOW_ROAD.thin);
+  const onRoad = step(dist, SNOW_ROAD.halfWidth - 0.2);
+  return mix(float(1), smoothstep(0, COVER_DEPTH, depth), onRoad);
+}
+// The spots of snow on the lake's ice (0 bare ice .. 1), as lakeSnowDepth in terrain/snow.js.
+// `inside`: distance inside the shoreline (m).
+function lakeCover(inside) {
+  const x = positionWorld.x.mul(0.45).add(7);
+  const z = positionWorld.z.mul(0.45).sub(3);
+  const spots = valueNoise(x.div(1.7), z.div(1.7)).mul(0.6).add(valueNoise(x.div(0.6).add(17), z.div(0.6).add(5)).mul(0.4));
+  const threshold = float(0.7).sub(smoothstep(0, 10, inside).oneMinus().mul(0.3));
+  return smoothstep(0, COVER_DEPTH, smoothstep(threshold, threshold.add(0.08), spots).mul(LAKE.thin));
+}
+// Black lake ice: dark blue-green, lighter where it froze cloudy, with thin, jagged white cracks
+// (where a noise field crosses its middle value: irregular lines of about even width).
+function iceColor() {
+  const x = positionWorld.x;
+  const z = positionWorld.z;
+  const cloudy = valueNoise(x.div(7), z.div(7));
+  const crack = (scale, ox, width) => {
+    const n = valueNoise(x.div(scale).add(ox), z.div(scale)).mul(0.8).add(valueNoise(x.div(scale * 0.2).add(ox), z.div(scale * 0.2)).mul(0.2));
+    return smoothstep(width, width * 0.3, n.sub(0.5).abs());
+  };
+  const cracks = max(crack(9, 3, 0.006), crack(3.5, 11, 0.006).mul(0.35));
+  return mix(vec3(0.02, 0.045, 0.06), vec3(0.08, 0.12, 0.15), cloudy.mul(cloudy)).add(cracks.mul(0.3));
+}
+// Snow ground colour: bare asphalt under a cover of snow, fresh or packed (packed road snow is
+// greyer, gritted); on the lake (`inside` > 0), black ice under spots of wind-packed snow.
+export function snowGroundColor(side, packed, inside) {
+  const asphalt = vec3(0.075, 0.078, 0.082).mul(snowGrain.mul(0.35).add(0.8));
+  const snow = mix(freshSnowColor, vec3(0.7, 0.72, 0.75), packed);
+  const land = mix(asphalt, snow, snowCover(side));
+  const lake = mix(iceColor(), mix(freshSnowColor, vec3(0.8, 0.84, 0.88), 0.5), lakeCover(inside));
+  return mix(land, lake, step(0, inside));
+}
+// How rough the snow ground is: bare ice is glassy (it shines in the sun), asphalt fairly rough.
+export function snowGroundRoughness(side, packed, inside) {
+  const land = mix(float(0.8), mix(float(0.95), float(0.6), packed), snowCover(side));
+  return mix(land, mix(float(0.08), float(0.8), lakeCover(inside)), step(0, inside));
+}
+const snowWorld = uniform(0);
+// Far from the car (the terrain mesh): on snow the 'gravel' attribute holds how packed the snow is
+// (as the snow surface shades it), so the two match where they meet.
+const lakeDist = attribute('lake', 'float');
+const snowFar = snowGroundColor(roadDist, attribute('gravel', 'float'), lakeDist);
+terrainMaterial.roughnessNode = mix(float(0.95), snowGroundRoughness(roadDist, attribute('gravel', 'float'), lakeDist), snowWorld);
 terrainMaterial.colorNode = vec4(
-  mix(ground, roadColor, roadMask).mul(
-    mix(vec3(1), gravelShade(), gravelAmount.clamp(0, 1).sqrt().mul(attribute('gravel', 'float'))),
+  mix(
+    mix(ground, roadColor, roadMask).mul(
+      mix(vec3(1), gravelShade(), gravelAmount.clamp(0, 1).sqrt().mul(attribute('gravel', 'float'))),
+    ),
+    snowFar,
+    snowWorld,
   ),
   1,
 );
@@ -60,6 +149,20 @@ terrainMaterial.colorNode = vec4(
 // The world's rock colours for the shader (steep faces): red sandstone, or yellow for the river.
 export function setTerrainWorld(world) {
   sandstone.value = world === 'river' ? 1 : 0;
+  snowWorld.value = world === 'snow' ? 1 : 0;
+}
+
+// On snow the fine snow surface (render/snow-surface.js) draws the ground near the car, with its
+// ruts. The terrain mesh inside that square sinks out of sight under it; the vertices on its edge
+// stay, so the two meet there.
+const snowPatch = uniform(vec4(0, 0, -1, -1)); // x0, z0, x1, z1 (m); empty by default
+const insidePatch = step(snowPatch.x.add(0.5), positionLocal.x)
+  .mul(step(positionLocal.x, snowPatch.z.sub(0.5)))
+  .mul(step(snowPatch.y.add(0.5), positionLocal.z))
+  .mul(step(positionLocal.z, snowPatch.w.sub(0.5)));
+terrainMaterial.positionNode = positionLocal.sub(vec3(0, insidePatch.mul(0.8), 0));
+export function setSnowPatch({ x0, z0, x1, z1 }) {
+  snowPatch.value.set(x0, z0, x1, z1);
 }
 
 const DIRT = new Color('#c2ab82');
@@ -126,6 +229,22 @@ function riverColor(s, slope, x, z, out) {
 }
 const tmp2 = new Color();
 
+// Snowfield palette (the terrain mesh far off; near the car the snow surface draws its own):
+// bright snow with faint blue-grey hollows and wind-blown patches.
+const SNOW_BRIGHT = new Color('#f3f6fa');
+const SNOW_SHADE = new Color('#dde5ee');
+function snowColor(h, x, z, out) {
+  const p = patchNoise(x * 0.03, z * 0.03) * 0.6 + patchNoise(x * 0.1, z * 0.1) * 0.4;
+  out.copy(SNOW_BRIGHT).lerp(SNOW_SHADE, Math.min(1, Math.max(0, p * 0.6 + 0.25 - h * 0.4)));
+  out.offsetHSL(0, 0, fineNoise(x * 0.6, z * 0.6) * 0.01);
+  return out;
+}
+
+function smoothstepJs(a, b, x) {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
 function slopeAt(heightAt, x, z) {
   const e = 0.5;
   const dx = (heightAt(x + e, z) - heightAt(x - e, z)) / (2 * e);
@@ -135,6 +254,7 @@ function slopeAt(heightAt, x, z) {
 
 // Ground colour at a world position, matching the terrain mesh (used by the tyre tracks and soil).
 export function terrainColorAt(heightAt, x, z, out = new Color()) {
+  if (heightAt.world === 'snow') return snowColor(heightAt(x, z), x, z, out);
   const slope = slopeAt(heightAt, x, z);
   if (heightAt.world === 'river') return riverColor(heightAt.sample(x, z), slope, x, z, out);
   if (heightAt.sample) {
@@ -162,6 +282,7 @@ export function chunkMeshData(heightAt, heights, cx, cz, size = CHUNK_SIZE, res 
   const gravel = new Float32Array(n * n);
   const roadDist = new Float32Array(n * n).fill(99);
   const steep = new Float32Array(n * n);
+  const lake = new Float32Array(n * n).fill(-99); // snowfield: m inside the lake's shoreline
   // Heights on the grid plus a one-sample border, so normals come from the grid (central
   // differences) and still match the neighbouring chunks.
   const m = n + 2;
@@ -186,7 +307,12 @@ export function chunkMeshData(heightAt, heights, cx, cz, size = CHUNK_SIZE, res 
       const len = Math.hypot(dx, 1, dz);
       normals.set([-dx / len, 1 / len, -dz / len], i * 3);
       const slope = Math.hypot(dx, dz);
-      if (heightAt.world === 'river') {
+      if (heightAt.world === 'snow') {
+        snowColor(h, x, z, tmp);
+        lake[i] = heightAt.lakeInside(x, z);
+        roadDist[i] = heightAt.roadSide(x, z); // signed (see snowCover)
+      }
+      else if (heightAt.world === 'river') {
         // No gravel road paint in the river bed (roadDist stays far): the sand is in the colours.
         riverColor(heightAt.sample(x, z), slope, x, z, tmp);
       } else if (heightAt.sample) {
@@ -195,12 +321,13 @@ export function chunkMeshData(heightAt, heights, cx, cz, size = CHUNK_SIZE, res 
         roadDist[i] = s.dist;
       } else colorFor(h, slope, x, z, tmp);
       colors.set([tmp.r, tmp.g, tmp.b], i * 3);
-      gravel[i] = 1 - Math.min(1, Math.max(0, (slope - 0.4) / 0.4));
+      // No stones under snow: there the attribute is how packed the snow is (see snowFar).
+      gravel[i] = heightAt.snowAt ? smoothstepJs(0.05, 0.9, heightAt.snowAt(x, z).firm) : 1 - Math.min(1, Math.max(0, (slope - 0.4) / 0.4));
       if (heightAt.sample) steep[i] = Math.min(1, Math.max(0, (slope - 0.55) / 0.5));
     }
   }
 
-  return { positions, normals, colors, gravel, roadDist, steep };
+  return { positions, normals, colors, gravel, roadDist, steep, lake };
 }
 
 // Triangle indices, the same for every chunk.
@@ -225,7 +352,7 @@ function indicesFor(res) {
   return indices;
 }
 
-export function createChunkMeshFromData({ positions, normals, colors, gravel, roadDist, steep }, cx, cz, res = CHUNK_RES) {
+export function createChunkMeshFromData({ positions, normals, colors, gravel, roadDist, steep, lake }, cx, cz, res = CHUNK_RES) {
   const indices = indicesFor(res);
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(positions, 3));
@@ -234,6 +361,7 @@ export function createChunkMeshFromData({ positions, normals, colors, gravel, ro
   geometry.setAttribute('gravel', new BufferAttribute(gravel, 1));
   geometry.setAttribute('roadDist', new BufferAttribute(roadDist, 1));
   geometry.setAttribute('steep', new BufferAttribute(steep, 1));
+  geometry.setAttribute('lake', new BufferAttribute(lake, 1));
   geometry.setIndex(new BufferAttribute(indices, 1));
   geometry.computeBoundingSphere();
 

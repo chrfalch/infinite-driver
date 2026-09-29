@@ -14,6 +14,7 @@ function chunkSeed(cx, cz) {
 }
 
 export function generatePlants(heightAt, cx, cz) {
+  if (heightAt.forestAt) return generateSpruces(heightAt, cx, cz);
   if (!heightAt.sample) return [];
   if (heightAt.world === 'river') return generateRiverPlants(heightAt, cx, cz);
   const rand = mulberry32(chunkSeed(cx, cz));
@@ -86,6 +87,33 @@ function generateRiverPlants(heightAt, cx, cz) {
       } else if (roll < pTree + pBush) {
         plants.push({ kind: 'bush', grey: true, x, y, z, size: 0.4 + size * 0.7, turn, shade });
       }
+    }
+  }
+  return plants;
+}
+
+// Snowfield: snow-laden spruce in the forest patches (heightAt.forestAt), tall and close together
+// inside, thinning to single trees at the edges. Spruces are 'tree' plants (solid trunks) with
+// `spruce` set. Candidates on a 2.5 m jittered grid.
+function generateSpruces(heightAt, cx, cz) {
+  const cell = 2.5;
+  const rand = mulberry32(chunkSeed(cx, cz) ^ 0x2c1b3c6d);
+  const plants = [];
+  const n = Math.round(CHUNK_SIZE / cell);
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const x = (cx * n + i + 0.1 + rand() * 0.8) * cell;
+      const z = (cz * n + j + 0.1 + rand() * 0.8) * cell;
+      const roll = rand();
+      const size = rand();
+      const turn = rand() * Math.PI * 2;
+      const shade = rand();
+      const density = heightAt.forestAt(x, z);
+      // Open forest (about one tree per 35 m² at its densest), so the car stays in view between them.
+      if (roll > density * 0.18) continue;
+      // Taller in the middle of a patch.
+      const height = 3.5 + 5 * density * (0.6 + 0.4 * size);
+      plants.push({ kind: 'tree', spruce: true, x, y: heightAt(x, z), z, height, trunk: 0.02 * height, turn, shade });
     }
   }
   return plants;

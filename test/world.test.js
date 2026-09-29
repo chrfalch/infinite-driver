@@ -12,7 +12,7 @@ describe('world choice', () => {
     expect(worldMode('?terrain=flat')).toBe('flat');
   });
 
-  it('offers the canyon and the dry river', () => {
-    expect(Object.values(WORLDS)).toEqual(['canyon', 'river']);
+  it('offers the canyon, the dry river and the snowfield', () => {
+    expect(Object.values(WORLDS)).toEqual(['canyon', 'river', 'snow']);
   });
 });

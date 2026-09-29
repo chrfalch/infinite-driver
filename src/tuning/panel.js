@@ -277,26 +277,30 @@ export function createTuningPanel(world, { heightAt }) {
   sound.add(AUDIO, 'car', 0, 3, 0.05).name('Driveline, body & wind ×').onChange(saveAudio);
   sound.close();
 
-  // Ground: softness sinks the tyres into the soil; gravel is what the tread rolls over.
+  // Ground: softness sinks the tyres into the soil; gravel is what the tread rolls over. The
+  // snowfield has its own snow (terrain/snow.js) and draws its ruts in the snow itself, so it only
+  // keeps the button that clears them.
   const ground = gui.addFolder('Ground');
-  ground
-    .add(GROUND, 'softness', 0, 1, 0.05)
-    .name('Soil softness')
-    .onChange(() => {
-      saveGround();
-      const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.gpu?.solver;
-      if (solver) solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step);
-    });
-  ground
-    .add(GROUND, 'gravel', 0, 1, 0.05)
-    .name('Gravel')
-    .onChange(() => {
-      saveGround();
-      const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.gpu?.solver;
-      if (solver) solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step);
-      setGravelAmount(GROUND.gravel);
-    });
-  ground.add(GROUND, 'tracks').name('Tyre tracks').onChange(saveGround);
+  if (!heightAt.snow) {
+    ground
+      .add(GROUND, 'softness', 0, 1, 0.05)
+      .name('Soil softness')
+      .onChange(() => {
+        saveGround();
+        const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.gpu?.solver;
+        if (solver) solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step);
+      });
+    ground
+      .add(GROUND, 'gravel', 0, 1, 0.05)
+      .name('Gravel')
+      .onChange(() => {
+        saveGround();
+        const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.gpu?.solver;
+        if (solver) solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step);
+        setGravelAmount(GROUND.gravel);
+      });
+    ground.add(GROUND, 'tracks').name('Tyre tracks').onChange(saveGround);
+  }
   ground
     .add(
       {

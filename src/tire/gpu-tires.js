@@ -2,6 +2,7 @@ import { DEFAULT_TIRE, GPU_TIRE, TIRE } from './config.js';
 import { GpuTireSolver, GROUND_N, rockToGpu } from './gpu-tire-solver.js';
 import { torusMesh } from './soft-tire.js';
 import { drawnSurface } from '../terrain/drawn-surface.js';
+import { BARE_DEPTH } from '../terrain/snow.js';
 
 // The tyre mesh descriptions (left and mirrored right) for the current settings; the solver's
 // particles follow the same grid.
@@ -32,7 +33,8 @@ const RECENTRE = 1; // metres the car may drift from the grid centre before it i
 // matches the deformation map, so ruts are read cell for cell. The grid only moves when the car is
 // RECENTRE metres off its centre (terrain heights of the overlap are kept), and rut changes are
 // patched in from the deformation's dirty rectangle, so most frames do little or nothing. Each cell
-// also carries a bare-rock flag (heightAt.rockAt; the dry river's rock sheet) for the solver.
+// also carries a bare-rock flag (heightAt.rockAt; the dry river's rock sheet) for the solver, or on
+// snow how packed the snow is (see snowPacking).
 export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell = 0.125) {
   const N = GROUND_N;
   const half = ((N - 1) * cell) / 2;
@@ -44,19 +46,27 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
   if (!recentre && g.version === version) return;
 
   if (!g) {
-    // grid: the heights (terrain plus ruts) then the rock flags, as the solver takes them.
-    const grid = new Float32Array(N * N * 2);
+    // grid: the heights (terrain plus ruts), the rock flags, then the snow drag, as the solver
+    // takes them.
+    const grid = new Float32Array(N * N * 3);
     g = solver.groundCache = {
       base: new Float32Array(N * N),
       spare: new Float32Array(N * N),
       rock: new Float32Array(N * N),
       spareRock: new Float32Array(N * N),
+      // Snow: how deep each cell can still pack (the rock flags hold the snow's firmness, or 1 + how
+      // bare it is where worn to asphalt).
+      pack: new Float32Array(N * N),
+      sparePack: new Float32Array(N * N),
+      drag: grid.subarray(2 * N * N),
+      spareDrag: new Float32Array(N * N),
       grid,
       heights: grid.subarray(0, N * N),
     };
   }
   const { heights } = g;
   const rockAt = heightAt.rockAt;
+  const snowAt = heightAt.snowAt;
   // The tyres feel the ground as it is drawn (see terrain/drawn-surface.js).
   const surface = (heightAt.drawn ??= drawnSurface(heightAt));
   if (recentre) {
@@ -67,6 +77,8 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
     // Terrain heights: keep the overlap with the previous grid, sample the rest.
     const base = g.spare;
     const rock = g.spareRock;
+    const pack = g.sparePack;
+    const drag = g.spareDrag;
     const reuse = compatible && g.cell === cell;
     const sx = reuse ? ix0 - g.ix0 : N;
     const sz = reuse ? iz0 - g.iz0 : N;
@@ -78,9 +90,17 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
         if (rowReuse && px >= 0 && px < N) {
           base[iz * N + ix] = g.base[pz * N + px];
           rock[iz * N + ix] = g.rock[pz * N + px];
+          pack[iz * N + ix] = g.pack[pz * N + px];
+          drag[iz * N + ix] = g.drag[pz * N + px];
         } else {
           base[iz * N + ix] = surface(ox + ix * cell, oz + iz * cell);
-          rock[iz * N + ix] = rockAt?.(ox + ix * cell, oz + iz * cell) ? 1 : 0;
+          if (snowAt) {
+            const sn = snowAt(ox + ix * cell, oz + iz * cell);
+            const bare = 1 - sn.depth / BARE_DEPTH;
+            rock[iz * N + ix] = bare > 0 ? (sn.ice ? 2 : 1) + Math.min(1, bare) : sn.firm;
+            pack[iz * N + ix] = sn.packDepth;
+            drag[iz * N + ix] = sn.drag;
+          } else rock[iz * N + ix] = rockAt?.(ox + ix * cell, oz + iz * cell) ? 1 : 0;
         }
       }
     }
@@ -88,6 +108,10 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
     g.base = base;
     g.spareRock = g.rock;
     g.rock = rock;
+    g.sparePack = g.pack;
+    g.pack = pack;
+    // The drag lives in the grid itself (g.drag views it); the spare was only scratch.
+    if (snowAt) g.drag.set(drag);
     g.grid.set(rock, N * N);
     g.ix0 = ix0;
     g.iz0 = iz0;
@@ -100,6 +124,7 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
       // The whole grid is fresh, so restart the deformation's change tracking.
       deformation.changedSince(version);
     }
+    if (snowAt) snowPacking(g, 0, 0, N - 1, N - 1);
   } else {
     // Same grid, the ruts changed: refresh only the changed cells inside it.
     const r = deformation.changedSince(g.version);
@@ -118,11 +143,29 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
       heights.set(g.base.subarray(o, o + nx), o);
     }
     deformation.accumulate(g.ix0 + x0, g.iz0 + z0, nx, z1 - z0 + 1, heights, N, z0 * N + x0);
+    if (snowAt) snowPacking(g, x0, z0, x1, z1);
   }
   g.version = version;
   solver.setGround(g.grid, g.ix0 * cell, g.iz0 * cell, cell);
   solver.groundReady = true;
   solver.groundVersion = version;
+}
+
+// Snow: the grid's second channel over cells [x0..x1] x [z0..z1] says what the tread stands on:
+// 0..1 is how packed the snow is, from fresh (0) to packed hard (1; a rut as deep as the snow there
+// packs, or firm snow such as the road's), 1..2 is snow worn down to bare asphalt (2 = bare), and
+// 2..3 the same on the lake's ice (3 = bare ice). From the firmness and pack depth kept per cell
+// (g.rock, g.pack) and the ruts. Snow piled up beside a rut stays as it was.
+export function snowPacking(g, x0, z0, x1, z1) {
+  const N = GROUND_N;
+  const { base, heights, grid, rock, pack } = g;
+  for (let iz = z0; iz <= z1; iz++) {
+    for (let ix = x0; ix <= x1; ix++) {
+      const i = iz * N + ix;
+      const firm = rock[i];
+      grid[N * N + i] = firm >= 1 || pack[i] <= 0 ? Math.max(1, firm) : firm + (1 - firm) * Math.min(1, Math.max(0, (base[i] - heights[i]) / pack[i]));
+    }
+  }
 }
 
 // Ground height (terrain plus ruts) at (x, z) from the solver's grid, interpolated on the same

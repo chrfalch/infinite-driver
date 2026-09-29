@@ -1,7 +1,7 @@
 import { Color } from 'three/webgpu';
 import { Deformation, HeightField, IsPlayer, Soil, Time, Tracks, Vehicle } from '../ecs/traits.js';
 import { terrainColorAt } from '../render/terrain-mesh.js';
-import { GROUND } from '../tire/config.js';
+import { GROUND, currentSnow } from '../tire/config.js';
 import { CAR } from '../vehicle/config.js';
 import { surfaceAt as groundAt } from '../audio/wheels.js';
 
@@ -25,13 +25,15 @@ export function updateSoil(world) {
   if (!particles) return;
   const { delta } = world.get(Time);
   const { heightAt, surfaceAt } = world.get(HeightField);
+  // Bare rock (dry river) and bare asphalt (snowfield) throw nothing, and nothing piles up on them.
+  const hardAt = heightAt.rockAt ?? heightAt.bareAt;
   const deformation = world.get(Deformation)?.map;
   const cellArea = deformation ? deformation.cell * deformation.cell : 1;
   const soilPerClump = 0.35; // share of a clump's volume that is moved in the height map
 
   // Soil landing on bare rock (the dry river's rock sheet) does not pile up.
   const land = (x, z, size) => {
-    if (deformation && !heightAt.rockAt?.(x, z)) deformation.add(x, z, (size * size * size * 2 * soilPerClump) / cellArea);
+    if (deformation && !hardAt?.(x, z)) deformation.add(x, z, (size * size * size * 2 * soilPerClump) / cellArea);
     // Hard ground clicks: bare rock, less so gravel.
     groundAt(heightAt, x, z, landGround);
     const hard = landGround.rock + 0.4 * landGround.gravel;
@@ -39,7 +41,16 @@ export function updateSoil(world) {
   };
   particles.update(delta, surfaceAt, land);
 
-  const softness = GROUND.softness;
+  // Snow throws more, finer and whiter spray than soil: powder, not clumps of dirt.
+  const snow = currentSnow();
+  const softness = snow ? 0.8 : GROUND.softness;
+  const grain = snow ? 0.55 : 1; // clump size scale
+  // A spinning tyre on snow mostly throws the loose powder and polishes the rut; it digs less
+  // than in soil, and not below the snow.
+  const digShare = snow ? 0.15 : 1;
+  // On snow, not below the snow where the tyre is (deeper in a plough bank).
+  const maxDig = (x, z) => (heightAt.snowAt ? heightAt.snowAt(x, z).depth : MAX_DIG);
+  const spray = (c) => (snow ? { r: tmp.r * (0.94 + c * 0.08), g: tmp.g * (0.94 + c * 0.08), b: tmp.b * (0.95 + c * 0.06) } : { r: tmp.r * (0.62 + c * 0.2), g: tmp.g * (0.62 + c * 0.2) * 0.97, b: tmp.b * (0.62 + c * 0.2) * 0.92 });
   const car = world.queryFirst(IsPlayer, Vehicle);
   if (!car || softness <= 0) return;
   const { controller, body } = car.get(Vehicle);
@@ -59,7 +70,7 @@ export function updateSoil(world) {
   for (let i = 0; i < 4; i++) {
     const contact = contacts[i];
     // Bare rock throws no soil.
-    if (!contact || heightAt.rockAt?.(contact.x, contact.z)) {
+    if (!contact || hardAt?.(contact.x, contact.z)) {
       soil.carry[i] = 0;
       continue;
     }
@@ -85,13 +96,12 @@ export function updateSoil(world) {
       if (soil.carryLat[i] >= 1) terrainColorAt(heightAt, contact.x, contact.z, tmp);
       while (soil.carryLat[i] >= 1) {
         soil.carryLat[i] -= 1;
-        const size = 0.02 + Math.random() * 0.04;
+        const size = (0.02 + Math.random() * 0.04) * grain;
         const along = (Math.random() - 0.5) * 0.4;
         const x = contact.x + ax * out * 0.18 + fx * along;
         const z = contact.z + az * out * 0.18 + fz * along;
         const throwSpeed = Math.min(6, slide * 0.7 + Math.random() * 1.2);
-        const c = 0.62 + Math.random() * 0.2;
-        const color = { r: tmp.r * c, g: tmp.g * c * 0.97, b: tmp.b * c * 0.92 };
+        const color = spray(Math.random());
         const emitted = particles.emit(
           x,
           surfaceAt(x, z) + 0.05,
@@ -103,8 +113,8 @@ export function updateSoil(world) {
           color,
         );
         if (emitted) soundEvent(soil, { kind: 'throw', size, speed: throwSpeed });
-        if (emitted && deformation && deformation.at(contact.x, contact.z) > -MAX_DIG) {
-          deformation.add(contact.x, contact.z, -(size * size * size * 2 * soilPerClump) / cellArea);
+        if (emitted && deformation && deformation.at(contact.x, contact.z) > -maxDig(contact.x, contact.z)) {
+          deformation.add(contact.x, contact.z, -(size * size * size * 2 * soilPerClump * digShare) / cellArea);
         }
       }
     }
@@ -127,7 +137,7 @@ export function updateSoil(world) {
     terrainColorAt(heightAt, contact.x, contact.z, tmp);
     while (soil.carry[i] >= 1) {
       soil.carry[i] -= 1;
-      const size = 0.025 + Math.random() * 0.045;
+      const size = (0.025 + Math.random() * 0.045) * grain;
       const along = back * (0.15 + Math.random() * 0.25);
       const side = (Math.random() - 0.5) * 0.3;
       const x = contact.x + fx * along - fz * side;
@@ -135,8 +145,7 @@ export function updateSoil(world) {
       const throwSpeed = Math.min(10, Math.abs(slip) * 0.5 + Math.random() * 2);
       const lift = 1.2 + Math.random() * 2.5 + Math.abs(slip) * 0.2;
       const spread = (Math.random() - 0.5) * 2.4;
-      const c = 0.62 + Math.random() * 0.2; // disturbed soil is darker than the surface
-      const color = { r: tmp.r * c, g: tmp.g * c * 0.97, b: tmp.b * c * 0.92 };
+      const color = spray(Math.random()); // disturbed soil is darker than the surface (snow is not)
       const emitted = particles.emit(
         x,
         surfaceAt(x, z) + 0.06,
@@ -149,8 +158,8 @@ export function updateSoil(world) {
       );
       if (emitted) soundEvent(soil, { kind: 'throw', size, speed: throwSpeed });
       // Dig at the tyre what the clump carries away (down to a limit).
-      if (emitted && deformation && deformation.at(contact.x, contact.z) > -MAX_DIG) {
-        deformation.add(contact.x, contact.z, -(size * size * size * 2 * soilPerClump) / cellArea);
+      if (emitted && deformation && deformation.at(contact.x, contact.z) > -maxDig(contact.x, contact.z)) {
+        deformation.add(contact.x, contact.z, -(size * size * size * 2 * soilPerClump * digShare) / cellArea);
       }
     }
   }

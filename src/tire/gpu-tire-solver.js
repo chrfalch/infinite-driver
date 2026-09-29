@@ -50,6 +50,11 @@ const Params = d.struct({
   radius: d.f32,
   relaxation: d.f32,
   soilStiffness: d.f32, // N/m per particle; 0 = hard ground
+  snow: d.f32, // 1: the grid's second channel is snow (0 fresh .. 1 packed .. 2 bare asphalt), not rock flags
+  bareFriction: d.f32, // snow: grip on bare asphalt
+  iceFriction: d.f32, // snow: grip on bare ice
+  snowSlide: d.f32, // snow: sliding grip as a share of the grip before it slides
+  packedStiffness: d.f32, // N/m per particle, fully packed snow
   pressureLead: d.f32, // substeps of wheel spin the pressure normal is turned ahead
   groundStiffness: d.f32, // N/m per particle, hard ground and rocks
   groundDamping: d.f32, // N·s/m per particle
@@ -111,15 +116,16 @@ export class GpuTireSolver {
     this.hubs = root.createUniform(d.arrayOf(Hub, MAX_TIRES));
     this.params = root.createUniform(Params);
     // Ground grid: GROUND_N² heights, then GROUND_N² bare-rock flags (1 = rock: grippy, hard, no
-    // gravel), in one buffer to stay within the storage buffer limit.
-    this.ground = root.createReadonly(d.arrayOf(d.f32, GROUND_N * GROUND_N * 2));
+    // gravel), then GROUND_N² snow drag coefficients (deep, loose snow), in one buffer to stay within
+    // the storage buffer limit.
+    this.ground = root.createReadonly(d.arrayOf(d.f32, GROUND_N * GROUND_N * 3));
     // Rocks: MAX_ROCKS bounding spheres followed by MAX_ROCKS × ROCK_FACES face planes.
     this.rocks = root.createReadonly(d.arrayOf(d.vec4f, MAX_ROCKS * (ROCK_FACES + 1)));
 
     const restData = new Float32Array(this.perTire * 4);
     for (let i = 0; i < this.perTire; i++) restData.set([restLocal[i * 3], restLocal[i * 3 + 1], restLocal[i * 3 + 2], 0], i * 4);
     this.rest.write(restData);
-    this.ground.write(new Float32Array(GROUND_N * GROUND_N * 2));
+    this.ground.write(new Float32Array(GROUND_N * GROUND_N * 3));
     this.groundOrigin = { x: -8, z: -8 };
     this.groundCell = 0.125;
     this.rockCount = 0;
@@ -229,12 +235,22 @@ export class GpuTireSolver {
       }
       return normalize(vec3f(-sx, 1.0, -sz));
     }`.$uses({ params: this.params, ground: this.ground });
-    // 1 on bare rock (the nearest grid cell's flag), else 0.
+    // The nearest grid cell's second channel: 1 on bare rock, else 0 (on snow: 0..1 how packed,
+    // up to 2 where worn to bare asphalt, 2..3 bare ice).
     const groundRock = tgpu.fn([d.f32, d.f32], d.f32)/* wgsl */ `(x, z) {
       let last = f32(${GROUND_N - 1});
       let ix = u32(clamp(round((x - params.groundOriginX) / params.groundCell), 0.0, last));
       let iz = u32(clamp(round((z - params.groundOriginZ) / params.groundCell), 0.0, last));
       return ground[${GROUND_N * GROUND_N}u + iz * ${GROUND_N}u + ix];
+    }`.$uses({ params: this.params, ground: this.ground });
+
+    // The nearest grid cell's snow drag: the share of the push that pushing through loose snow there
+    // costs (0 on packed snow, asphalt and soil).
+    const groundDrag = tgpu.fn([d.f32, d.f32], d.f32)/* wgsl */ `(x, z) {
+      let last = f32(${GROUND_N - 1});
+      let ix = u32(clamp(round((x - params.groundOriginX) / params.groundCell), 0.0, last));
+      let iz = u32(clamp(round((z - params.groundOriginZ) / params.groundCell), 0.0, last));
+      return ground[${2 * GROUND_N * GROUND_N}u + iz * ${GROUND_N}u + ix];
     }`.$uses({ params: this.params, ground: this.ground });
 
     // Distance constraints for particle k of tyre t (one Jacobi pass).
@@ -277,14 +293,20 @@ export class GpuTireSolver {
     // vTrial is the particle velocity after all other forces this substep.
     const contactForce = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32], d.vec3f)/* wgsl */ `(x, vTrial, m, dt) {
       var f = vec3f(0.0);
-      // Bare rock does not give like soil.
-      let soft = params.soilStiffness > 0.0 && groundRock(x.x, x.z) < 0.5;
+      // Bare rock does not give like soil. Snow gives, less as it packs: from the soft fresh-snow
+      // spring to one as firm as hard ground (squared, so it firms up late, near the rut's floor).
+      // Snow worn down to bare asphalt (channel over 1.5) is hard ground.
+      let surf = groundRock(x.x, x.z);
+      let snowy = params.snow > 0.5;
+      let pack = min(surf, 1.0);
+      let soft = params.soilStiffness > 0.0 && select(surf < 0.5, surf < 1.5, snowy);
+      let soilK = select(params.soilStiffness, mix(params.soilStiffness, params.packedStiffness, pack * pack), snowy);
       // The ground pushes along its normal (the triangle's slope), by the depth along it: on a steep
       // face a straight-up push let a tyre pressed sideways sink into the rock.
       let gn = groundNormal(x.x, x.z);
       let depth = (groundHeight(x.x, x.z) + params.radius - x.y) * gn.y;
       if (depth > 0.0) {
-        var push = select(params.groundStiffness, params.soilStiffness, soft) * depth;
+        var push = select(params.groundStiffness, soilK, soft) * depth;
         let vn0 = dot(vTrial, gn);
         if (soft && vn0 > 0.0) {
           // Soil pushes back fully while compressed, only partly as the tread lifts (it absorbs energy).
@@ -328,7 +350,7 @@ export class GpuTireSolver {
     // contact springs normally hold it).
     const floorClamp = tgpu.fn([d.vec3f], d.vec3f)/* wgsl */ `(pIn) {
       var p = pIn;
-      let floorDepth = select(params.rockFloor, params.maxSink, params.soilStiffness > 0.0 && groundRock(p.x, p.z) < 0.5);
+      let floorDepth = select(params.rockFloor, params.maxSink, params.soilStiffness > 0.0 && groundRock(p.x, p.z) < select(0.5, 1.5, params.snow > 0.5));
       let floor = groundHeight(p.x, p.z) + params.radius - floorDepth;
       if (p.y < floor) { p.y = floor; }
       return p;
@@ -441,7 +463,20 @@ export class GpuTireSolver {
           let rigid = hsLin.xyz + cross(hsAng.xyz, x - c0);
           vl -= (vl - rigid) * min(1.0, params.damping * dt);
           // Ground push and rocks.
-          let fc = contactForce(x, vl, m, dt);
+          var fc = contactForce(x, vl, m, dt);
+          // Snow: driving through deep, loose snow (a plough bank) packs it ahead of the tyre, which
+          // takes work: a drag against the hub's travel, a share of the ground's push (the cell's
+          // drag) that falls as the snow packs.
+          if (params.snow > 0.5) {
+            let drag = groundDrag(x.x, x.z);
+            let travel = vec3f(hsLin.x, 0.0, hsLin.z);
+            let speed = length(travel);
+            let pn = max(dot(fc, groundNormal(x.x, x.z)), 0.0);
+            if (drag > 0.0 && speed > 1e-3 && pn > 0.0) {
+              let loose = 1.0 - min(groundRock(x.x, x.z), 1.0);
+              fc -= travel / speed * (drag * loose * pn * min(1.0, speed / 0.5));
+            }
+          }
           vl += fc * (dt / m);
           let ext = gravity + fc;
           extForce += ext;
@@ -542,10 +577,19 @@ export class GpuTireSolver {
             let moved = p - pr.xyz;
             let slide = moved - gn * dot(moved, gn);
             let len = length(slide);
-            let mu = select(params.friction, params.rockFriction, groundRock(p.x, p.z) > 0.5);
+            // On snow, rockFriction is the grip on fully packed snow, blended in as it packs, and then
+            // toward bare asphalt where the snow is worn through.
+            let surfF = groundRock(p.x, p.z);
+            // Channel 2..3: snow worn to bare ice instead (see snowPacking in gpu-tires.js).
+            let onSnow = mix(mix(params.friction, params.rockFriction, min(surfF, 1.0)), params.bareFriction, clamp(surfF - 1.0, 0.0, 1.0));
+            let snowMu = select(onSnow, mix(params.rockFriction, params.iceFriction, clamp(surfF - 2.0, 0.0, 1.0)), surfF > 2.0);
+            let mu = select(select(params.friction, params.rockFriction, surfF > 0.5), snowMu, params.snow > 0.5);
             let limit = mu * push * dt * dt / m;
             var cut = slide;
-            if (len > limit) { cut = slide * (limit / len); }
+            // Once the tread slides on snow it grips less than it held (the snow shears into a
+            // slick layer), so a slide carries on: drifts and donuts. Bare asphalt keeps its grip.
+            let kinetic = select(1.0, mix(params.snowSlide, 1.0, clamp(surfF - 1.0, 0.0, 1.0)), params.snow > 0.5);
+            if (len > limit) { cut = slide * (limit * kinetic / len); }
             p -= cut;
             let ff = -cut * (m / (dt * dt));
             dbgCount += 1.0;
@@ -644,6 +688,7 @@ export class GpuTireSolver {
       groundHeight,
       groundNormal,
       groundRock,
+      groundDrag,
       pos: this.pos,
       prev: this.prev,
       vel: this.vel,
@@ -717,6 +762,11 @@ export class GpuTireSolver {
       relaxation: s.relaxation,
       // Soft ground is an explicit soil spring, capped below the stability limit for this substep.
       soilStiffness: s.soilStiffness > 0 ? Math.min(s.soilStiffness, (3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)) : 0,
+      snow: s.snow ?? 0,
+      bareFriction: s.bareFriction ?? s.friction,
+      iceFriction: s.iceFriction ?? s.friction,
+      snowSlide: s.snowSlide ?? 1,
+      packedStiffness: Math.min(s.packedStiffness ?? 0, (3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)),
       soilRebound: s.soilRebound ?? 0.35,
       pressureLead: s.pressureLead ?? 1,
       // Hard ground and rocks: the stiffest contact spring the substep allows, lightly damped.
@@ -747,7 +797,7 @@ export class GpuTireSolver {
   }
 
   // Ground heights on a GROUND_N² grid starting at (originX, originZ) with the given spacing.
-  // `grid`: GROUND_N² heights followed by GROUND_N² bare-rock flags.
+  // `grid`: GROUND_N² heights, GROUND_N² bare-rock flags (snow: see snowPacking), GROUND_N² snow drag.
   setGround(grid, originX, originZ, cell) {
     this.ground.write(grid);
     this.groundOrigin = { x: originX, z: originZ };

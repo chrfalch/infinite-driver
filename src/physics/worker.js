@@ -9,7 +9,7 @@ import { Deformation, HeightField, Input, IsPlayer, Physics, RigidBody, RockFiel
 import { stepPhysics } from '../systems/physics.js';
 import { GroundDeformation } from '../terrain/deformation.js';
 import { createHeightField } from '../terrain/height.js';
-import { GPU_TIRE, GROUND, TIRE, effectiveGpuTire, effectiveTire } from '../tire/config.js';
+import { GPU_TIRE, GROUND, TIRE, effectiveGpuTire, effectiveTire, setSnowCover } from '../tire/config.js';
 import { createGpuTires } from '../tire/gpu-tires.js';
 import { CAR, DRIVETRAIN } from '../vehicle/config.js';
 import { Drivetrain } from '../vehicle/drivetrain.js';
@@ -165,6 +165,7 @@ async function init(msg) {
   physicsWorld.numSolverIterations = 8;
   world = createWorld();
   const heightAt = createHeightField({ mode: msg.terrain });
+  setSnowCover(heightAt.snow);
   deformation = new GroundDeformation();
   for (const [key, tile] of msg.tiles ?? []) deformation.adoptTile(key, tile);
   world.add(Input, Physics({ rapier: RAPIER, world: physicsWorld, accumulator: 0, step: STEP, stepMs: 0, simTime: 0, displayTime: 0 }));

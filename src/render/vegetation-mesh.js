@@ -1,6 +1,7 @@
 // Low-poly cartoon bushes and small trees (juniper-like), one instanced mesh per part per chunk.
 import {
   Color,
+  ConeGeometry,
   CylinderGeometry,
   Group,
   IcosahedronGeometry,
@@ -74,6 +75,29 @@ function gumCrownGeometry() {
   ].map(([x, y, z, r]) => new IcosahedronGeometry(r, 0).scale(1.25, 0.55, 1.25).translate(x, y, z));
   return mergeGeometries(parts);
 }
+// Spruce, unit height: a short dark trunk under five tiers of needles, widest at the bottom, each
+// with a cap of snow on its upper face (the caps are their own mesh, so a tree can shed them).
+const SPRUCE_TIERS = [
+  [0.2, 0.3, 0.33],
+  [0.34, 0.26, 0.27],
+  [0.48, 0.22, 0.21],
+  [0.62, 0.17, 0.2],
+  [0.76, 0.1, 0.24],
+];
+function spruceNeedleGeometry() {
+  return mergeGeometries(SPRUCE_TIERS.map(([y, r, h]) => new ConeGeometry(r, h, 7).translate(0, y + h / 2, 0).toNonIndexed()));
+}
+function spruceSnowGeometry() {
+  // A cap over the tier's upper 70 %, a little wider than the needles under it, so the snow lies on
+  // them and hangs over at its edge.
+  return mergeGeometries(SPRUCE_TIERS.map(([y, r, h]) => new ConeGeometry(r * 0.8, h * 0.72, 7).translate(0, y + h - (h * 0.72) / 2 + 0.01, 0).toNonIndexed()));
+}
+const SPRUCE_TRUNK = new CylinderGeometry(0.018, 0.03, 0.3, 6).translate(0, 0.15, 0);
+const SPRUCE_NEEDLES = spruceNeedleGeometry();
+const SPRUCE_SNOW = spruceSnowGeometry();
+const SPRUCE_GREENS = ['#2f4a37', '#35503a', '#2a4234', '#3b5641', '#314b3d'].map((c) => new Color(c));
+const needles = new MeshStandardMaterial({ roughness: 0.9, flatShading: true });
+const snowCaps = new MeshStandardMaterial({ color: '#f2f5f9', roughness: 0.95, flatShading: true });
 const GUM_TRUNK = gumTrunkGeometry();
 const GUM_CROWN = gumCrownGeometry();
 const leaves = new MeshStandardMaterial({ roughness: 0.9, flatShading: true });
@@ -158,7 +182,8 @@ const col = new Color();
 export function createVegetationMesh(plants) {
   if (!plants.length) return null;
   const bushes = plants.filter((p) => p.kind === 'bush');
-  const trees = plants.filter((p) => p.kind === 'tree' && !p.gum);
+  const trees = plants.filter((p) => p.kind === 'tree' && !p.gum && !p.spruce);
+  const spruces = plants.filter((p) => p.spruce);
   const gums = plants.filter((p) => p.gum);
   const group = new Group();
   const instanced = (geometry, material, count) => {
@@ -205,6 +230,21 @@ export function createVegetationMesh(plants) {
       crowns.setMatrixAt(i, m);
       trunks.setColorAt(i, GUM_BARK[Math.floor(p.shade * 7) % GUM_BARK.length]);
       colour(p, i, crowns);
+    });
+  }
+  if (spruces.length) {
+    const trunks = instanced(SPRUCE_TRUNK, bark, spruces.length);
+    const crowns = instanced(SPRUCE_NEEDLES, needles, spruces.length);
+    const caps = instanced(SPRUCE_SNOW, snowCaps, spruces.length);
+    // The snow on them can be shaken off (systems/vegetation.js).
+    group.userData.spruces = { plants: spruces, caps };
+    spruces.forEach((p, i) => {
+      q.setFromAxisAngle(up, p.turn);
+      m.compose(pos.set(p.x, p.y - 0.15, p.z), q, scl.set(p.height * (0.9 + p.shade * 0.2), p.height, p.height * (0.9 + p.shade * 0.2)));
+      trunks.setMatrixAt(i, m);
+      crowns.setMatrixAt(i, m);
+      caps.setMatrixAt(i, m);
+      crowns.setColorAt(i, SPRUCE_GREENS[Math.floor(p.shade * SPRUCE_GREENS.length) % SPRUCE_GREENS.length]);
     });
   }
   for (const child of group.children) child.computeBoundingSphere();

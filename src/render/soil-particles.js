@@ -1,10 +1,12 @@
 import { Color, IcosahedronGeometry, InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from 'three/webgpu';
 
 const GRAVITY = 9.81;
-const DRAG = 1.2; // 1/s, clumps slow down in the air
+const DRAG = 1.2; // 1/s, clumps slow down in the air (powder snow: more, see `drag`)
 const SETTLE_TIME = 1.6; // s a landed clump stays before it crumbles away
 
 const material = new MeshStandardMaterial({ roughness: 1, metalness: 0, flatShading: true });
+// Powder snow scatters light through itself: no dark faces or self-shadowing.
+const powderMaterial = new MeshStandardMaterial({ roughness: 1, metalness: 0, flatShading: true, emissive: '#b8c2cc' });
 const m4 = new Matrix4();
 const q = new Quaternion();
 const v3 = new Vector3();
@@ -14,11 +16,12 @@ const s3 = new Vector3();
 // clump lands it settles, shrinks away, and hands its soil back to the ground (onLand), so digging
 // at the tyre and piling up where it lands balance out.
 export class SoilParticles {
-  constructor(scene, { capacity = 2500 } = {}) {
+  constructor(scene, { capacity = 2500, drag = DRAG, powder = false } = {}) {
     this.capacity = capacity;
-    this.mesh = new InstancedMesh(new IcosahedronGeometry(1, 0), material, capacity);
+    this.drag = drag;
+    this.mesh = new InstancedMesh(new IcosahedronGeometry(1, 0), powder ? powderMaterial : material, capacity);
     this.mesh.castShadow = true;
-    this.mesh.receiveShadow = true;
+    this.mesh.receiveShadow = !powder;
     this.mesh.frustumCulled = false;
     this.mesh.count = 0;
     this.mesh.name = 'soil spray';
@@ -74,7 +77,7 @@ export class SoilParticles {
         continue;
       }
       this.vel[o + 1] -= GRAVITY * dt;
-      const k = Math.max(0, 1 - DRAG * dt);
+      const k = Math.max(0, 1 - this.drag * dt);
       this.vel[o] *= k;
       this.vel[o + 1] *= k;
       this.vel[o + 2] *= k;

@@ -1,4 +1,5 @@
 import { HeightField, IsPlayer, RockField, Soil, Time, Vehicle } from '../ecs/traits.js';
+import { Color, Matrix4 } from 'three/webgpu';
 import { createCrushedBush, deformBush } from '../render/vegetation-mesh.js';
 
 // Bushes are crushed only where the car touches them, and stay crushed like the tyre tracks:
@@ -42,6 +43,7 @@ export function updateBushes(world) {
 
   world.query(RockField).forEach((entity) => {
     const field = entity.get(RockField);
+    if (field.spruces) shakeSpruces(field, c, fx / fl, fz / fl, v, particles);
     const bushes = field.bushes;
     if (!bushes) return;
     if (Math.abs(field.cx * 64 + 32 - c.x) > 32 + REACH || Math.abs(field.cz * 64 + 32 - c.z) > 32 + REACH) return;
@@ -114,4 +116,47 @@ function groundPlane(p, sy, heightAt) {
   const az = (p.size * (gx * s + gz * c)) / sy;
   const base = (heightAt(p.x, p.z) - (p.y - 0.08)) / sy;
   return (x, z) => base + ax * x + az * z;
+}
+
+// A spruce the car bumps into sheds its snow: the caps vanish and the snow comes down as powder
+// around the trunk, drifting a little with the knock.
+const CAR_HALF_LENGTH = 2.3; // m, the frame and bumpers either side of the chassis origin
+const CAR_HALF_WIDTH = 1.2;
+const hidden = new Matrix4().makeScale(0, 0, 0);
+const cap = new Color('#f2f5f9');
+function shakeSpruces(field, c, fx, fz, v, particles) {
+  const { plants, caps } = field.spruces;
+  if (Math.abs(field.cx * 64 + 32 - c.x) > 32 + REACH || Math.abs(field.cz * 64 + 32 - c.z) > 32 + REACH) return;
+  for (let i = 0; i < plants.length; i++) {
+    const p = plants[i];
+    if (p.shed) continue;
+    const dx = p.x - c.x;
+    const dz = p.z - c.z;
+    if (dx * dx + dz * dz > 16) continue;
+    const along = dx * fx + dz * fz;
+    const across = -dx * fz + dz * fx;
+    if (Math.abs(along) > CAR_HALF_LENGTH + p.trunk || Math.abs(across) > CAR_HALF_WIDTH + p.trunk) continue;
+    p.shed = true;
+    caps.setMatrixAt(i, hidden);
+    caps.instanceMatrix.needsUpdate = true;
+    if (!particles) continue;
+    // Powder from every tier, falling from the branch tips inward.
+    for (let k = 0; k < 90; k++) {
+      const t = Math.random();
+      const y = p.y + p.height * (0.25 + 0.65 * t);
+      const r = p.height * (0.28 - 0.2 * t) * Math.sqrt(Math.random());
+      const a = Math.random() * Math.PI * 2;
+      const shade = 0.93 + Math.random() * 0.07;
+      particles.emit(
+        p.x + Math.cos(a) * r,
+        y,
+        p.z + Math.sin(a) * r,
+        v.x * 0.15 + (Math.random() - 0.5) * 1.2,
+        -0.5 - Math.random(),
+        v.z * 0.15 + (Math.random() - 0.5) * 1.2,
+        0.02 + Math.random() * 0.035,
+        { r: cap.r * shade, g: cap.g * shade, b: cap.b * shade },
+      );
+    }
+  }
 }

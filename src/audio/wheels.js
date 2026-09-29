@@ -37,9 +37,13 @@ const smoothstep = (a, b, x) => {
 // The ground under a point as weights: { rock, gravel } (the rest is soil or sand).
 //   dry river: the rock sheet, else a sandy bed with pebbles;
 //   canyon: the gravel road, bare rock where the rock formations rise, else soil with gravel;
+//   snowfield: soft and quiet, no stones (a sound of its own for snow, asphalt and ice is still to do);
 //   test worlds: soil with some gravel.
 export function surfaceAt(heightAt, x, z, out = { rock: 0, gravel: 0 }) {
-  if (heightAt?.rockAt) {
+  if (heightAt?.snowAt) {
+    out.rock = 0;
+    out.gravel = 0;
+  } else if (heightAt?.rockAt) {
     const rock = heightAt.rockAt(x, z) ? 1 : 0;
     out.rock = rock;
     out.gravel = (1 - rock) * 0.5;
