@@ -100,6 +100,7 @@ export class EngineSynth {
     this.flutterPhase = 0;
     this.lastThrottle = 0;
     this.roughNoise = 0;
+    this.wander = 0;
     this.whine2Phase = 0;
   }
 
@@ -114,7 +115,10 @@ export class EngineSynth {
     const interval = 120 / Math.max(rpm, 100) / p.cylinders; // s between firings
     const burn = Math.min(1, fuel * 3); // any fuel at all burns: the knock does not scale with load
     const jitter = 1 + p.ampJitter * (this.random() * 2 - 1);
-    const strength = p.cylinderGain[k] * jitter * (p.motoring + (1 - p.motoring) * Math.pow(fuel, 0.6) + p.exhaustBrake.level * exhaustBrake);
+    // A slow wander over several firings: the engine throbs and lumps along instead of hissing.
+    this.wander += ((this.random() * 2 - 1) - this.wander) * 0.35;
+    const wander = 1 + (p.wander ?? 0) * this.wander;
+    const strength = p.cylinderGain[k] * jitter * wander * (p.motoring + (1 - p.motoring) * Math.pow(fuel, 0.6) + p.exhaustBrake.level * exhaustBrake);
     const rpmNorm = Math.min(1, rpm / p.limiterRpm);
     const knock = p.clatter.level * (0.08 + 0.92 * burn) * (0.35 + 0.65 * burn * (1 - fuel * 0.4)) * Math.max(0.25, 1.25 - rpmNorm) * jitter;
     const body = Math.min(0.012, Math.max(0.0008, p.bodyShare * interval));

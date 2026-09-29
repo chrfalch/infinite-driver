@@ -12,8 +12,10 @@ export const TURBO_DIESEL_I4 = Object.freeze({
   firing: [0, 0.75, 0.25, 0.5],
   // No two cylinders are quite alike (injectors, compression): a fixed strength per cylinder gives
   // the half-order lumpiness of a real engine, and a small random spread per firing its roughness.
-  cylinderGain: [1.0, 0.86, 1.1, 0.92],
+  cylinderGain: [1.0, 0.8, 1.15, 0.9],
   ampJitter: 0.22,
+  // A slow random wander in strength over several firings (see EngineSynth.fire).
+  wander: 0.4,
   timingJitter: 0.003, // share of the firing interval
   // Exhaust pulse: a sharp blowdown spike and a longer body that lasts a share of the interval
   // between firings. With no fuel (coasting) the engine still pumps air: `motoring` of the strength.
@@ -31,8 +33,9 @@ export const TURBO_DIESEL_I4 = Object.freeze({
     { f: 260, q: 2.2, gain: 0.35 },
   ],
   // Turbulent flow: each pulse is roughened by noise low-passed at `frequency` (Hz), and the
-  // silencer is overdriven (`drive`): together they turn a smooth tube tone into a rumble.
-  rough: { amount: 0.55, frequency: 320 },
+  // silencer is overdriven (`drive`): together they turn a smooth tube tone into a rumble. More
+  // roughness than this is heard as a noise generator on top of the engine (0.55 at 320 Hz was).
+  rough: { amount: 0.12, frequency: 150 },
   drive: 2.5,
   // Brightness: the low-pass cutoff over the exhaust (Hz) = base + load × fuel + perRpm × rpm.
   tone: { base: 220, load: 1500, perRpm: 0.3, q: 0.8 },
@@ -60,7 +63,7 @@ export const TURBO_DIESEL_I4 = Object.freeze({
   exhaustBrake: { level: 0.35, rasp: 0.5 },
   idleRpm: 850,
   limiterRpm: 5400,
-  gain: 0.7,
+  gain: 0.9,
   topCut: 7000, // Hz, a gentle low-pass over everything
 });
 
