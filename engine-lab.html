@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Drift — engine sound lab</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #e9e2d3; overflow: hidden; font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; color: #4a4538; }
+      #readout { position: fixed; left: 16px; top: 12px; font: 13px/1.6 ui-monospace, monospace; white-space: pre; }
+      #throttle { position: fixed; right: 24px; bottom: 24px; width: 150px; height: 150px; border-radius: 50%; border: 0; background: #9a5b2c; color: #fff; font: 600 15px system-ui, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; }
+      #throttle:active { background: #7a431c; }
+      #hint { position: fixed; left: 16px; bottom: 12px; max-width: 520px; }
+      .lil-gui.tuning,
+      .lil-gui.tuning .lil-gui {
+        --background-color: rgba(250, 246, 238, 0.92);
+        --widget-color: #e4dccb;
+        --hover-color: #d8cfbb;
+        --focus-color: #cfc5ae;
+        --number-color: #9a5b2c;
+        --string-color: #6b7f3a;
+        --text-color: #4a4538;
+        --title-background-color: #e9e0cd;
+        --title-text-color: #4a4538;
+        --font-size: 11px;
+        --width: 290px;
+      }
+      .lil-gui.tuning {
+        top: 12px;
+        right: 12px;
+        max-height: calc(100vh - 24px);
+        overflow-y: auto;
+        border-radius: 6px;
+        box-shadow: 0 2px 12px rgba(60, 50, 30, 0.15);
+      }
+      .fatal { position: fixed; inset: 16px; margin: 0; padding: 16px; background: #fff; color: #a00; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <div id="readout"></div>
+    <div id="hint">Click or press a key to start the sound. Drive mode: hold W or ↑ for throttle (the car's
+      drivetrain on a flat road). Rev mode: the same in neutral. Manual mode: the sliders set the
+      engine directly.</div>
+    <button id="throttle">Throttle (hold)</button>
+    <script type="module" src="/src/enginelab/main.js"></script>
+  </body>
+</html>

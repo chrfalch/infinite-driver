@@ -3,6 +3,15 @@ import { Deformation, HeightField, IsPlayer, Soil, Time, Tracks, Vehicle } from 
 import { terrainColorAt } from '../render/terrain-mesh.js';
 import { GROUND, currentSnow } from '../tire/config.js';
 import { CAR } from '../vehicle/config.js';
+import { surfaceAt as groundAt } from '../audio/wheels.js';
+
+const landGround = { rock: 0, gravel: 0 };
+const MAX_SOUND_EVENTS = 64;
+// Stones thrown and landing, for the sound (audio/ground-synth.js); the audio takes them every frame.
+function soundEvent(soil, e) {
+  soil.sounds ??= [];
+  if (soil.sounds.length < MAX_SOUND_EVENTS) soil.sounds.push(e);
+}
 
 const tmp = new Color();
 const MAX_DIG = 0.4; // m, deepest hole spinning tyres can dig
@@ -25,6 +34,10 @@ export function updateSoil(world) {
   // Soil landing on bare rock (the dry river's rock sheet) does not pile up.
   const land = (x, z, size) => {
     if (deformation && !hardAt?.(x, z)) deformation.add(x, z, (size * size * size * 2 * soilPerClump) / cellArea);
+    // Hard ground clicks: bare rock, less so gravel.
+    groundAt(heightAt, x, z, landGround);
+    const hard = landGround.rock + 0.4 * landGround.gravel;
+    if (hard > 0.2) soundEvent(soil, { kind: 'land', size, rock: hard });
   };
   particles.update(delta, surfaceAt, land);
 
@@ -99,6 +112,7 @@ export function updateSoil(world) {
           size,
           color,
         );
+        if (emitted) soundEvent(soil, { kind: 'throw', size, speed: throwSpeed });
         if (emitted && deformation && deformation.at(contact.x, contact.z) > -maxDig(contact.x, contact.z)) {
           deformation.add(contact.x, contact.z, -(size * size * size * 2 * soilPerClump * digShare) / cellArea);
         }
@@ -142,6 +156,7 @@ export function updateSoil(world) {
         size,
         color,
       );
+      if (emitted) soundEvent(soil, { kind: 'throw', size, speed: throwSpeed });
       // Dig at the tyre what the clump carries away (down to a limit).
       if (emitted && deformation && deformation.at(contact.x, contact.z) > -maxDig(contact.x, contact.z)) {
         deformation.add(contact.x, contact.z, -(size * size * size * 2 * soilPerClump * digShare) / cellArea);

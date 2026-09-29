@@ -20,6 +20,8 @@ import { DRIVETRAIN, resetDrivetrain, saveDrivetrain } from '../vehicle/config.j
 import { requestRebuild, requestRespawn } from '../vehicle/spawn.js';
 import { setGravelAmount } from '../render/terrain-mesh.js';
 import { WORLDS, saveWorld, worldMode } from '../world.js';
+import { AUDIO, resetAudio, saveAudio } from '../audio/config.js';
+import { ENGINE_PRESETS } from '../audio/engine-presets.js';
 
 // [path, label, min, max, step, apply] — apply is 'live' (read every step), 'wheels' (pushed to
 // the Rapier controller), or 'rebuild' (shape or mass: the car is rebuilt in place).
@@ -149,6 +151,7 @@ export function createTuningPanel(world, { heightAt }) {
       resetGround();
       setGravelAmount(GROUND.gravel);
       resetDrivetrain();
+      resetAudio();
       Object.assign(CONTROLS, DEFAULT_CONTROLS);
       saveControls();
       gui.controllersRecursive().forEach((c) => c.updateDisplay());
@@ -262,6 +265,18 @@ export function createTuningPanel(world, { heightAt }) {
   }
   dt.close();
 
+  // Sound: applied live by audio/audio.js when saved. M toggles it, so the checkbox follows.
+  const sound = gui.addFolder('Sound');
+  sound.add(AUDIO, 'enabled').name('Sound on (M)').onChange(saveAudio).listen();
+  sound.add(AUDIO, 'engineType', Object.keys(ENGINE_PRESETS)).name('Engine sound').onChange(saveAudio);
+  sound.add(AUDIO, 'volume', 0, 1, 0.01).name('Volume').onChange(saveAudio);
+  sound.add(AUDIO, 'engine', 0, 2, 0.05).name('Engine ×').onChange(saveAudio);
+  sound.add(AUDIO, 'turbo', 0, 3, 0.05).name('Turbo whistle ×').onChange(saveAudio);
+  sound.add(AUDIO, 'clatter', 0, 3, 0.05).name('Diesel clatter ×').onChange(saveAudio);
+  sound.add(AUDIO, 'ground', 0, 3, 0.05).name('Tyres & ground ×').onChange(saveAudio);
+  sound.add(AUDIO, 'car', 0, 3, 0.05).name('Driveline, body & wind ×').onChange(saveAudio);
+  sound.close();
+
   // Ground: softness sinks the tyres into the soil; gravel is what the tread rolls over. The
   // snowfield has its own snow (terrain/snow.js) and draws its ruts in the snow itself, so it only
   // keeps the button that clears them.
@@ -328,6 +343,7 @@ const KEYS = [
   ['C', 'Follow camera on / off (tap)'],
   ['C + arrows', 'Turn and tilt the camera'],
   ['P', 'Perf stats on / off'],
+  ['M', 'Sound on / off'],
   ['Drag', 'Turn the camera; double-click resets'],
   ['Wheel / pinch', 'Zoom'],
 ];

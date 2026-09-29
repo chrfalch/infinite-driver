@@ -62,6 +62,11 @@ export function engineTorque(params, rpm) {
   return curve[curve.length - 1][1];
 }
 
+// The full-load curve's highest torque.
+export function peakTorque(params) {
+  return params.torqueCurve.reduce((m, [, t]) => Math.max(m, t), 0);
+}
+
 export function frictionTorque(params, rpm) {
   return params.frictionTorque + params.frictionPerRpm * Math.max(0, rpm);
 }
@@ -88,6 +93,11 @@ export class Drivetrain {
     this.throttle = 0;
     this.torques = [0, 0, 0, 0];
     this.coupledInertia = 0; // kg·m² at the wheels, see update()
+    // For the engine sound: fuel injected (drive torque over the curve's peak, 0..1, including the
+    // idle governor and shift blips) and how hard the exhaust brake works (0..1).
+    this.fuel = 0;
+    this.exhaustBrake = 0;
+    this.shaftTorque = 0; // N·m out of the gearbox (for the driveline's clunk and whine)
   }
 
   get rpm() {
@@ -250,6 +260,8 @@ export class Drivetrain {
       ? (coast.exhaustBrake * Math.min(1, Math.max(0, (rpmNow - p.idleRpm) / 600)) + coast.extraFriction * rpmNow) / (p.low ? p.lowRange : 1)
       : 0;
     const engineNet = drive - frictionTorque(p, rpmNow) - brake;
+    this.fuel = Math.min(1, Math.max(0, drive) / peakTorque(p));
+    this.exhaustBrake = coast.exhaustBrake > 0 && offThrottle ? Math.min(1, Math.max(0, (rpmNow - p.idleRpm) / 600)) * Math.min(1, coast.exhaustBrake / 180) : 0;
 
     // Clutch torque from engine to gearbox: stiff when the speeds match, capped by capacity.
     // In reverse the ratio is negative, so gearboxEngineW is positive when backing up.
@@ -298,6 +310,7 @@ export class Drivetrain {
 
     // Torque into the gearbox output; reverse flips the sign via the ratio.
     const shaftT = clutchT * ratio * p.efficiency;
+    this.shaftTorque = shaftT;
     const t = this.torques;
     t.fill(0);
     if (shaftT !== 0) {
