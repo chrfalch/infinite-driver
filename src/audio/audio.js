@@ -11,6 +11,10 @@
 import processorUrl from './engine-processor.js?worker&url';
 import { onSettingsSaved } from '../settings-store.js';
 import { AUDIO, AUDIO_KEY, audioMix, saveAudio } from './config.js';
+import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from './engine-presets.js';
+
+// The engine sound picked in the settings.
+export const currentPreset = () => ENGINE_PRESETS[AUDIO.engineType] ?? TURBO_DIESEL_V8;
 
 const GESTURES = ['pointerdown', 'pointerup', 'touchend', 'mousedown', 'keydown'];
 const FADE = 0.4; // s
@@ -19,9 +23,10 @@ const FADE = 0.4; // s
 // module does not import: the engine lab has no panel).
 const isTyping = (e) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target?.tagName) || e.target?.isContentEditable;
 
-export function createAudio({ feed = null } = {}) {
+export function createAudio({ feed = null, preset = null } = {}) {
   const Context = globalThis.AudioContext ?? globalThis.webkitAudioContext;
-  const audio = { ctx: null, node: null, state: 'off', manual: !feed?.shared, update: () => {}, dispose: () => {} };
+  // preset: a fixed engine preset (the engine lab); otherwise the one picked in the settings.
+  const audio = { ctx: null, node: null, state: 'off', manual: !feed?.shared, preset, update: () => {}, dispose: () => {} };
   if (!Context || typeof AudioWorkletNode === 'undefined') {
     audio.state = 'unsupported';
     return audio;
@@ -43,7 +48,7 @@ export function createAudio({ feed = null } = {}) {
 
   async function load() {
     await ctx.audioWorklet.addModule(processorUrl);
-    const options = { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { mix: audioMix() } };
+    const options = { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { mix: audioMix(), preset: audio.preset ?? currentPreset() } };
     try {
       node = new AudioWorkletNode(ctx, 'engine', { ...options, processorOptions: { ...options.processorOptions, feedBuffer: audio.manual ? null : feed.buffer } });
     } catch (error) {
@@ -105,9 +110,12 @@ export function createAudio({ feed = null } = {}) {
     }
     unlock();
   };
+  let engineType = AUDIO.engineType;
   const apply = () => {
     if (!ctx) return;
     node?.port.postMessage({ type: 'mix', values: audioMix() });
+    if (AUDIO.engineType !== engineType && !audio.preset) node?.port.postMessage({ type: 'preset', preset: currentPreset() });
+    engineType = AUDIO.engineType;
     fadeTo(level());
     if (AUDIO.enabled && ctx.state !== 'running' && !document.hidden) ctx.resume().catch(() => {});
     if (!AUDIO.enabled) setTimeout(() => !AUDIO.enabled && ctx.state === 'running' && ctx.suspend().catch(() => {}), FADE * 1000 + 50);

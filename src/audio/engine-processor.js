@@ -20,8 +20,8 @@ const MANUAL_SMOOTHING = 0.05; // s
 class EngineProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
-    const { feedBuffer = null, mix = null } = options.processorOptions ?? {};
-    this.synth = new EngineSynth(sampleRate, TURBO_DIESEL_I4, { seed: (Math.random() * 2 ** 31) | 0 });
+    const { feedBuffer = null, mix = null, preset = null } = options.processorOptions ?? {};
+    this.synth = new EngineSynth(sampleRate, preset ?? TURBO_DIESEL_I4, { seed: (Math.random() * 2 ** 31) | 0 });
     if (mix) this.synth.setMix(mix);
     this.reader = feedBuffer ? new FeedReader(new AudioFeed(feedBuffer)) : null;
     this.manual = null;

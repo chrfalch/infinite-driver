@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AudioFeed, FeedReader, RECORDS, createFeedBuffer } from '../src/audio/feed.js';
 import { EngineSynth, LAYERS } from '../src/audio/engine-synth.js';
-import { TURBO_DIESEL_I4 } from '../src/audio/engine-presets.js';
+import { TURBO_DIESEL_I4, TURBO_DIESEL_V8 } from '../src/audio/engine-presets.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../src/vehicle/drivetrain.js';
 
 const SR = 48000;
@@ -197,6 +197,36 @@ describe('engine synth', () => {
     const a = render(0.2, { rpm: 2000, fuel: 0.5 }, new EngineSynth(SR, undefined, { seed: 7 })).out;
     const b = render(0.2, { rpm: 2000, fuel: 0.5 }, new EngineSynth(SR, undefined, { seed: 7 })).out;
     expect(a).toEqual(b);
+  });
+});
+
+describe('V8', () => {
+  it('fires each bank unevenly: 270-180-90-180°', () => {
+    const p = TURBO_DIESEL_V8;
+    for (const bank of [0, 1]) {
+      const times = p.firing.filter((_, c) => p.banks[c] === bank).sort((a, b) => a - b);
+      const gaps = times.map((t, i) => Math.round(((times[(i + 1) % 4] - t + 1) % 1) * 720));
+      expect([...gaps].sort()).toEqual([180, 180, 270, 90].sort());
+    }
+    // The engine as a whole fires every 90°.
+    expect([...p.firing].sort((a, b) => a - b).map((t) => t * 8)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it('fires eight times per two crank turns', () => {
+    const { synth } = render(2, { rpm: 1500, fuel: 0.5 }, new EngineSynth(SR, TURBO_DIESEL_V8));
+    expect(Math.abs(synth.firings - 200)).toBeLessThanOrEqual(2);
+  });
+
+  it('burbles: strong low orders (per cycle) against the firing tone, unlike the four', () => {
+    const burble = (preset) => {
+      const x = render(3, { rpm: 2200, fuel: 1, throttle: 1 }, new EngineSynth(SR, preset)).out.subarray(SR);
+      const f0 = 2200 / 120;
+      return (power(x, 2 * f0) + power(x, 3 * f0)) / power(x, preset.cylinders * f0);
+    };
+    expect(burble(TURBO_DIESEL_V8)).toBeGreaterThan(burble(TURBO_DIESEL_I4) * 30);
+    // With equal banks it mostly cancels.
+    const equal = { ...TURBO_DIESEL_V8, bankGain: [1, 1], bankPipeLengths: [3.4, 3.4], headers: TURBO_DIESEL_V8.headers.map(() => 0.5), collide: 0 };
+    expect(burble(TURBO_DIESEL_V8)).toBeGreaterThan(burble(equal) * 3);
   });
 });
 

@@ -2,14 +2,15 @@
 //   node scripts/render-engine.mjs [out.wav] [scenario] [preset changes as JSON]
 // Scenarios: drive (default: idle, full throttle through the gears, lift off, coast, idle),
 // short (idle, pull through 1st to 3rd, lift off), rev (revs in neutral), idle.
-// Preset changes are merged into the preset, e.g. '{"pipe":{"feedback":0},"bodyShare":0.12}'.
+// Preset changes are merged into the preset, e.g. '{"pipe":{"feedback":0},"bodyShare":0.12}';
+// '{"base":"Turbo-diesel I4"}' renders the four instead of the V8.
 //
 // The drivetrain runs on a simple rolling car (as in test/drivetrain.test.js), writes the audio feed
 // every physics step, and the sound is read from the feed as the audio worklet does.
 import { writeFileSync } from 'node:fs';
 import { AudioFeed, FeedReader, createFeedBuffer } from '../src/audio/feed.js';
 import { EngineSynth } from '../src/audio/engine-synth.js';
-import { TURBO_DIESEL_I4 } from '../src/audio/engine-presets.js';
+import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from '../src/audio/engine-presets.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../src/vehicle/drivetrain.js';
 
 const out = process.argv[2] ?? 'engine.wav';
@@ -38,7 +39,9 @@ const merge = (base, changes) => {
   for (const [k, v] of Object.entries(changes)) out[k] = v && typeof v === 'object' && !Array.isArray(v) ? merge(base[k] ?? {}, v) : v;
   return out;
 };
-const preset = merge(TURBO_DIESEL_I4, JSON.parse(process.argv[4] ?? '{}'));
+// "base" picks the preset to change (a name in ENGINE_PRESETS; the V8 by default).
+const { base = TURBO_DIESEL_V8.name, ...changes } = JSON.parse(process.argv[4] ?? '{}');
+const preset = merge(ENGINE_PRESETS[base], changes);
 const synth = new EngineSynth(SR, preset);
 const drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN, automatic: !s.neutral });
 const samples = new Float32Array(Math.ceil(s.seconds * SR));

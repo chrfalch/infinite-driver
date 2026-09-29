@@ -5,10 +5,13 @@ import GUI from 'lil-gui';
 import { createAudio } from '../audio/audio.js';
 import { AUDIO, saveAudio } from '../audio/config.js';
 import { AudioFeed, createFeedBuffer } from '../audio/feed.js';
-import { TURBO_DIESEL_I4 } from '../audio/engine-presets.js';
+import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from '../audio/engine-presets.js';
 import { LAYERS } from '../audio/engine-synth.js';
 import { changedFrom, loadSettings, saveSettings } from '../settings-store.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../vehicle/drivetrain.js';
+
+// The lab tunes the engine picked in the settings (the game's Sound folder, or the picker here).
+const BASE = ENGINE_PRESETS[AUDIO.engineType] ?? TURBO_DIESEL_V8;
 
 const DT = 1 / 120;
 const R = 0.46;
@@ -16,7 +19,8 @@ const MASS = 1800;
 
 const LAB = { mode: 'drive', rpm: 850, fuel: 0.13, exhaustBrake: 0, throttle: false, coastStop: 1 };
 const feed = new AudioFeed(createFeedBuffer());
-const audio = createAudio({ feed });
+// The preset is sent below (the lab's tuned copy of BASE), so the settings' pick is not applied.
+const audio = createAudio({ feed, preset: BASE });
 window.__lab = { audio }; // for debugging from the console
 let drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN });
 let v = 0;
@@ -34,6 +38,10 @@ gui.add(LAB, 'mode', ['drive', 'rev', 'manual']).name('Mode').onChange(() => {
   reset();
   if (LAB.mode !== 'manual') audio.node?.port.postMessage({ type: 'feed' });
 });
+gui.add(AUDIO, 'engineType', Object.keys(ENGINE_PRESETS)).name('Engine (reloads)').onChange(() => {
+  saveAudio();
+  location.reload();
+});
 gui.add(LAB, 'coastStop', 0, 1, 0.05).name('Exhaust brake (drive, rev)').onChange(reset);
 const manual = gui.addFolder('Manual');
 const manualValues = () => ({ rpm: LAB.rpm, fuel: LAB.fuel, exhaustBrake: LAB.exhaustBrake, throttle: LAB.throttle ? 1 : 0 });
@@ -50,7 +58,7 @@ levels.add(AUDIO, 'clatter', 0, 3, 0.05).name('Diesel clatter ×').onChange(save
 
 // The engine model itself, live: every change goes to the worklet and is kept in this browser.
 // "Copy preset changes" puts the changed values on the clipboard, to paste into engine-presets.js.
-const PRESET_KEY = 'drift.enginelab.preset.v1';
+const PRESET_KEY = BASE.cylinders === 4 ? 'drift.enginelab.preset.v1' : `drift.enginelab.preset.${BASE.name}.v1`;
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const merge = (base, changes) => {
   for (const [k, v] of Object.entries(changes)) {
@@ -60,10 +68,10 @@ const merge = (base, changes) => {
   }
   return base;
 };
-const preset = merge(clone(TURBO_DIESEL_I4), loadSettings(PRESET_KEY));
+const preset = merge(clone(BASE), loadSettings(PRESET_KEY));
 const sendPreset = () => {
   audio.node?.port.postMessage({ type: 'preset', preset: clone(preset) });
-  saveSettings(PRESET_KEY, TURBO_DIESEL_I4, preset);
+  saveSettings(PRESET_KEY, BASE, preset);
 };
 const model = gui.addFolder('Engine model (live)');
 const group = (title, rows) => {
@@ -84,6 +92,16 @@ group('Pipe', [
   [preset.pipe, 'length', 0.5, 6, 0.05, 'Length (m)'],
   [preset.pipe, 'damping', 0, 0.95, 0.01, 'Echo dullness'],
 ]);
+if (preset.banks) {
+  group('Banks (V engine)', [
+    [preset, 'collide', 0, 6, 0.05, 'Pulse collision in collector'],
+    [preset.bankGain, 0, 0, 1.5, 0.01, 'Left bank level'],
+    [preset.bankGain, 1, 0, 1.5, 0.01, 'Right bank level'],
+    [preset.bankPipeLengths, 0, 0.5, 8, 0.05, 'Left pipe (m)'],
+    [preset.bankPipeLengths, 1, 0.5, 8, 0.05, 'Right pipe (m)'],
+    [preset, 'timingJitter', 0, 0.03, 0.001, 'Uneven timing'],
+  ]);
+}
 group('Silencer', [
   ...preset.muffler.flatMap((m, i) => [
     [m, 'f', 30, 600, 1, `Resonance ${i + 1} (Hz)`],
@@ -151,11 +169,11 @@ const layerFolder = gui.addFolder('Layers');
 layerFolder.add(soloChoice, 'solo', { 'none (all)': 'none', ...Object.fromEntries(Object.entries(LAYER_NAMES).map(([k, name]) => [name, k])) }).name('Solo').onChange(sendLayers);
 for (const [key, name] of Object.entries(LAYER_NAMES)) layerFolder.add(preset.layers, key, 0, 2, 0.01).name(name).onChange(sendPreset).listen();
 layerFolder
-  .add({ reset: () => { Object.assign(preset.layers, TURBO_DIESEL_I4.layers); soloChoice.solo = 'none'; layerFolder.controllersRecursive().forEach((c) => c.updateDisplay()); sendPreset(); sendLayers(); } }, 'reset')
+  .add({ reset: () => { Object.assign(preset.layers, BASE.layers); soloChoice.solo = 'none'; layerFolder.controllersRecursive().forEach((c) => c.updateDisplay()); sendPreset(); sendLayers(); } }, 'reset')
   .name('Layers back to the preset');
 const presetActions = {
   copy: async () => {
-    const text = JSON.stringify(changedFrom(TURBO_DIESEL_I4, preset), null, 2);
+    const text = JSON.stringify(changedFrom(BASE, preset), null, 2);
     try {
       await navigator.clipboard.writeText(text);
       copyButton.name('Copied ✓');
@@ -166,7 +184,7 @@ const presetActions = {
     setTimeout(() => copyButton.name('Copy preset changes'), 1800);
   },
   reset: () => {
-    merge(preset, clone(TURBO_DIESEL_I4));
+    merge(preset, clone(BASE));
     sendPreset();
   },
 };

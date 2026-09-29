@@ -100,4 +100,39 @@ export const TURBO_DIESEL_I4 = Object.freeze({
   topCut: 7000, // Hz, a gentle low-pass over everything
 });
 
-export const ENGINE_PRESETS = { 'Turbo-diesel I4': TURBO_DIESEL_I4 };
+// A big turbo-diesel V8 (a pickup or a Land Cruiser): cross-plane crank, one exhaust per bank
+// joined in a Y-pipe before the silencer. Cylinders numbered with the odd ones on the left bank.
+// Firing order 1-8-4-3-6-5-7-2, 90° apart: each bank on its own fires 270-180-90-180°, and that
+// unevenness, heard through each bank's own header and pipe, is the burble.
+const V8_ORDER = [1, 8, 4, 3, 6, 5, 7, 2];
+export const TURBO_DIESEL_V8 = Object.freeze({
+  ...TURBO_DIESEL_I4,
+  name: 'Turbo-diesel V8',
+  cylinders: 8,
+  firing: [1, 2, 3, 4, 5, 6, 7, 8].map((c) => V8_ORDER.indexOf(c) / 8),
+  banks: [0, 1, 0, 1, 0, 1, 0, 1],
+  // Header length (m) from each port to its bank's collector: log manifolds, not equal length.
+  headers: [0.45, 0.62, 0.55, 0.4, 0.72, 0.5, 0.6, 0.48],
+  bankPipeLengths: [3.4, 3.9], // m, left and right, to the Y-pipe
+  // Pulses close together in a bank's collector limit each other (the 90° pairs).
+  collide: 1.8,
+  // The listener hears the left bank better (the right one crosses over to the Y-pipe): with
+  // equal banks the two uneven trains add up to an even one and most of the burble cancels.
+  bankGain: [1, 0.6],
+  gain: 0.9,
+  cylinderGain: [1.0, 0.88, 1.08, 0.94, 1.04, 0.9, 1.1, 0.95],
+  timingJitter: 0.006,
+  // Bigger cylinders: a longer blowdown.
+  bodyShare: 0.45,
+  // A bigger silencer, lower resonances.
+  muffler: [
+    { f: 52, q: 1.8, gain: 0.9 },
+    { f: 105, q: 1.6, gain: 0.7 },
+    { f: 200, q: 2.2, gain: 0.35 },
+  ],
+  tone: { base: 180, load: 1300, perRpm: 0.25, q: 0.8 },
+  block: { f: 480, q: 1.3, gain: 0.35 },
+  idleRpm: 700,
+});
+
+export const ENGINE_PRESETS = { 'Turbo-diesel I4': TURBO_DIESEL_I4, 'Turbo-diesel V8': TURBO_DIESEL_V8 };

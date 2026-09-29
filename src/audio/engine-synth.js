@@ -1,8 +1,12 @@
 // Procedural engine sound. Pure maths with no Web Audio: the audio worklet (engine-processor.js)
 // runs it, and tests and scripts/render-engine.mjs render it offline.
 //
-// Each cylinder firing sends a pressure pulse down the exhaust. The pulses go through a model of
-// the pipe (a delay line with an inverted reflection) and the silencer (resonances and a low-pass
+// Each cylinder firing sends a pressure pulse down the exhaust. A V engine has one exhaust per
+// bank: each cylinder's pulse reaches its bank's collector after its header, pulses that come close
+// together collide there (a soft limit), and each bank has its own pipe. That is where a cross-plane
+// V8's burble comes from: its banks fire unevenly (270-180-90-180°), though the engine as a whole
+// fires evenly. The banks then meet in the silencer. The pipe is a delay line with an inverted
+// reflection; the silencer (resonances and a low-pass
 // whose cutoff rises with load and rpm). The block rings a little with each combustion, the diesel
 // knocks (clatter), and the turbo spools up with exhaust energy and whistles. The pitch is simply
 // the firing rate: rpm / 60 × cylinders / 2 pulses per second.
@@ -46,7 +50,8 @@ function rng(seed) {
   };
 }
 
-const MAX_PULSES = 6;
+const MAX_PULSES = 12;
+const MAX_BANKS = 2;
 
 // The parts of the sound. The preset sets each part's level (preset.layers); these runtime levels
 // multiply them (1 = as the preset has it), so the engine lab can solo one part.
@@ -85,9 +90,10 @@ export class EngineSynth {
     // Active pulses: time since firing (s), strength, body time constant (s), knock strength.
     this.pulses = [];
 
-    this.delay = new Float32Array(Math.ceil(sampleRate * 0.1));
-    this.delayIndex = 0;
-    this.delayLp = 0;
+    // One pipe per bank (see setPreset).
+    this.pipes = [];
+    this.bankPressure = new Float64Array(MAX_BANKS);
+    this.bankRasp = new Float64Array(MAX_BANKS);
     this.muffler = [];
     this.tone = new Svf();
     this.block = new Svf();
@@ -121,7 +127,15 @@ export class EngineSynth {
     const sr = this.sr;
     this.preset = preset;
     const pipe = preset.pipe;
-    this.delayLength = Math.min(this.delay.length - 1, Math.max(1, Math.round((sr * 2 * pipe.length) / pipe.speedOfSound)));
+    const banks = Math.min(MAX_BANKS, 1 + Math.max(0, ...(preset.banks ?? [0])));
+    while (this.pipes.length < banks) this.pipes.push({ delay: new Float32Array(Math.ceil(sr * 0.1)), index: 0, lp: 0, length: 1 });
+    this.pipes.length = banks;
+    this.pipes.forEach((b, i) => {
+      const length = preset.bankPipeLengths?.[i] ?? pipe.length;
+      b.length = Math.min(b.delay.length - 1, Math.max(1, Math.round((sr * 2 * length) / pipe.speedOfSound)));
+    });
+    // The first bank's pipe (tests read it).
+    this.delayLength = this.pipes[0].length;
     const filters = (list, specs) => {
       while (list.length < specs.length) list.push(new Svf());
       list.length = specs.length;
@@ -158,7 +172,9 @@ export class EngineSynth {
     const knock = p.clatter.level * (0.08 + 0.92 * burn) * (0.35 + 0.65 * burn * (1 - fuel * 0.4)) * Math.max(0.25, 1.25 - rpmNorm) * jitter;
     const body = Math.min(0.012, Math.max(0.0008, p.bodyShare * interval));
     if (this.pulses.length >= MAX_PULSES) this.pulses.shift();
-    this.pulses.push({ t: 0, strength, body, knock, brake: exhaustBrake });
+    // The pulse reaches the collector after the header (one-way, at the gas' speed of sound).
+    const header = (p.headers?.[k] ?? 0) / p.pipe.speedOfSound;
+    this.pulses.push({ t: -header, t0: -header, strength, body, knock, brake: exhaustBrake, bank: Math.min(MAX_BANKS - 1, p.banks?.[k] ?? 0) });
     // The next firing of this cylinder comes a little early or late.
     this.nextJitter[k] = p.timingJitter * (this.random() * 2 - 1) / p.cylinders;
   }
@@ -184,6 +200,7 @@ export class EngineSynth {
     const downK = 1 - Math.exp(-(n * dt) / t.downTime);
     const dcK = Math.exp((-2 * Math.PI * 25) / sr);
     const pipeFb = p.pipe.feedback;
+    const collide = p.collide ?? 0;
     const pipeDamp = p.pipe.damping;
     const spikeTime = p.spikeTime;
     const clatterDecay = p.clatter.decay;
@@ -252,39 +269,60 @@ export class EngineSynth {
 
       // Sum the active pulses: spike + body (alpha functions, peak 1 at their time constant),
       // and the knock envelope.
-      let pressure = 0;
+      const bp = this.bankPressure;
+      const br = this.bankRasp;
+      bp.fill(0);
+      br.fill(0);
       let knock = 0;
-      let rasp = 0;
       for (let j = 0; j < this.pulses.length; j++) {
         const q = this.pulses[j];
-        const ts = q.t / spikeTime;
-        const tb = q.t / q.body;
-        const shape = p.spike * ts * Math.exp(1 - ts) + tb * Math.exp(1 - tb);
-        pressure += q.strength * shape;
-        knock += q.knock * Math.exp(-q.t / clatterDecay);
-        rasp += q.brake * tb * Math.exp(1 - tb);
+        // The knock is in the cylinder at the firing; the pulse reaches the collector after the header.
+        knock += q.knock * Math.exp(-(q.t - q.t0) / clatterDecay);
+        if (q.t >= 0) {
+          const ts = q.t / spikeTime;
+          const tb = q.t / q.body;
+          const body = tb * Math.exp(1 - tb);
+          bp[q.bank] += q.strength * (p.spike * ts * Math.exp(1 - ts) + body);
+          br[q.bank] += q.brake * body;
+        }
         q.t += dt;
       }
       // Drop pulses that have died away (oldest first).
       while (this.pulses.length && this.pulses[0].t > this.pulses[0].body * 8 && this.pulses[0].t > 0.006) this.pulses.shift();
 
       const noise = this.random() * 2 - 1;
-      // The exhaust brake makes the pulses raspy.
-      pressure += rasp * p.exhaustBrake.rasp * noise * L.rasp;
       // Turbulence: the gas does not flow smoothly, so each pulse is roughened by low-passed noise.
-      // Smooth pulses through the pipe sounded like blowing through a hose; rough ones rumble.
       this.roughNoise += (noise - this.roughNoise) * roughK;
-      pressure *= Math.max(0, 1 + roughAmount * this.roughNoise * roughNorm);
+      const rough = Math.max(0, 1 + roughAmount * this.roughNoise * roughNorm);
 
-      // Pipe: the pulse plus its inverted, dulled reflection a round trip later.
-      const delayed = this.delay[(this.delayIndex - this.delayLength + this.delay.length) % this.delay.length];
-      this.delayLp += (delayed - this.delayLp) * (1 - pipeDamp);
-      const piped = pressure + pipeFb * this.delayLp;
-      this.delay[this.delayIndex] = piped;
-      this.delayIndex = (this.delayIndex + 1) % this.delay.length;
+      // Each bank: collector, then its pipe (the pulse plus its inverted, dulled reflection a round
+      // trip later).
+      let pressure = 0; // all banks, for the block
+      let direct = 0;
+      let echo = 0;
+      let piped = 0;
+      for (let k = 0; k < this.pipes.length; k++) {
+        // The exhaust brake makes the pulses raspy.
+        let x = (bp[k] + br[k] * p.exhaustBrake.rasp * noise * L.rasp) * rough;
+        // Pulses close together collide in the collector: a soft limit on the bank's pressure.
+        if (collide > 0) x = Math.tanh(x * collide) / collide;
+        // How much of each bank the listener hears (the crossover pipe is longer, or one side exits).
+        x *= p.bankGain?.[k] ?? 1;
+        pressure += x;
+        const pipe = this.pipes[k];
+        const n = pipe.delay.length;
+        const delayed = pipe.delay[(pipe.index - pipe.length + n) % n];
+        pipe.lp += (delayed - pipe.lp) * (1 - pipeDamp);
+        const out = x + pipeFb * pipe.lp;
+        pipe.delay[pipe.index] = out;
+        pipe.index = (pipe.index + 1) % n;
+        direct += x;
+        echo += pipeFb * pipe.lp;
+        piped += out;
+      }
 
       // Silencer: body resonances, then the load-dependent low-pass.
-      let silenced = (pressure * L.pulses + pipeFb * this.delayLp * L.echo) * 0.5;
+      let silenced = (direct * L.pulses + echo * L.echo) * 0.5;
       for (let m = 0; m < this.muffler.length; m++) {
         this.muffler[m].tick(piped);
         silenced += this.muffler[m].band * p.muffler[m].gain * (silencerLayers[m] ?? 1);
@@ -355,8 +393,11 @@ export class EngineSynth {
   recover(out, start, end) {
     this.recoveries = (this.recoveries ?? 0) + 1;
     for (const f of [this.tone, this.block, this.hiss, this.flutterFilter, this.wastegateFilter, this.bleedFilter, this.air, ...this.muffler, ...this.clatter]) f.ic1 = f.ic2 = 0;
-    this.delay.fill(0);
-    this.delayLp = this.dc = this.dcIn = this.roughNoise = this.wander = 0;
+    for (const pipe of this.pipes) {
+      pipe.delay.fill(0);
+      pipe.lp = 0;
+    }
+    this.dc = this.dcIn = this.roughNoise = this.wander = 0;
     this.pulses.length = 0;
     if (!Number.isFinite(this.spool)) this.spool = 0;
     out.fill(0, start, end);
