@@ -140,16 +140,19 @@ const LAYER_NAMES = {
   wastegate: 'Wastegate',
   gear: 'Timing gear whine',
 };
-const layers = { ...LAYERS };
+// Layer levels are part of the preset (preset.layers), so Copy includes them. Solo mutes the
+// others at runtime without changing the preset.
 const soloChoice = { solo: 'none' };
 const sendLayers = () => {
-  const values = soloChoice.solo === 'none' ? { ...layers } : Object.fromEntries(Object.keys(layers).map((k) => [k, k === soloChoice.solo ? layers[k] : 0]));
+  const values = Object.fromEntries(Object.keys(LAYERS).map((k) => [k, soloChoice.solo === 'none' || k === soloChoice.solo ? 1 : 0]));
   audio.node?.port.postMessage({ type: 'layers', values });
 };
 const layerFolder = gui.addFolder('Layers');
 layerFolder.add(soloChoice, 'solo', { 'none (all)': 'none', ...Object.fromEntries(Object.entries(LAYER_NAMES).map(([k, name]) => [name, k])) }).name('Solo').onChange(sendLayers);
-for (const [key, name] of Object.entries(LAYER_NAMES)) layerFolder.add(layers, key, 0, 2, 0.01).name(name).onChange(sendLayers).listen();
-layerFolder.add({ all: () => { Object.assign(layers, LAYERS); soloChoice.solo = 'none'; layerFolder.controllersRecursive().forEach((c) => c.updateDisplay()); sendLayers(); } }, 'all').name('All layers back to 1');
+for (const [key, name] of Object.entries(LAYER_NAMES)) layerFolder.add(preset.layers, key, 0, 2, 0.01).name(name).onChange(sendPreset).listen();
+layerFolder
+  .add({ reset: () => { Object.assign(preset.layers, TURBO_DIESEL_I4.layers); soloChoice.solo = 'none'; layerFolder.controllersRecursive().forEach((c) => c.updateDisplay()); sendPreset(); sendLayers(); } }, 'reset')
+  .name('Layers back to the preset');
 const presetActions = {
   copy: async () => {
     const text = JSON.stringify(changedFrom(TURBO_DIESEL_I4, preset), null, 2);

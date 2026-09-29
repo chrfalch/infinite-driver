@@ -48,8 +48,8 @@ function rng(seed) {
 
 const MAX_PULSES = 6;
 
-// The parts of the sound, each with its own level (1 = as the preset has it). The engine lab's
-// layer sliders set these to pick out one part at a time.
+// The parts of the sound. The preset sets each part's level (preset.layers); these runtime levels
+// multiply them (1 = as the preset has it), so the engine lab can solo one part.
 export const LAYERS = Object.freeze({
   pulses: 1, // the exhaust pulses straight out of the pipe
   echo: 1, // their reflection in the pipe
@@ -74,6 +74,7 @@ export class EngineSynth {
     // Level multipliers from the sound settings (see audio/config.js).
     this.mix = { engine: 1, turbo: 1, clatter: 1 };
     this.layers = { ...LAYERS };
+    this.effective = { ...LAYERS }; // preset level × runtime level, per block
 
     this.phase = 0; // position in the 720° cycle, 0..1
     this.firings = 0; // count of firings so far (tests read it)
@@ -186,6 +187,7 @@ export class EngineSynth {
     const pipeDamp = p.pipe.damping;
     const spikeTime = p.spikeTime;
     const clatterDecay = p.clatter.decay;
+    const clatterNoise = p.clatter.noise ?? 1;
     // Turbulence noise: one-pole low-passed white noise, scaled back to unit spread.
     const roughK = 1 - Math.exp((-2 * Math.PI * p.rough.frequency) / sr);
     const roughNorm = 1 / Math.sqrt(roughK / (2 - roughK) / 3);
@@ -210,7 +212,8 @@ export class EngineSynth {
     }
     // The release sweeps down as the pressure falls.
     if (wg && this.wastegate > 0) this.wastegateFilter.set(wg.f * (0.5 + 0.5 * (this.wastegate / this.wastegateLength)), wg.q, sr);
-    const L = this.layers;
+    const L = this.effective;
+    for (const k in LAYERS) L[k] = (p.layers?.[k] ?? 1) * this.layers[k];
     // Held at full boost, the wastegate bleeds a little.
     const bleedAmp = wg ? wg.bleed * Math.max(0, (spool - 0.8) / 0.2) * fuelMid * mix.turbo * L.wastegate : 0;
     this.lastThrottle = throttle;
@@ -294,7 +297,9 @@ export class EngineSynth {
       // Block ring and diesel clatter.
       this.block.tick(pressure);
       const blockOut = this.block.band * p.block.gain * L.block;
-      const knockNoise = knock * noise;
+      // A short click with a little noise rings the metal: high-Q modes, like a tapped casting.
+      // (Noise alone through wide bands, as before, sounded like a hose.)
+      const knockNoise = knock * (1 - clatterNoise + clatterNoise * noise);
       let clatter = 0;
       for (let c = 0; c < this.clatter.length; c++) {
         this.clatter[c].tick(knockNoise);

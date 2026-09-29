@@ -34,15 +34,27 @@ export const TURBO_DIESEL_I4 = Object.freeze({
   ],
   // Turbulent flow: each pulse is roughened by noise low-passed at `frequency` (Hz), and the
   // silencer is overdriven (`drive`): together they turn a smooth tube tone into a rumble. More
-  // roughness than this is heard as a noise generator on top of the engine (0.55 at 320 Hz was).
-  rough: { amount: 0.12, frequency: 150 },
+  // roughness is heard as a noise generator on top of the engine (0.55 at 320 Hz was), and even
+  // 0.12 made the dry pulses sound blown.
+  rough: { amount: 0.06, frequency: 150 },
   drive: 2.5,
   // Brightness: the low-pass cutoff over the exhaust (Hz) = base + load × fuel + perRpm × rpm.
   tone: { base: 220, load: 1500, perRpm: 0.3, q: 0.8 },
   // The block and head ring with each combustion, heard through the engine bay.
   block: { f: 620, q: 1.3, gain: 0.35 },
-  // Diesel clatter: a metallic knock with each combustion, strongest at idle and low rpm.
-  clatter: { level: 0.5, decay: 0.0009, bands: [{ f: 1900, q: 3, gain: 1 }, { f: 3700, q: 5, gain: 0.45 }] },
+  // Diesel clatter: a metallic knock with each combustion, strongest at idle and low rpm. A short
+  // click (decay, s) with a share of noise rings inharmonic high-Q modes of the block.
+  clatter: {
+    level: 0.17,
+    decay: 0.00015,
+    noise: 0.2,
+    bands: [
+      { f: 1350, q: 14, gain: 1 },
+      { f: 2250, q: 18, gain: 0.8 },
+      { f: 3400, q: 20, gain: 0.6 },
+      { f: 4700, q: 22, gain: 0.4 },
+    ],
+  },
   gearWhine: { teeth: 29, level: 0.003 }, // timing gears
   turbo: {
     upTime: 0.7, // s, spool-up time constant
@@ -64,9 +76,27 @@ export const TURBO_DIESEL_I4 = Object.freeze({
   },
   // The exhaust brake closes a valve in the exhaust: a hard, raspy note on the overrun.
   exhaustBrake: { level: 0.35, rasp: 0.5 },
+  // The level of each part of the sound (EngineSynth LAYERS), as tuned by ear in the engine lab.
+  // The old clatter (a noise burst) sounded like a garden hose and was tuned out; the metallic one
+  // above is new and starts silent too.
+  layers: {
+    pulses: 0.25,
+    echo: 1.06,
+    silencer1: 1.18,
+    silencer2: 1.92,
+    silencer3: 2,
+    block: 1.21,
+    clatter: 0,
+    rasp: 1.89,
+    whistle: 1.71,
+    whoosh: 1.43,
+    flutter: 1,
+    wastegate: 1.51,
+    gear: 1,
+  },
   idleRpm: 850,
   limiterRpm: 5400,
-  gain: 0.9,
+  gain: 0.75,
   topCut: 7000, // Hz, a gentle low-pass over everything
 });
 

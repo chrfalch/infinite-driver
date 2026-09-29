@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AudioFeed, FeedReader, RECORDS, createFeedBuffer } from '../src/audio/feed.js';
 import { EngineSynth, LAYERS } from '../src/audio/engine-synth.js';
+import { TURBO_DIESEL_I4 } from '../src/audio/engine-presets.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../src/vehicle/drivetrain.js';
 
 const SR = 48000;
@@ -159,11 +160,18 @@ describe('engine synth', () => {
     const silent = new EngineSynth(SR);
     silent.setLayers(Object.fromEntries(Object.keys(LAYERS).map((k) => [k, 0])));
     expect(rms(render(0.5, { rpm: 2000, fuel: 0.6 }, silent).out, SR / 4)).toBeLessThan(1e-4);
+    // The clatter is tuned out in the preset (layers.clatter = 0), so it is turned back on here.
+    const preset = { ...TURBO_DIESEL_I4, layers: { ...TURBO_DIESEL_I4.layers, clatter: 1 } };
     for (const layer of ['pulses', 'echo', 'silencer1', 'block', 'clatter']) {
-      const solo = new EngineSynth(SR);
+      const solo = new EngineSynth(SR, preset);
       solo.setLayers(Object.fromEntries(Object.keys(LAYERS).map((k) => [k, k === layer ? 1 : 0])));
       expect(rms(render(0.5, { rpm: 2000, fuel: 0.6 }, solo).out, SR / 4), layer).toBeGreaterThan(1e-3);
     }
+  });
+
+  it('takes the layer levels from the preset', () => {
+    const muted = new EngineSynth(SR, { ...TURBO_DIESEL_I4, layers: Object.fromEntries(Object.keys(LAYERS).map((k) => [k, 0])) });
+    expect(rms(render(0.5, { rpm: 2000, fuel: 0.6 }, muted).out, SR / 4)).toBeLessThan(1e-4);
   });
 
   it('lets the boost off through the wastegate when the throttle lifts', () => {
