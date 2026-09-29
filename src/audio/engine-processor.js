@@ -7,6 +7,7 @@
 //                                     ({ rpm, fuel, exhaustBrake, throttle }; the engine lab, or a
 //                                     browser that cannot share memory with the audio thread)
 //        { type: 'feed' }             back to the feed
+//        { type: 'preset', preset }   a whole new engine preset (the engine lab's sliders)
 //   out: { type: 'status', feedSteps } once a second: how many steps the feed has seen
 import { EngineSynth } from './engine-synth.js';
 import { TURBO_DIESEL_I4 } from './engine-presets.js';
@@ -29,6 +30,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (e) => {
       const m = e.data;
       if (m.type === 'mix') this.synth.setMix(m.values);
+      else if (m.type === 'preset') this.synth.setPreset(m.preset);
       else if (m.type === 'manual') this.manual = { ...IDLE, ...m.values };
       else if (m.type === 'feed') this.manual = null;
     };

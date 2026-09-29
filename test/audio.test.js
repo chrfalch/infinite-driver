@@ -143,6 +143,18 @@ describe('engine synth', () => {
     expect(synth.flutter).toBeGreaterThan(0);
   });
 
+  it('takes a new preset while playing', () => {
+    const synth = new EngineSynth(SR);
+    render(0.2, { rpm: 1500, fuel: 0.5 }, synth);
+    const quiet = { ...synth.preset, gain: 0.1, pipe: { ...synth.preset.pipe, length: 1 }, muffler: synth.preset.muffler.slice(0, 1) };
+    synth.setPreset(quiet);
+    expect(synth.muffler.length).toBe(1);
+    expect(synth.delayLength).toBe(Math.round((SR * 2) / quiet.pipe.speedOfSound));
+    const out = render(0.5, { rpm: 1500, fuel: 0.5 }, synth).out;
+    const loud = render(0.5, { rpm: 1500, fuel: 0.5 }).out;
+    expect(rms(out, SR / 4)).toBeLessThan(rms(loud, SR / 4) * 0.3);
+  });
+
   it('renders the same with the same seed', () => {
     const a = render(0.2, { rpm: 2000, fuel: 0.5 }, new EngineSynth(SR, undefined, { seed: 7 })).out;
     const b = render(0.2, { rpm: 2000, fuel: 0.5 }, new EngineSynth(SR, undefined, { seed: 7 })).out;

@@ -65,31 +65,19 @@ export class EngineSynth {
     // Active pulses: time since firing (s), strength, body time constant (s), knock strength.
     this.pulses = [];
 
-    const pipe = preset.pipe;
     this.delay = new Float32Array(Math.ceil(sampleRate * 0.1));
-    this.delayLength = Math.max(1, Math.round((sampleRate * 2 * pipe.length) / pipe.speedOfSound));
     this.delayIndex = 0;
     this.delayLp = 0;
-
-    this.muffler = preset.muffler.map((m) => {
-      const f = new Svf();
-      f.set(m.f, m.q, sampleRate);
-      return f;
-    });
+    this.muffler = [];
     this.tone = new Svf();
     this.block = new Svf();
-    this.block.set(preset.block.f, preset.block.q, sampleRate);
-    this.clatter = preset.clatter.bands.map((b) => {
-      const f = new Svf();
-      f.set(b.f, b.q, sampleRate);
-      return f;
-    });
+    this.clatter = [];
     this.hiss = new Svf();
     this.flutterFilter = new Svf();
     this.flutterFilter.set(900, 1.5, sampleRate);
     // The last stage: no fizz above what an exhaust makes.
     this.air = new Svf();
-    this.air.set(preset.topCut ?? 7000, 0.6, sampleRate);
+    this.setPreset(preset);
     this.dc = 0; // DC blocker state
     this.dcIn = 0;
 
@@ -102,6 +90,23 @@ export class EngineSynth {
     this.roughNoise = 0;
     this.wander = 0;
     this.whine2Phase = 0;
+  }
+
+  // A new preset, applied while playing (the engine lab's sliders). Filters keep their state.
+  setPreset(preset) {
+    const sr = this.sr;
+    this.preset = preset;
+    const pipe = preset.pipe;
+    this.delayLength = Math.min(this.delay.length - 1, Math.max(1, Math.round((sr * 2 * pipe.length) / pipe.speedOfSound)));
+    const filters = (list, specs) => {
+      while (list.length < specs.length) list.push(new Svf());
+      list.length = specs.length;
+      specs.forEach((s, i) => list[i].set(s.f, s.q, sr));
+    };
+    filters(this.muffler, preset.muffler);
+    filters(this.clatter, preset.clatter.bands);
+    this.block.set(preset.block.f, preset.block.q, sr);
+    this.air.set(preset.topCut ?? 7000, 0.6, sr);
   }
 
   setMix(mix) {

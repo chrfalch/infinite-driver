@@ -1,13 +1,15 @@
 // Renders the engine sound offline to a WAV file, for listening and for checking levels:
-//   node scripts/render-engine.mjs [out.wav] [scenario]
+//   node scripts/render-engine.mjs [out.wav] [scenario] [preset changes as JSON]
 // Scenarios: drive (default: idle, full throttle through the gears, lift off, coast, idle),
-// rev (revs in neutral), idle.
+// short (idle, pull through 1st to 3rd, lift off), rev (revs in neutral), idle.
+// Preset changes are merged into the preset, e.g. '{"pipe":{"feedback":0},"bodyShare":0.12}'.
 //
 // The drivetrain runs on a simple rolling car (as in test/drivetrain.test.js), writes the audio feed
 // every physics step, and the sound is read from the feed as the audio worklet does.
 import { writeFileSync } from 'node:fs';
 import { AudioFeed, FeedReader, createFeedBuffer } from '../src/audio/feed.js';
 import { EngineSynth } from '../src/audio/engine-synth.js';
+import { TURBO_DIESEL_I4 } from '../src/audio/engine-presets.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../src/vehicle/drivetrain.js';
 
 const out = process.argv[2] ?? 'engine.wav';
@@ -21,6 +23,7 @@ const MASS = 1800;
 // Throttle over time for each scenario; neutral: the gearbox stays in neutral.
 const SCENARIOS = {
   drive: { seconds: 26, neutral: false, throttle: (t) => (t < 2 ? 0 : t < 16 ? 1 : t < 17.5 ? 0 : t < 20 ? 1 : 0) },
+  short: { seconds: 9, neutral: false, throttle: (t) => (t >= 1.5 && t < 7 ? 1 : 0) },
   rev: { seconds: 10, neutral: true, throttle: (t) => (t % 2.5 > 0.8 && t % 2.5 < 1.4 ? 1 : 0) },
   idle: { seconds: 5, neutral: true, throttle: () => 0 },
 };
@@ -29,7 +32,14 @@ if (!s) throw new Error(`unknown scenario ${scenario}`);
 
 const feed = new AudioFeed(createFeedBuffer());
 const reader = new FeedReader(feed);
-const synth = new EngineSynth(SR);
+// Nested objects merge key by key; arrays and values replace.
+const merge = (base, changes) => {
+  const out = { ...base };
+  for (const [k, v] of Object.entries(changes)) out[k] = v && typeof v === 'object' && !Array.isArray(v) ? merge(base[k] ?? {}, v) : v;
+  return out;
+};
+const preset = merge(TURBO_DIESEL_I4, JSON.parse(process.argv[4] ?? '{}'));
+const synth = new EngineSynth(SR, preset);
 const drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN, automatic: !s.neutral });
 const samples = new Float32Array(Math.ceil(s.seconds * SR));
 

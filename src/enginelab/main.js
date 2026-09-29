@@ -5,6 +5,8 @@ import GUI from 'lil-gui';
 import { createAudio } from '../audio/audio.js';
 import { AUDIO, saveAudio } from '../audio/config.js';
 import { AudioFeed, createFeedBuffer } from '../audio/feed.js';
+import { TURBO_DIESEL_I4 } from '../audio/engine-presets.js';
+import { changedFrom, loadSettings, saveSettings } from '../settings-store.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../vehicle/drivetrain.js';
 
 const DT = 1 / 120;
@@ -44,6 +46,98 @@ levels.add(AUDIO, 'engine', 0, 2, 0.05).name('Engine ×').onChange(saveAudio);
 levels.add(AUDIO, 'turbo', 0, 3, 0.05).name('Turbo whistle ×').onChange(saveAudio);
 levels.add(AUDIO, 'clatter', 0, 3, 0.05).name('Diesel clatter ×').onChange(saveAudio);
 
+// The engine model itself, live: every change goes to the worklet and is kept in this browser.
+// "Copy preset changes" puts the changed values on the clipboard, to paste into engine-presets.js.
+const PRESET_KEY = 'drift.enginelab.preset.v1';
+const clone = (x) => JSON.parse(JSON.stringify(x));
+const merge = (base, changes) => {
+  for (const [k, v] of Object.entries(changes)) {
+    if (!(k in base)) continue;
+    if (v && typeof v === 'object' && !Array.isArray(v)) merge(base[k], v);
+    else base[k] = v;
+  }
+  return base;
+};
+const preset = merge(clone(TURBO_DIESEL_I4), loadSettings(PRESET_KEY));
+const sendPreset = () => {
+  audio.node?.port.postMessage({ type: 'preset', preset: clone(preset) });
+  saveSettings(PRESET_KEY, TURBO_DIESEL_I4, preset);
+};
+const model = gui.addFolder('Engine model (live)');
+const group = (title, rows) => {
+  const f = model.addFolder(title);
+  for (const [obj, key, min, max, step, label] of rows) f.add(obj, key, min, max, step).name(label).onChange(sendPreset).listen();
+  f.close();
+};
+group('Exhaust pulses', [
+  [preset, 'spike', 0, 2, 0.05, 'Blowdown spike'],
+  [preset, 'spikeTime', 0.0001, 0.002, 0.00005, 'Spike time (s)'],
+  [preset, 'bodyShare', 0.03, 0.6, 0.01, 'Pulse length (share)'],
+  [preset, 'motoring', 0, 1, 0.01, 'Strength with no fuel'],
+  [preset, 'ampJitter', 0, 0.6, 0.01, 'Random per firing'],
+  [preset, 'wander', 0, 1, 0.01, 'Slow wander'],
+]);
+group('Pipe', [
+  [preset.pipe, 'feedback', -0.9, 0.9, 0.01, 'Echo (− = open end)'],
+  [preset.pipe, 'length', 0.5, 6, 0.05, 'Length (m)'],
+  [preset.pipe, 'damping', 0, 0.95, 0.01, 'Echo dullness'],
+]);
+group('Silencer', [
+  ...preset.muffler.flatMap((m, i) => [
+    [m, 'f', 30, 600, 1, `Resonance ${i + 1} (Hz)`],
+    [m, 'q', 0.3, 8, 0.1, `Resonance ${i + 1} Q`],
+    [m, 'gain', 0, 2, 0.01, `Resonance ${i + 1} level`],
+  ]),
+  [preset, 'drive', 0.1, 8, 0.1, 'Overdrive'],
+  [preset.rough, 'amount', 0, 1, 0.01, 'Turbulence'],
+  [preset.rough, 'frequency', 20, 1000, 5, 'Turbulence band (Hz)'],
+]);
+group('Tone', [
+  [preset.tone, 'base', 50, 2000, 10, 'Low-pass base (Hz)'],
+  [preset.tone, 'load', 0, 5000, 10, 'Low-pass + load (Hz)'],
+  [preset.tone, 'perRpm', 0, 2, 0.01, 'Low-pass + per rpm'],
+  [preset.tone, 'q', 0.3, 4, 0.05, 'Low-pass Q'],
+  [preset, 'topCut', 1000, 16000, 100, 'Top cut (Hz)'],
+  [preset, 'gain', 0.1, 3, 0.05, 'Output gain'],
+]);
+group('Block and clatter', [
+  [preset.block, 'f', 100, 3000, 10, 'Block ring (Hz)'],
+  [preset.block, 'gain', 0, 2, 0.01, 'Block ring level'],
+  [preset.clatter, 'level', 0, 2, 0.01, 'Clatter level'],
+  [preset.clatter, 'decay', 0.0002, 0.005, 0.0001, 'Clatter decay (s)'],
+]);
+group('Turbo', [
+  [preset.turbo, 'whine', 0, 0.3, 0.005, 'Whistle'],
+  [preset.turbo, 'whine2', 0, 1.5, 0.01, 'Second tone'],
+  [preset.turbo, 'whineMin', 500, 8000, 50, 'Whistle at no boost (Hz)'],
+  [preset.turbo, 'whineMax', 1000, 14000, 50, 'Whistle at full boost (Hz)'],
+  [preset.turbo, 'hiss', 0, 0.8, 0.01, 'Whoosh'],
+  [preset.turbo, 'hissQ', 0.2, 5, 0.05, 'Whoosh Q'],
+  [preset.turbo, 'flutter', 0, 1, 0.01, 'Lift-off flutter'],
+  [preset.turbo, 'upTime', 0.1, 3, 0.05, 'Spool-up time (s)'],
+]);
+const presetActions = {
+  copy: async () => {
+    const text = JSON.stringify(changedFrom(TURBO_DIESEL_I4, preset), null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      copyButton.name('Copied ✓');
+    } catch {
+      console.log(text);
+      copyButton.name('Copy failed, see console');
+    }
+    setTimeout(() => copyButton.name('Copy preset changes'), 1800);
+  },
+  reset: () => {
+    merge(preset, clone(TURBO_DIESEL_I4));
+    sendPreset();
+  },
+};
+const copyButton = model.add(presetActions, 'copy').name('Copy preset changes');
+model.add(presetActions, 'reset').name('Reset engine model');
+// The worklet starts with the built-in preset; send the kept one once it is running.
+let presetSent = false;
+
 const THROTTLE_KEYS = ['KeyW', 'ArrowUp'];
 window.addEventListener('keydown', (e) => THROTTLE_KEYS.includes(e.code) && (held = true));
 window.addEventListener('keyup', (e) => THROTTLE_KEYS.includes(e.code) && (held = false));
@@ -73,6 +167,10 @@ const frame = (now) => {
     }
     simTime += DT;
     feed.writeStep(simTime, { drivetrain: drive, speed: v });
+  }
+  if (audio.node && !presetSent) {
+    presetSent = true;
+    audio.node.port.postMessage({ type: 'preset', preset: clone(preset) });
   }
   if (LAB.mode === 'manual') audio.node?.port.postMessage({ type: 'manual', values: manualValues() });
   else audio.update({ drivetrain: drive });
