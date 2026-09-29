@@ -46,8 +46,9 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
   if (!recentre && g.version === version) return;
 
   if (!g) {
-    // grid: the heights (terrain plus ruts) then the rock flags, as the solver takes them.
-    const grid = new Float32Array(N * N * 2);
+    // grid: the heights (terrain plus ruts), the rock flags, then the snow drag, as the solver
+    // takes them.
+    const grid = new Float32Array(N * N * 3);
     g = solver.groundCache = {
       base: new Float32Array(N * N),
       spare: new Float32Array(N * N),
@@ -57,6 +58,8 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
       // bare it is where worn to asphalt).
       pack: new Float32Array(N * N),
       sparePack: new Float32Array(N * N),
+      drag: grid.subarray(2 * N * N),
+      spareDrag: new Float32Array(N * N),
       grid,
       heights: grid.subarray(0, N * N),
     };
@@ -75,6 +78,7 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
     const base = g.spare;
     const rock = g.spareRock;
     const pack = g.sparePack;
+    const drag = g.spareDrag;
     const reuse = compatible && g.cell === cell;
     const sx = reuse ? ix0 - g.ix0 : N;
     const sz = reuse ? iz0 - g.iz0 : N;
@@ -87,6 +91,7 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
           base[iz * N + ix] = g.base[pz * N + px];
           rock[iz * N + ix] = g.rock[pz * N + px];
           pack[iz * N + ix] = g.pack[pz * N + px];
+          drag[iz * N + ix] = g.drag[pz * N + px];
         } else {
           base[iz * N + ix] = surface(ox + ix * cell, oz + iz * cell);
           if (snowAt) {
@@ -94,6 +99,7 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
             const bare = 1 - sn.depth / BARE_DEPTH;
             rock[iz * N + ix] = bare > 0 ? 1 + Math.min(1, bare) : sn.firm;
             pack[iz * N + ix] = sn.packDepth;
+            drag[iz * N + ix] = sn.drag;
           } else rock[iz * N + ix] = rockAt?.(ox + ix * cell, oz + iz * cell) ? 1 : 0;
         }
       }
@@ -104,6 +110,8 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
     g.rock = rock;
     g.sparePack = g.pack;
     g.pack = pack;
+    // The drag lives in the grid itself (g.drag views it); the spare was only scratch.
+    if (snowAt) g.drag.set(drag);
     g.grid.set(rock, N * N);
     g.ix0 = ix0;
     g.iz0 = iz0;

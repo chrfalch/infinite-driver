@@ -76,7 +76,8 @@ describe('snowfield', () => {
         const at = (off) => [x + Math.sin(yaw) * off * side, z + Math.cos(yaw) * off * side];
         const crest = snowField.snowAt(...at(ROAD.bankCentre));
         expect(crest.depth).toBeGreaterThan(0.3);
-        expect(crest.firm).toBeGreaterThan(ROAD.bankFirmness / 2);
+        expect(crest.firm).toBeLessThanOrEqual(ROAD.bankFirmness);
+        expect(crest.drag).toBeGreaterThan(0);
         rise += (snowField(...at(ROAD.bankCentre)) - snowField(...at(12))) / 20;
         x += Math.cos(yaw) * 2;
         z -= Math.sin(yaw) * 2;

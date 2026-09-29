@@ -114,15 +114,16 @@ export class GpuTireSolver {
     this.hubs = root.createUniform(d.arrayOf(Hub, MAX_TIRES));
     this.params = root.createUniform(Params);
     // Ground grid: GROUND_N² heights, then GROUND_N² bare-rock flags (1 = rock: grippy, hard, no
-    // gravel), in one buffer to stay within the storage buffer limit.
-    this.ground = root.createReadonly(d.arrayOf(d.f32, GROUND_N * GROUND_N * 2));
+    // gravel), then GROUND_N² snow drag coefficients (deep, loose snow), in one buffer to stay within
+    // the storage buffer limit.
+    this.ground = root.createReadonly(d.arrayOf(d.f32, GROUND_N * GROUND_N * 3));
     // Rocks: MAX_ROCKS bounding spheres followed by MAX_ROCKS × ROCK_FACES face planes.
     this.rocks = root.createReadonly(d.arrayOf(d.vec4f, MAX_ROCKS * (ROCK_FACES + 1)));
 
     const restData = new Float32Array(this.perTire * 4);
     for (let i = 0; i < this.perTire; i++) restData.set([restLocal[i * 3], restLocal[i * 3 + 1], restLocal[i * 3 + 2], 0], i * 4);
     this.rest.write(restData);
-    this.ground.write(new Float32Array(GROUND_N * GROUND_N * 2));
+    this.ground.write(new Float32Array(GROUND_N * GROUND_N * 3));
     this.groundOrigin = { x: -8, z: -8 };
     this.groundCell = 0.125;
     this.rockCount = 0;
@@ -239,6 +240,15 @@ export class GpuTireSolver {
       let ix = u32(clamp(round((x - params.groundOriginX) / params.groundCell), 0.0, last));
       let iz = u32(clamp(round((z - params.groundOriginZ) / params.groundCell), 0.0, last));
       return ground[${GROUND_N * GROUND_N}u + iz * ${GROUND_N}u + ix];
+    }`.$uses({ params: this.params, ground: this.ground });
+
+    // The nearest grid cell's snow drag: the share of the push that pushing through loose snow there
+    // costs (0 on packed snow, asphalt and soil).
+    const groundDrag = tgpu.fn([d.f32, d.f32], d.f32)/* wgsl */ `(x, z) {
+      let last = f32(${GROUND_N - 1});
+      let ix = u32(clamp(round((x - params.groundOriginX) / params.groundCell), 0.0, last));
+      let iz = u32(clamp(round((z - params.groundOriginZ) / params.groundCell), 0.0, last));
+      return ground[${2 * GROUND_N * GROUND_N}u + iz * ${GROUND_N}u + ix];
     }`.$uses({ params: this.params, ground: this.ground });
 
     // Distance constraints for particle k of tyre t (one Jacobi pass).
@@ -451,7 +461,20 @@ export class GpuTireSolver {
           let rigid = hsLin.xyz + cross(hsAng.xyz, x - c0);
           vl -= (vl - rigid) * min(1.0, params.damping * dt);
           // Ground push and rocks.
-          let fc = contactForce(x, vl, m, dt);
+          var fc = contactForce(x, vl, m, dt);
+          // Snow: driving through deep, loose snow (a plough bank) packs it ahead of the tyre, which
+          // takes work: a drag against the hub's travel, a share of the ground's push (the cell's
+          // drag) that falls as the snow packs.
+          if (params.snow > 0.5) {
+            let drag = groundDrag(x.x, x.z);
+            let travel = vec3f(hsLin.x, 0.0, hsLin.z);
+            let speed = length(travel);
+            let pn = max(dot(fc, groundNormal(x.x, x.z)), 0.0);
+            if (drag > 0.0 && speed > 1e-3 && pn > 0.0) {
+              let loose = 1.0 - min(groundRock(x.x, x.z), 1.0);
+              fc -= travel / speed * (drag * loose * pn * min(1.0, speed / 0.5));
+            }
+          }
           vl += fc * (dt / m);
           let ext = gravity + fc;
           extForce += ext;
@@ -658,6 +681,7 @@ export class GpuTireSolver {
       groundHeight,
       groundNormal,
       groundRock,
+      groundDrag,
       pos: this.pos,
       prev: this.prev,
       vel: this.vel,
@@ -764,7 +788,7 @@ export class GpuTireSolver {
   }
 
   // Ground heights on a GROUND_N² grid starting at (originX, originZ) with the given spacing.
-  // `grid`: GROUND_N² heights followed by GROUND_N² bare-rock flags.
+  // `grid`: GROUND_N² heights, GROUND_N² bare-rock flags (snow: see snowPacking), GROUND_N² snow drag.
   setGround(grid, originX, originZ, cell) {
     this.ground.write(grid);
     this.groundOrigin = { x: originX, z: originZ };

@@ -35,7 +35,8 @@ export function updateSoil(world) {
   // A spinning tyre on snow mostly throws the loose powder and polishes the rut; it digs less
   // than in soil, and not below the snow.
   const digShare = snow ? 0.15 : 1;
-  const maxDig = snow ? snow.depth : MAX_DIG;
+  // On snow, not below the snow where the tyre is (deeper in a plough bank).
+  const maxDig = (x, z) => (heightAt.snowAt ? heightAt.snowAt(x, z).depth : MAX_DIG);
   const spray = (c) => (snow ? { r: tmp.r * (0.94 + c * 0.08), g: tmp.g * (0.94 + c * 0.08), b: tmp.b * (0.95 + c * 0.06) } : { r: tmp.r * (0.62 + c * 0.2), g: tmp.g * (0.62 + c * 0.2) * 0.97, b: tmp.b * (0.62 + c * 0.2) * 0.92 });
   const car = world.queryFirst(IsPlayer, Vehicle);
   if (!car || softness <= 0) return;
@@ -98,7 +99,7 @@ export function updateSoil(world) {
           size,
           color,
         );
-        if (emitted && deformation && deformation.at(contact.x, contact.z) > -maxDig) {
+        if (emitted && deformation && deformation.at(contact.x, contact.z) > -maxDig(contact.x, contact.z)) {
           deformation.add(contact.x, contact.z, -(size * size * size * 2 * soilPerClump * digShare) / cellArea);
         }
       }
@@ -142,7 +143,7 @@ export function updateSoil(world) {
         color,
       );
       // Dig at the tyre what the clump carries away (down to a limit).
-      if (emitted && deformation && deformation.at(contact.x, contact.z) > -maxDig) {
+      if (emitted && deformation && deformation.at(contact.x, contact.z) > -maxDig(contact.x, contact.z)) {
         deformation.add(contact.x, contact.z, -(size * size * size * 2 * soilPerClump * digShare) / cellArea);
       }
     }

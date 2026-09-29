@@ -28,6 +28,7 @@ export const SNOW = Object.freeze({
   freshGrip: 0.36, // x the tyre's friction setting: rubber on fresh snow (with the lugs biting)
   packedGrip: 0.2, // x the tyre's friction setting: polished, packed snow in a rut or on the road
   asphaltGrip: 0.8, // x the tyre's friction setting: bare, cold asphalt
+  drag: 1.0, // drag through deep, loose snow (plough banks), as a share of the tyre's load there
   maxSink: 0.22, // m below the (packed) surface a particle may go before it is stopped
   chassisFriction: 0.3, // chassis and body sliding on snow (Rapier colliders)
 });
@@ -43,10 +44,10 @@ export const ROAD = Object.freeze({
   tracks: [0.75, 2.25], // wheel tracks of both lanes (distance from the centre line)
   trackWidth: 0.35, // width of a wheel track (a little less snow there)
   thin: 0.025, // m of packed snow in the spots of snow on the road
-  bankCentre: 4.3, // the plough bank's crest
-  bankHalfWidth: 1.1,
-  bankHeight: 0.6, // above the fresh snow beside the road
-  bankFirmness: 0.6, // thrown snow is dense, already more than half packed (less where it is thin)
+  bankCentre: 5.0, // the plough bank's crest
+  bankHalfWidth: 1.8,
+  bankHeight: 0.8, // above the fresh snow beside the road
+  bankFirmness: 0.12, // thrown snow is loose, barely packed: tyres sink deep into a bank and can bog down
 });
 
 // Snow on the road lies in spots and patches on bare asphalt: value noise of two sizes (spots of
@@ -110,7 +111,8 @@ export function createSnowField(seed = 2024) {
   const roadDistance = (x, z) => Math.abs(roadSide(x, z));
 
   // The snow at a point: depth (m), firmness (how packed it already is, 0 fresh .. 1 packed), and
-  // how much deeper tyres can still pack it (packDepth, m).
+  // how much deeper tyres can still pack it (packDepth, m), and how hard it drags at a tyre ploughing
+  // through it (drag).
   function snowAt(x, z) {
     const d = roadDistance(x, z);
     const road = roadSnowDepth(d, x, z);
@@ -129,7 +131,9 @@ export function createSnowField(seed = 2024) {
       depth = Math.max(verge, fresh + bank);
       firm = depth === verge ? 1 : (ROAD.bankFirmness * bank) / (bank + fresh + 1e-6);
     }
-    return { depth, firm, packDepth: SNOW.packRatio * depth * (1 - firm), dist: d };
+    // Deep, loose snow (a plough bank) drags at the tyres ploughing through it.
+    const drag = SNOW.drag * smoothstep(SNOW.depth + 0.05, SNOW.depth + 0.35, depth) * (1 - firm);
+    return { depth, firm, packDepth: SNOW.packRatio * depth * (1 - firm), drag, dist: d };
   }
 
   const ground = (x, z) => swell(x * 0.006, z * 0.006) * 0.35;
