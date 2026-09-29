@@ -21,7 +21,7 @@ const isolationEverywhere = {
 
 export default defineConfig({
   plugins: [isolationEverywhere],
-  server: { port: 8731, strictPort: true, host: '127.0.0.1', allowedHosts: ['html-page.tuft.host'], headers: isolation },
+  server: { port: 8731, strictPort: true, host: '127.0.0.1', allowedHosts: ['endless-drift.tuft.host'], headers: isolation },
   preview: { headers: isolation },
   optimizeDeps: { exclude: ['@pmndrs/glyph'] },
   build: {
