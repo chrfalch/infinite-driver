@@ -99,6 +99,8 @@ export class EngineSynth {
     this.flutter = 0; // time left of a compressor flutter (s)
     this.flutterPhase = 0;
     this.lastThrottle = 0;
+    this.roughNoise = 0;
+    this.whine2Phase = 0;
   }
 
   setMix(mix) {
@@ -138,7 +140,7 @@ export class EngineSynth {
     const cutoff = (p.tone.base + p.tone.load * fuelMid + p.tone.perRpm * rpmMid) * (1 - 0.25 * this.spool);
     this.tone.set(cutoff, p.tone.q, sr);
     const t = p.turbo;
-    this.hiss.set(1500 + 2600 * this.spool, 1.2, sr);
+    this.hiss.set(1500 + 2600 * this.spool, t.hissQ, sr);
     const upK = 1 - Math.exp(-(n * dt) / t.upTime);
     const downK = 1 - Math.exp(-(n * dt) / t.downTime);
     const dcK = Math.exp((-2 * Math.PI * 25) / sr);
@@ -146,6 +148,10 @@ export class EngineSynth {
     const pipeDamp = p.pipe.damping;
     const spikeTime = p.spikeTime;
     const clatterDecay = p.clatter.decay;
+    // Turbulence noise: one-pole low-passed white noise, scaled back to unit spread.
+    const roughK = 1 - Math.exp((-2 * Math.PI * p.rough.frequency) / sr);
+    const roughNorm = 1 / Math.sqrt(roughK / (2 - roughK) / 3);
+    const roughAmount = p.rough.amount * (0.6 + 0.4 * fuelMid);
 
     // Turbo: spools toward the exhaust energy (rpm and fuel), faster up than down.
     const energy = (rpmMid / p.limiterRpm) * (0.15 + fuelMid);
@@ -156,7 +162,7 @@ export class EngineSynth {
     const throttle = b.throttle ?? 0;
     if (this.lastThrottle > 0.5 && throttle <= 0.5 && spool > 0.4) this.flutter = t.flutterTime;
     this.lastThrottle = throttle;
-    const whineAmp = t.whine * spool * spool * (0.4 + 0.6 * fuelMid) * mix.turbo;
+    const whineAmp = t.whine * spool ** 1.5 * (0.4 + 0.6 * fuelMid) * mix.turbo;
     const hissAmp = t.hiss * spool * (0.2 + 0.8 * fuelMid) * mix.turbo;
     const flutterAmp = t.flutter * spool * mix.turbo;
     const whineF = t.whineMin + (t.whineMax - t.whineMin) * spool;
@@ -208,6 +214,10 @@ export class EngineSynth {
       const noise = this.random() * 2 - 1;
       // The exhaust brake makes the pulses raspy.
       pressure += rasp * p.exhaustBrake.rasp * noise;
+      // Turbulence: the gas does not flow smoothly, so each pulse is roughened by low-passed noise.
+      // Smooth pulses through the pipe sounded like blowing through a hose; rough ones rumble.
+      this.roughNoise += (noise - this.roughNoise) * roughK;
+      pressure *= Math.max(0, 1 + roughAmount * this.roughNoise * roughNorm);
 
       // Pipe: the pulse plus its inverted, dulled reflection a round trip later.
       const delayed = this.delay[(this.delayIndex - this.delayLength + this.delay.length) % this.delay.length];
@@ -222,6 +232,9 @@ export class EngineSynth {
         this.muffler[m].tick(piped);
         silenced += this.muffler[m].band * p.muffler[m].gain;
       }
+      // The silencer overdriven a little, harder on the pressure peaks: grit in the low mids.
+      const drive = p.drive;
+      silenced = silenced > 0 ? Math.tanh(silenced * drive) / drive : Math.tanh(silenced * drive * 0.6) / (drive * 0.6);
       const exhaust = this.tone.tick(silenced);
 
       // Block ring and diesel clatter.
@@ -238,7 +251,10 @@ export class EngineSynth {
       // Turbo whistle, intake hiss and lift-off flutter.
       this.whinePhase += whineF * dt;
       if (this.whinePhase >= 1) this.whinePhase -= 1;
-      let turbo = whineAmp * Math.sin(2 * Math.PI * this.whinePhase);
+      // Compressor whistle: the blade tone and a splitter-blade tone above it.
+      this.whine2Phase += whineF * t.whine2Ratio * dt;
+      if (this.whine2Phase >= 1) this.whine2Phase -= 1;
+      let turbo = whineAmp * (Math.sin(2 * Math.PI * this.whinePhase) + t.whine2 * Math.sin(2 * Math.PI * this.whine2Phase));
       this.hiss.tick(noise);
       turbo += hissAmp * this.hiss.band;
       if (this.flutter > 0) {

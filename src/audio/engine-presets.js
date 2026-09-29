@@ -12,8 +12,8 @@ export const TURBO_DIESEL_I4 = Object.freeze({
   firing: [0, 0.75, 0.25, 0.5],
   // No two cylinders are quite alike (injectors, compression): a fixed strength per cylinder gives
   // the half-order lumpiness of a real engine, and a small random spread per firing its roughness.
-  cylinderGain: [1.0, 0.93, 1.05, 0.96],
-  ampJitter: 0.1,
+  cylinderGain: [1.0, 0.86, 1.1, 0.92],
+  ampJitter: 0.22,
   timingJitter: 0.003, // share of the firing interval
   // Exhaust pulse: a sharp blowdown spike and a longer body that lasts a share of the interval
   // between firings. With no fuel (coasting) the engine still pumps air: `motoring` of the strength.
@@ -23,12 +23,17 @@ export const TURBO_DIESEL_I4 = Object.freeze({
   bodyShare: 0.3,
   // Exhaust pipe: a round trip of 2 × length at the hot gas' speed of sound, reflected inverted at
   // the open end (feedback < 0) and a little duller each trip.
-  pipe: { length: 3.2, speedOfSound: 520, feedback: -0.5, damping: 0.4 },
+  pipe: { length: 3.2, speedOfSound: 520, feedback: -0.25, damping: 0.5 },
   // Silencer body resonances, added to the pipe's sound.
   muffler: [
-    { f: 80, q: 2.2, gain: 0.9 },
-    { f: 230, q: 2.8, gain: 0.45 },
+    { f: 70, q: 1.8, gain: 0.9 },
+    { f: 145, q: 1.6, gain: 0.7 },
+    { f: 260, q: 2.2, gain: 0.35 },
   ],
+  // Turbulent flow: each pulse is roughened by noise low-passed at `frequency` (Hz), and the
+  // silencer is overdriven (`drive`): together they turn a smooth tube tone into a rumble.
+  rough: { amount: 0.55, frequency: 320 },
+  drive: 2.5,
   // Brightness: the low-pass cutoff over the exhaust (Hz) = base + load × fuel + perRpm × rpm.
   tone: { base: 220, load: 1500, perRpm: 0.3, q: 0.8 },
   // The block and head ring with each combustion, heard through the engine bay.
@@ -40,11 +45,14 @@ export const TURBO_DIESEL_I4 = Object.freeze({
     upTime: 0.7, // s, spool-up time constant
     downTime: 1.8, // s, spool-down
     whineMin: 2400, // Hz at no boost
-    whineMax: 7200, // Hz at full boost
-    whine: 0.02,
-    hiss: 0.06,
+    whineMax: 6800, // Hz at full boost
+    whine: 0.07,
+    whine2: 0.45, // splitter-blade tone, relative to the main whistle
+    whine2Ratio: 1.55,
+    hiss: 0.2, // intake whoosh
+    hissQ: 0.8,
     // Lifting off at boost: the compressor surges, a short "tu-tu-tu" flutter.
-    flutter: 0.1,
+    flutter: 0.3,
     flutterRate: 19, // Hz
     flutterTime: 0.4, // s
   },
@@ -52,7 +60,7 @@ export const TURBO_DIESEL_I4 = Object.freeze({
   exhaustBrake: { level: 0.35, rasp: 0.5 },
   idleRpm: 850,
   limiterRpm: 5400,
-  gain: 0.55,
+  gain: 0.7,
   topCut: 7000, // Hz, a gentle low-pass over everything
 });
 
