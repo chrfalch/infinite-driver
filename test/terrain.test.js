@@ -2,6 +2,8 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { CHUNK_SIZE, chunkTrimesh, sampleChunk, toRapierHeights } from '../src/terrain/chunk.js';
 import { createHeightField } from '../src/terrain/height.js';
+import { generateRocks } from '../src/terrain/rocks.js';
+import { ROCK_EDGE } from '../src/terrain/riverbed.js';
 
 beforeAll(async () => {
   await RAPIER.init();
@@ -197,6 +199,42 @@ describe('dry river terrain', () => {
     expect(tris).toBeGreaterThan(1000);
     // Far from any bed: nothing.
     expect(rockSheetData(heightAt, 3, 3)).toBeNull();
+  });
+
+  it('jitters the drawn sheet the same way either side of a chunk border, so the seam stays closed', async () => {
+    const { rockSheetData } = await import('../src/terrain/rock-sheet.js');
+    const key = (p, k) => `${p[k].toFixed(4)},${p[k + 2].toFixed(4)}`;
+    const points = (data) => new Map(Array.from({ length: data.positions.length / 3 }, (_, i) => [key(data.positions, i * 3), data.positions[i * 3 + 1]]));
+    const a = points(rockSheetData(heightAt, 0, -1));
+    const b = points(rockSheetData(heightAt, -1, -1));
+    let shared = 0;
+    for (const [xz, y] of a) {
+      if (!b.has(xz)) continue;
+      shared++;
+      expect(b.get(xz)).toBeCloseTo(y, 5);
+    }
+    expect(shared).toBeGreaterThan(20);
+  });
+
+  it('scatters small loose rocks and pebbles over the rock sheet', async () => {
+    const { generatePebbles, PEBBLE_STRIDE } = await import('../src/terrain/rocks.js');
+    const rocks = generateRocks(heightAt, 0, -1);
+    const onBed = rocks.filter((r) => heightAt.roadDistance(r.x, r.z) < ROCK_EDGE);
+    expect(onBed.length).toBeGreaterThan(40);
+    // Small enough to drive over (the car's belly is 0.62 m up), and none on the spawn point.
+    for (const r of onBed) {
+      expect(r.size).toBeLessThanOrEqual(0.5);
+      expect(Math.hypot(r.x, r.z)).toBeGreaterThan(3.5);
+    }
+    const pebbles = generatePebbles(heightAt, 0, -1);
+    expect(pebbles.length / PEBBLE_STRIDE).toBeGreaterThan(300);
+    for (let i = 0; i < pebbles.length; i += PEBBLE_STRIDE) {
+      const [x, y, z, , size] = pebbles.subarray(i, i + PEBBLE_STRIDE);
+      expect(size).toBeLessThan(0.09);
+      expect(Math.abs(y - heightAt(x, z))).toBeLessThan(0.02);
+    }
+    // Only in the river world.
+    expect(generatePebbles(createHeightField({ mode: 'canyon' }), 0, 0)).toBeNull();
   });
 
   it('keeps trees out of the bed', async () => {

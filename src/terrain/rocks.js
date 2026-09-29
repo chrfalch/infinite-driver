@@ -1,7 +1,7 @@
 import { createNoise3D } from 'simplex-noise';
 import { mulberry32 } from './height.js';
 import { CHUNK_SIZE } from './chunk.js';
-import { ROCK_REACH } from './riverbed.js';
+import { BED_HALF_WIDTH, ROCK_EDGE, ROCK_REACH } from './riverbed.js';
 
 const SPAWN_CLEAR_RADIUS = 10;
 
@@ -106,12 +106,33 @@ export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) 
   return rocks;
 }
 
-// Dry river: the bed and its walls are one rock sheet in the ground itself (terrain/riverbed.js),
-// so the only loose rocks are a few in the forest beyond. Yellow-grey sandstone.
+// The lowest of the rock sheet under a loose rock's footprint, so it rests in the sheet instead of
+// floating off a slope.
+function restingGround(heightAt, radius) {
+  return (x, z) => Math.min(heightAt(x, z), heightAt(x + radius, z), heightAt(x - radius, z), heightAt(x, z + radius), heightAt(x, z - radius));
+}
+
+// Dry river: the bed and its walls are one rock sheet in the ground itself (terrain/riverbed.js).
+// Loose on top of it lie smaller rocks (15-50 cm, solid like any rock), and a few bigger ones in
+// the forest beyond. Yellow-grey sandstone.
 function generateRiverRocks(heightAt, cx, cz, { seed, count }) {
   const rand = mulberry32(hashChunk(seed, cx, cz));
   const noise = createNoise3D(rand);
   const rocks = [];
+  // About one per 6 m² of the bed, fewer up on the walls; none near the spawn point.
+  const bedRand = mulberry32(hashChunk(seed + 7, cx, cz));
+  for (let k = 0; k < 700; k++) {
+    const x = (cx + bedRand()) * CHUNK_SIZE;
+    const z = (cz + bedRand()) * CHUNK_SIZE;
+    const keep = bedRand();
+    const size = 0.15 + 0.35 * bedRand() * bedRand();
+    const dist = heightAt.roadDistance(x, z);
+    if (dist > ROCK_EDGE - 0.5 || keep > (dist < BED_HALF_WIDTH + 0.5 ? 0.9 : 0.35)) continue;
+    if (Math.hypot(x, z) < 3.5) continue;
+    const rock = makeRock(restingGround(heightAt, size * 0.4), x, z, size, bedRand, noise);
+    rock.sand = true;
+    rocks.push(rock);
+  }
   for (let k = 0; k < count; k++) {
     const x = (cx + rand()) * CHUNK_SIZE;
     const z = (cz + rand()) * CHUNK_SIZE;
@@ -125,4 +146,27 @@ function generateRiverRocks(heightAt, cx, cz, { seed, count }) {
     rocks.push(rock);
   }
   return rocks;
+}
+
+// Dry river: pebbles (5-17 cm across, like the stones the tyres throw) scattered over the rock
+// sheet, gathered in its creases. Drawn only (render/pebble-mesh.js); the tyres roll through them.
+// Per pebble: x, y, z, yaw, size, squash (height / width), tint, grey.
+export const PEBBLE_STRIDE = 8;
+export function generatePebbles(heightAt, cx, cz, { seed = 99 } = {}) {
+  if (heightAt.world !== 'river') return null;
+  const rand = mulberry32(hashChunk(seed + 13, cx, cz));
+  const out = [];
+  for (let k = 0; k < 12000; k++) {
+    const x = (cx + rand()) * CHUNK_SIZE;
+    const z = (cz + rand()) * CHUNK_SIZE;
+    const keep = rand();
+    const size = 0.025 + 0.06 * rand() * rand(); // radius
+    if (keep > 0.8 || heightAt.roadDistance(x, z) > ROCK_EDGE) continue;
+    // More in the creases (the sheet is lower than around it), few on the humps.
+    const h = heightAt(x, z);
+    const around = (heightAt(x + 0.3, z) + heightAt(x - 0.3, z) + heightAt(x, z + 0.3) + heightAt(x, z - 0.3)) / 4 - h;
+    if (keep > 0.2 + Math.min(0.6, Math.max(0, around * 8))) continue;
+    out.push(x, h - size * 0.15, z, rand() * 6.2832, size, 0.5 + 0.3 * rand(), rand(), rand());
+  }
+  return out.length ? new Float32Array(out) : null;
 }

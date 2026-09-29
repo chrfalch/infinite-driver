@@ -1,8 +1,9 @@
 // Draws the dry river's rock sheet (terrain/rock-sheet.js builds its vertex data).
 import { BufferAttribute, BufferGeometry, Mesh, MeshStandardMaterial } from 'three/webgpu';
 
-// Smooth-shaded: the sheet's normals come from its grid (see rockSheetData).
-export const rockSheetMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+// Flat-shaded (face normals in the shader), so each 25 cm triangle of the chipped sheet is a hard
+// facet and the boulders read as broken rock, not smooth humps.
+export const rockSheetMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
 
 export function createRockSheetMesh(data) {
   if (!data) return null;

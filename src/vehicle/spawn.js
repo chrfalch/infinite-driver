@@ -206,12 +206,13 @@ export function footprint(heightAt, x, z, yaw) {
   return { min: Math.min(...hs), max: Math.max(...hs) };
 }
 
-// Rocks and tree trunks near a point, from the loaded terrain chunks.
+// Rocks and tree trunks near a point, from the loaded terrain chunks. Rocks under 60 cm (the
+// dry river's loose ones) are driven over, so they are no obstacle.
 function obstaclesNear(world, x, z, radius) {
   const out = [];
   world.query(RockField).forEach((e) => {
     const field = e.get(RockField);
-    for (const r of field.rocks) if (Math.hypot(r.x - x, r.z - z) < radius) out.push({ x: r.x, z: r.z, r: r.size * 1.2 });
+    for (const r of field.rocks) if (r.size >= 0.6 && Math.hypot(r.x - x, r.z - z) < radius) out.push({ x: r.x, z: r.z, r: r.size * 1.2 });
     for (const p of field.plants ?? []) {
       if (p.kind === 'tree' && Math.hypot(p.x - x, p.z - z) < radius) out.push({ x: p.x, z: p.z, r: 0.5 });
     }
