@@ -9,7 +9,8 @@
 //
 // The rock sheet: three layers of boulders on jittered grids (small rocks, boulders, and big slabs
 // up to 11 m long), each a faceted dome (a flat top cut by tilted side planes), merged by taking
-// the highest at every point. Patches of small rocks alternate with bigger boulders. So the bed is one surface of rock humps
+// the highest at every point, with a chipped skin of creases a few cm deep over them. Patches of
+// small rocks alternate with bigger boulders. So the bed is one surface of rock humps
 // and creases, with no sand between them, and the same function gives the tyres, the colliders and
 // the drawn rock mesh (render/rock-surface.js) their shape. Toward the banks the domes grow tall and
 // steep into boulder walls the car cannot climb.
@@ -104,6 +105,7 @@ export function createRiverField(seed = 4711) {
   const sizeNoise = createNoise2D(rand);
   const bankNoise = createNoise2D(rand);
   const ridgeNoise = createNoise2D(rand);
+  const chipNoise = createNoise2D(rand);
 
   // Warped coordinate across the beds; a bed is where it is a multiple of the spacing. Long gentle
   // bends plus shorter wiggles.
@@ -210,7 +212,10 @@ export function createRiverField(seed = 4711) {
           return { tall: (0.4 + 0.3 * r) * (1 - wall), steep: 0.75, a: 4 + 1.5 * hash2(hx, hz, 303), b: 1.5 + 0.75 * r, gentle: 0.15 };
         }, top);
       }
-      stone = zone * Math.max(0.04, top.h);
+      // A rough, chipped skin over every boulder: V-shaped creases (|noise|) at two scales, a few
+      // cm deep, so the faces read as broken sandstone rather than smooth humps.
+      const chip = 0.05 * (Math.abs(chipNoise(x * 0.9, z * 0.9)) - 0.35) + 0.025 * (Math.abs(chipNoise(x * 2.3 + 7, z * 2.3 - 4)) - 0.35);
+      stone = zone * Math.max(0.04, top.h + chip);
       h += stone;
     }
     return { h, under, stone, stoneId: top.id, rockZone: zone, road: inBed, rut: channel * inBed, dist, rock, bank, cliff: ridge };

@@ -9,21 +9,37 @@ import { ROCK_REACH } from './riverbed.js';
 export const ROCK_SHEET_STEP = 0.25; // m, drawn mesh
 export const ROCK_COLLIDER_STEP = 0.5; // m, physics collider
 
+// A hash of a world grid point in [0, 1), for jittering it.
+function hash(ix, iz, k) {
+  let h = Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(k, 982451653);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
 // Samples the sheet on a `step` grid over the chunk, only in the 1 m cells that the sheet reaches.
-// Returns the grid heights and ids (NaN where unsampled) and the list of covered grid cells.
-// `rows`: the metre rows [from, to) of the chunk to cover (a band, so the work can be split).
-function sampleSheet(heightAt, cx, cz, step, rows = [0, CHUNK_SIZE]) {
+// Returns the grid heights and ids (NaN where unsampled), where each point was sampled, and the
+// list of covered grid cells. `rows`: the metre rows [from, to) of the chunk to cover (a band, so
+// the work can be split). `jitter` (share of a step) moves each point a random bit, the same for
+// the same world point in every chunk (so the seams stay closed), so the triangles are uneven and
+// steep faces do not show the grid as stair steps.
+function sampleSheet(heightAt, cx, cz, step, rows = [0, CHUNK_SIZE], jitter = 0) {
   const per = Math.round(1 / step); // grid cells per metre
   const n = CHUNK_SIZE * per + 1;
   const heights = new Float32Array(n * n).fill(NaN);
   const ids = new Float32Array(n * n);
+  const px = new Float32Array(n * n);
+  const pz = new Float32Array(n * n);
   const x0 = cx * CHUNK_SIZE;
   const z0 = cz * CHUNK_SIZE;
   const cells = [];
   const at = (gx, gz) => {
     const i = gx + gz * n;
     if (Number.isNaN(heights[i])) {
-      const s = heightAt.sample(x0 + gx * step, z0 + gz * step);
+      const wx = cx * CHUNK_SIZE * per + gx;
+      const wz = cz * CHUNK_SIZE * per + gz;
+      px[i] = x0 + (gx + jitter * (hash(wx, wz, 1) - 0.5)) * step;
+      pz[i] = z0 + (gz + jitter * (hash(wx, wz, 2) - 0.5)) * step;
+      const s = heightAt.sample(px[i], pz[i]);
       heights[i] = s.h;
       ids[i] = s.rockZone > 0 ? s.stoneId : -1;
     }
@@ -46,7 +62,7 @@ function sampleSheet(heightAt, cx, cz, step, rows = [0, CHUNK_SIZE]) {
       }
     }
   }
-  return { heights, ids, cells, n, x0, z0 };
+  return { heights, ids, px, pz, cells, n, x0, z0 };
 }
 
 // Linear-light colours from sRGB hex (what three's Color does), for the vertex colours.
@@ -79,14 +95,13 @@ function toneFor(id, out) {
 }
 
 // Vertex data for the drawn sheet (plain arrays, so the chunk worker can build it), or null if the
-// chunk has none: an indexed mesh with smooth normals from the grid (central differences), so the
-// big facets stay flat and only the ridges between them soften over a grid cell. (Face normals
-// per 25 cm triangle speckled the facets wherever a triangle straddled a ridge.) Triangles are split
-// along the same diagonal as the ground mesh.
+// chunk has none: an indexed mesh, drawn flat-shaded (render/rock-surface.js), so the chipped skin
+// of the boulders shows as hard facets. The grid normals (central differences) are kept for
+// anything that reads them. Triangles are split along the same diagonal as the ground mesh.
 export function rockSheetData(heightAt, cx, cz) {
   if (!heightAt.rockAt) return null;
   const step = ROCK_SHEET_STEP;
-  const { heights, ids, cells, n, x0, z0 } = sampleSheet(heightAt, cx, cz, step);
+  const { heights, ids, px, pz, cells, n } = sampleSheet(heightAt, cx, cz, step, undefined, 0.7);
   if (!cells.length) return null;
   // Grid points in use, numbered in order.
   const index = new Int32Array(n * n).fill(-1);
@@ -102,7 +117,7 @@ export function rockSheetData(heightAt, cx, cz) {
     const gx = i % n;
     const gz = (i - gx) / n;
     const y = heights[i];
-    positions.set([x0 + gx * step, y, z0 + gz * step], k * 3);
+    positions.set([px[i], y, pz[i]], k * 3);
     // Slopes from the neighbours either side (one-sided at the edge of the sampled cells).
     const l = gx > 0 ? h(i - 1, NaN) : NaN;
     const r = gx < n - 1 ? h(i + 1, NaN) : NaN;
@@ -113,8 +128,7 @@ export function rockSheetData(heightAt, cx, cz) {
     const len = Math.hypot(dx, 1, dz);
     normals.set([-dx / len, 1 / len, -dz / len], k * 3);
     // Each point takes its boulder's tone (bare ground where the sheet has faded out), darkened in
-    // the creases between boulders and a little lighter on their ridges, so the boulders read apart
-    // under the smooth shading.
+    // the creases between boulders and a little lighter on their ridges, so the boulders read apart.
     toneFor(ids[i] < 0 ? 0.5 : ids[i], tone);
     const around = (Number.isNaN(l) ? y : l) + (Number.isNaN(r) ? y : r) + (Number.isNaN(u) ? y : u) + (Number.isNaN(d) ? y : d) - 4 * y;
     const shade = 1 - Math.min(0.5, Math.max(0, around * 1.4)) + Math.min(0.12, Math.max(0, -around * 0.5));
