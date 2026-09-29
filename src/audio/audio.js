@@ -16,18 +16,68 @@ import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from './engine-presets.js';
 // The engine sound picked in the settings.
 export const currentPreset = () => ENGINE_PRESETS[AUDIO.engineType] ?? TURBO_DIESEL_V8;
 
-const GESTURES = ['pointerdown', 'pointerup', 'touchend', 'mousedown', 'keydown'];
+// Safari starts audio only from some of these (click, mouseup, keyup, touchend), Chrome from
+// others (pointerdown, mousedown, keydown); all of them try.
+const GESTURES = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'touchend', 'keydown', 'keyup'];
 const FADE = 0.4; // s
 
 // Keys typed into the tuning panel are not shortcuts (as tuning/panel.js isTyping, which this
 // module does not import: the engine lab has no panel).
 const isTyping = (e) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target?.tagName) || e.target?.isContentEditable;
 
-export function createAudio({ feed = null, preset = null } = {}) {
+// A small button that shows the sound's state and starts it (a click is a gesture every browser
+// accepts), or mutes it once it plays. It shows why when the sound cannot start.
+function createSoundButton(audio) {
+  const button = document.createElement('button');
+  button.className = 'sound-button';
+  button.style.cssText =
+    'position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:20;padding:6px 12px;border:0;border-radius:14px;' +
+    'background:rgba(40,34,24,0.72);color:#fff;font:600 12px/1.2 system-ui,sans-serif;cursor:pointer;max-width:80vw;';
+  document.body.append(button);
+  button.addEventListener('click', () => {
+    // Off: on again. Playing: off. Otherwise (not started, or stopped by the browser): start.
+    const playing = audio.state === 'running' && audio.ctx?.state === 'running';
+    if (!AUDIO.enabled || playing) {
+      AUDIO.enabled = !AUDIO.enabled;
+      saveAudio();
+    }
+    audio.unlock();
+  });
+  let shownSince = performance.now();
+  let last = '';
+  const refresh = () => {
+    const ctxState = audio.ctx?.state;
+    let label;
+    if (audio.state === 'unsupported') label = 'No Web Audio in this browser';
+    else if (audio.state === 'failed') label = `Sound failed: ${audio.error ?? 'unknown error'} (click to retry)`;
+    else if (!AUDIO.enabled) label = '🔇 Sound off (M)';
+    else if (audio.state === 'off') label = '🔈 Click for sound';
+    else if (audio.state === 'loading') label = '🔈 Starting sound…';
+    else if (ctxState !== 'running') label = `🔈 Sound ${ctxState} — click to start`;
+    else label = '🔊 Sound on (M)';
+    if (label !== last) {
+      last = label;
+      button.textContent = label;
+      shownSince = performance.now();
+    }
+    // Out of the way once it plays.
+    button.style.opacity = label.startsWith('🔊') && performance.now() - shownSince > 3000 ? '0.35' : '1';
+  };
+  refresh();
+  const timer = setInterval(refresh, 300);
+  return () => {
+    clearInterval(timer);
+    button.remove();
+  };
+}
+
+export function createAudio({ feed = null, preset = null, button = true } = {}) {
   const Context = globalThis.AudioContext ?? globalThis.webkitAudioContext;
   // preset: a fixed engine preset (the engine lab); otherwise the one picked in the settings.
   const audio = { ctx: null, node: null, state: 'off', manual: !feed?.shared, preset, update: () => {}, dispose: () => {} };
-  if (!Context || typeof AudioWorkletNode === 'undefined') {
+  audio.unlock = () => {};
+  const removeButton = button && typeof document !== 'undefined' ? createSoundButton(audio) : () => {};
+  if (!Context || typeof AudioWorkletNode === 'undefined' || !globalThis.isSecureContext) {
     audio.state = 'unsupported';
     return audio;
   }
@@ -77,6 +127,11 @@ export function createAudio({ feed = null, preset = null } = {}) {
   // Called inside a user gesture.
   function unlock() {
     if (!AUDIO.enabled) return;
+    // After a failure, start over on the next gesture.
+    if (audio.state === 'failed') {
+      ctx?.close().catch(() => {});
+      ctx = null;
+    }
     if (!ctx) {
       // iOS: play through the ring/silent switch, like a game or a video (Safari 17+).
       try {
@@ -97,11 +152,13 @@ export function createAudio({ feed = null, preset = null } = {}) {
       audio.state = 'loading';
       load().catch((error) => {
         audio.state = 'failed';
+        audio.error = String(error?.message ?? error);
         console.warn('Engine sound failed to start', error);
       });
     }
-    if (ctx.state !== 'running' && !document.hidden) ctx.resume().catch(() => {});
+    if (ctx.state !== 'running' && !document.hidden) ctx.resume().catch((error) => (audio.resumeError = String(error?.message ?? error)));
   }
+  audio.unlock = unlock;
 
   const onGesture = (e) => {
     if (e.type === 'keydown' && e.code === 'KeyM' && !e.repeat && !isTyping(e)) {
@@ -141,6 +198,7 @@ export function createAudio({ feed = null, preset = null } = {}) {
     for (const type of GESTURES) window.removeEventListener(type, onGesture, { capture: true });
     document.removeEventListener('visibilitychange', onVisibility);
     unsubscribe();
+    removeButton();
     ctx?.close();
   };
   return audio;
