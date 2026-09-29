@@ -26,6 +26,6 @@ export default defineConfig({
   optimizeDeps: { exclude: ['@pmndrs/glyph'] },
   build: {
     target: 'es2022',
-    rolldownOptions: { input: { main: 'index.html', tireLab: 'tire-lab.html' } },
+    rolldownOptions: { input: { main: 'index.html', tireLab: 'tire-lab.html', engineLab: 'engine-lab.html' } },
   },
 });

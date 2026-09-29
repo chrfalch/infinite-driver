@@ -94,7 +94,7 @@ class RemoteController {
   }
 }
 
-export function createPhysicsClient({ terrain, rocks, deformation, slowGpu = 0 }) {
+export function createPhysicsClient({ terrain, rocks, deformation, slowGpu = 0, audioFeed = null }) {
   const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
   let ready = null;
   let failed = null;
@@ -203,7 +203,9 @@ export function createPhysicsClient({ terrain, rocks, deformation, slowGpu = 0 }
   // physics on the main thread).
   client.start = () => {
     const tiles = [...deformation.tiles.entries()];
-    worker.postMessage({ type: 'init', terrain, rocks, settings: settingsBundle(), tiles, slowGpu });
+    // The audio feed only if it is shared memory (a copy would never reach the audio thread).
+    const feedBuffer = audioFeed?.shared ? audioFeed.buffer : null;
+    worker.postMessage({ type: 'init', terrain, rocks, settings: settingsBundle(), tiles, slowGpu, audioFeed: feedBuffer });
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('physics worker did not start in 15 s')), 15000);
       ready = () => {
