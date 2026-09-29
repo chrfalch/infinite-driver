@@ -76,7 +76,8 @@ export const TURBO_DIESEL_I4 = Object.freeze({
   },
   // The exhaust brake closes a valve in the exhaust: a hard, raspy note on the overrun.
   exhaustBrake: { level: 0.35, rasp: 0.5 },
-  // The level of each part of the sound (EngineSynth LAYERS), as tuned by ear in the engine lab.
+  // The level of each part of the sound (EngineSynth LAYERS), as tuned by ear in the engine lab
+  // (then turbo and wastegate about a third lower).
   // The old clatter (a noise burst) sounded like a garden hose and was tuned out; the metallic one
   // above is new and starts silent too.
   layers: {
@@ -88,10 +89,10 @@ export const TURBO_DIESEL_I4 = Object.freeze({
     block: 1.21,
     clatter: 0,
     rasp: 1.89,
-    whistle: 1.71,
-    whoosh: 1.43,
-    flutter: 1,
-    wastegate: 1.51,
+    whistle: 1.1,
+    whoosh: 0.95,
+    flutter: 0.7,
+    wastegate: 1.0,
     gear: 1,
   },
   idleRpm: 850,
