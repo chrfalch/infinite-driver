@@ -121,4 +121,29 @@ describe('drivetrain', () => {
     for (let i = 0; i < 120; i++) d.update(DT, { throttle: 0, reverseRequest: false }, [54, 54, 54, 54], 25, R);
     expect(d.gear).toBeGreaterThan(1);
   });
+
+  // Wheels spinning free (in the air, or on no grip): the clutch must bring engine and wheels
+  // together without overshooting the light wheel side, and once locked the wheels carry the
+  // engine's flywheel (they chattered back and forth every step, worst in low range).
+  it('clutch does not chatter against light wheels, in high or low range', () => {
+    for (const low of [false, true]) {
+      const drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN, low });
+      const I = DEFAULT_DRIVETRAIN.wheelInertia;
+      const w = [0, 0, 0, 0];
+      // Chatter: the drive torque changing sign on consecutive steps (back, forth, back).
+      let chatter = 0;
+      const sums = [];
+      for (let step = 0; step < 240; step++) {
+        const t = drive.update(DT, { throttle: step < 120 ? 1 : 0 }, w, 0, R);
+        // The vehicle adds the engine's flywheel to the hubs while the clutch is locked.
+        const hubI = I + drive.coupledInertia / 4;
+        for (let i = 0; i < 4; i++) w[i] += (t[i] / hubI) * DT - w[i] * 0.02 * DT; // a little bearing drag
+        sums.push(t.reduce((a, b) => a + b, 0));
+        const [a, b, c] = sums.slice(-3);
+        if (sums.length >= 3 && Math.min(Math.abs(a), Math.abs(b), Math.abs(c)) > 50 && Math.sign(a) !== Math.sign(b) && Math.sign(b) !== Math.sign(c)) chatter++;
+        for (const x of w) expect(Number.isFinite(x)).toBe(true);
+      }
+      expect(chatter).toBeLessThanOrEqual(2); // was every step (it diverged in low range)
+    }
+  });
 });
