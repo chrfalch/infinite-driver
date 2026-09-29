@@ -4,7 +4,6 @@ import { ThreeConfig } from '@pmndrs/glyph/three';
 import { createWorld } from 'koota';
 import {
   HeightField,
-  HudLabel,
   Input,
   IsPlayer,
   Physics,
@@ -22,9 +21,9 @@ import {
 } from './ecs/traits.js';
 import { createRenderer } from './render/scene.js';
 import { createGauges } from './ui/gauges.js';
-import { attachZoom, followCamera, isFollowCamera, toggleFollowCamera } from './systems/camera.js';
-import { updateHud } from './systems/hud.js';
-import { attachKeyboard, readInput } from './systems/input.js';
+import { attachZoom, followCamera, isFollowCamera, orbitCamera, toggleFollowCamera } from './systems/camera.js';
+import { attachKeyboard, readCameraKeys, readInput } from './systems/input.js';
+import { CONTROLS } from './controls.js';
 import { stepPhysics } from './systems/physics.js';
 import { syncBodies } from './systems/draw-sync.js';
 import { streamTerrain } from './systems/terrain.js';
@@ -131,35 +130,12 @@ async function main() {
   // Speedometer, tachometer, and gear indicator.
   const gauges = createGauges({ hud, font: inter, scene: render.hudScene });
 
-  const perfText = hud.createText({
-    font: inter,
-    text: '',
-    style: { fontSize: 12, lineHeight: 1.2, color: '#9a927e' },
-  });
-  perfText.position.set(28, -48, 0);
-  render.hudScene.add(perfText);
-  world.spawn(
-    HudLabel({
-      text: perfText,
-      format: (v) => {
-        const tyres = v.controller.gpu ? 'GPU tyres' : v.controller.wheels ? 'Rapier soft tyres' : 'rigid wheels';
-        const gpu = render.renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2 (no WebGPU)';
-        return `${tyres}    physics ${world.get(Physics).stepMs.toFixed(1)} ms/step${remote ? ' (worker)' : ''}    ${gpu}`;
-      },
-    }),
-  );
-
-  const hintText = hud.createText({
-    font: inter,
-    text: '',
-    style: { fontSize: 14, lineHeight: 1.2, color: '#8a826f' },
-  });
-  hintText.position.set(28, -24, 0);
-  render.hudScene.add(hintText);
-  const KEY_HINT =
-    'W / Up  accelerate (hold)    S / Down  brake, reverse    A D  steer    Q E  shift    L  low range    Space  handbrake    R  respawn    C  follow camera';
-  const TOUCH_HINT = 'Hold the up button to drive, down to brake    Pinch to zoom';
-  world.spawn(HudLabel({ text: hintText, format: () => (touch.isVisible() ? TOUCH_HINT : KEY_HINT) + (isFollowCamera() ? '    [follow camera on]' : '') }));
+  // The perf card's two lines (P or the panel's switch shows it).
+  const gpuName = render.renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2 (no WebGPU)';
+  const perfLines = (v) => {
+    const tyres = v.controller.gpu ? 'GPU tyres' : v.controller.wheels ? 'Rapier soft tyres' : 'rigid wheels';
+    return [`${tyres}  ·  ${gpuName}`, `physics ${world.get(Physics).stepMs.toFixed(1)} ms/step${remote ? ' (worker)' : ''}`];
+  };
 
   attachKeyboard();
   attachZoom(render.renderer.domElement);
@@ -242,13 +218,14 @@ async function main() {
       timed('sys.updateTracks', () => updateTracks(world));
       timed('sys.updateSoil', () => updateSoil(world));
       timed('sys.updateBushes', () => updateBushes(world));
+      orbitCamera(readCameraKeys(), time.delta);
       timed('sys.followCamera', () => followCamera(world));
-      timed('sys.updateHud', () => updateHud(world));
       const player = world.queryFirst(IsPlayer, Vehicle);
       if (player) {
         const canvas = render.renderer.domElement;
         gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible());
-        gauges.update(player.get(Vehicle), time.delta);
+        const vehicle = player.get(Vehicle);
+        gauges.update(vehicle, time.delta, { follow: isFollowCamera(), perf: CONTROLS.showPerf ? perfLines(vehicle) : null });
         { const v = player.get(Vehicle).body.linvel(); sample('speed.kmh', Math.hypot(v.x, v.z) * 3.6); }
       }
       timed('sys.glyph', () => glyph.shape());
