@@ -65,7 +65,8 @@ export const GROUND_SOUND = Object.freeze({
   },
   gain: 0.8,
   topCut: 8000, // Hz: the clicks' noise stops here
-  layers: { ...GROUND_LAYERS },
+  // Levels of the parts, as tuned by ear (the gravel at half).
+  layers: { ...GROUND_LAYERS, gravel: 0.5 },
 });
 
 const smoothstep = (a, b, x) => {
