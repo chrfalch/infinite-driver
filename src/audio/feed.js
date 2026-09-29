@@ -4,7 +4,12 @@
 // sometimes late), so the audio plays the records a little behind the newest one and interpolates
 // between them; values sent once per frame made the engine pitch step.
 
-export const FIELDS = ['time', 'rpm', 'throttle', 'fuel', 'exhaustBrake', 'clutch', 'speed', 'gear'];
+import { WHEEL_FIELDS, WHEELS, writeWheels } from './wheels.js';
+
+// The engine's fields, then each wheel's (w0contact, w0ground, …; see wheels.js).
+const ENGINE_FIELDS = ['time', 'rpm', 'throttle', 'fuel', 'exhaustBrake', 'clutch', 'speed', 'gear'];
+export const FIELDS = [...ENGINE_FIELDS, ...Array.from({ length: WHEELS }, (_, i) => WHEEL_FIELDS.map((f) => `w${i}${f}`)).flat()];
+const SURFACE_EVERY = 6; // steps between ground lookups per wheel
 const STRIDE = FIELDS.length;
 export const RECORDS = 512; // about 4 s at 120 steps per second
 const HEADER = 8; // bytes: the count of records written (Int32), padded
@@ -38,11 +43,24 @@ export class AudioFeed {
     else this.count[0] = n + 1;
   }
 
-  // The record for a vehicle after a physics step at sim time t.
-  writeStep(t, vehicle) {
+  // The record for a vehicle after a physics step at sim time t. heightAt (optional) gives the
+  // ground under each wheel.
+  writeStep(t, vehicle, heightAt = null) {
     const d = vehicle.drivetrain;
     if (!d) return;
-    this.write([t, d.rpm, d.throttle ?? 0, d.fuel ?? 0, d.exhaustBrake ?? 0, d.clutch ?? 0, vehicle.speed ?? 0, d.gear ?? 0]);
+    const r = (this.record ??= new Float64Array(STRIDE));
+    r[0] = t;
+    r[1] = d.rpm;
+    r[2] = d.throttle ?? 0;
+    r[3] = d.fuel ?? 0;
+    r[4] = d.exhaustBrake ?? 0;
+    r[5] = d.clutch ?? 0;
+    r[6] = vehicle.speed ?? 0;
+    r[7] = d.gear ?? 0;
+    this.surfaces ??= Array.from({ length: WHEELS }, () => ({ rock: 0, gravel: 0 }));
+    this.steps = (this.steps ?? 0) + 1;
+    writeWheels(vehicle, r, ENGINE_FIELDS.length, heightAt, this.surfaces, this.steps % SURFACE_EVERY === 1);
+    this.write(r);
   }
 
   // Record i (0 = oldest still kept) into out; returns false if it is no longer in the ring.

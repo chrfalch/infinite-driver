@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { AudioFeed, FeedReader, RECORDS, createFeedBuffer } from '../src/audio/feed.js';
 import { EngineSynth, LAYERS } from '../src/audio/engine-synth.js';
 import { TURBO_DIESEL_I4, TURBO_DIESEL_V8 } from '../src/audio/engine-presets.js';
+import { GroundSynth } from '../src/audio/ground-synth.js';
+import { surfaceAt, writeWheels, WHEEL_FIELDS } from '../src/audio/wheels.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../src/vehicle/drivetrain.js';
 
 const SR = 48000;
@@ -251,5 +253,79 @@ describe('drivetrain outputs for the sound', () => {
     for (let t = 0; t < 2; t += 1 / 120) d.update(1 / 120, { throttle: 0, reverseRequest: false }, [0, 0, 0, 0], 0, 0.46);
     expect(d.fuel).toBeGreaterThan(0.05);
     expect(d.fuel).toBeLessThan(0.3);
+  });
+});
+
+
+describe('tyres and ground', () => {
+  const wheels = (o) => {
+    const v = {};
+    for (let i = 0; i < 4; i++) for (const [k, x] of Object.entries({ contact: 1, ground: 0, roll: 0, slipLong: 0, slipLat: 0, load: 1, rock: 0, gravel: 0, ...o })) v[`w${i}${k}`] = x;
+    return v;
+  };
+  const play = (state, synth = new GroundSynth(SR), seconds = 1) => {
+    const out = new Float32Array(SR * seconds);
+    for (let i = 0; i < out.length; i += BLOCK) synth.render(out, state, state, i, i + BLOCK);
+    return rms(out, SR / 4);
+  };
+
+  it('is silent standing still, and in the air', () => {
+    expect(play(wheels({}))).toBeLessThan(1e-4);
+    expect(play(wheels({ contact: 0, ground: 15, roll: 15, gravel: 1 }))).toBeLessThan(1e-4);
+  });
+
+  it('crunches louder on gravel the faster it rolls', () => {
+    const slow = play(wheels({ ground: 3, roll: 3, gravel: 1 }));
+    const fast = play(wheels({ ground: 12, roll: 12, gravel: 1 }));
+    expect(slow).toBeGreaterThan(0.005);
+    expect(fast).toBeGreaterThan(slow * 1.5);
+  });
+
+  it('squeals sliding on rock, not on soil', () => {
+    const rolling = play(wheels({ ground: 8, roll: 8, rock: 1 }));
+    const sliding = play(wheels({ ground: 8, roll: 8, slipLat: 3, rock: 1 }));
+    expect(sliding).toBeGreaterThan(rolling * 2);
+    const soilSliding = new GroundSynth(SR);
+    soilSliding.setLayers({ gravel: 0, soil: 0, rock: 0, hum: 0, scrub: 0, spin: 0 }); // squeal alone
+    expect(play(wheels({ ground: 8, roll: 8, slipLat: 3 }), soilSliding)).toBeLessThan(1e-4);
+  });
+
+  it('stays inside full scale added to a loud engine', () => {
+    const synth = new GroundSynth(SR);
+    const out = new Float32Array(SR).fill(0.8);
+    const s = wheels({ ground: 20, roll: 26, slipLong: 6, slipLat: 4, gravel: 1, load: 2 });
+    for (let i = 0; i < out.length; i += BLOCK) synth.render(out, s, s, i, i + BLOCK);
+    for (const x of out) expect(Math.abs(x)).toBeLessThanOrEqual(1);
+  });
+
+  it('ticks when a thrown stone hits the car, clicks when one lands on rock', () => {
+    for (const e of [{ kind: 'throw', size: 0.06, speed: 6 }, { kind: 'land', size: 0.05, rock: 1 }]) {
+      const synth = new GroundSynth(SR, { ...new GroundSynth(SR).preset, stones: { ...new GroundSynth(SR).preset.stones, hitChance: 1 } });
+      synth.event(e);
+      const out = new Float32Array(SR / 4);
+      for (let i = 0; i < out.length; i += BLOCK) synth.render(out, wheels({ contact: 0 }), wheels({ contact: 0 }), i, i + BLOCK);
+      expect(Math.max(...out.map(Math.abs)), e.kind).toBeGreaterThan(0.02);
+    }
+  });
+
+  it('reads the wheels: speed, slip and ground', () => {
+    const identity = { x: 0, y: 0, z: 0, w: 1 };
+    const controller = {
+      wheels: [0, 1, 2, 3].map(() => ({ hub: { linvel: () => ({ x: 10, y: 0, z: 1 }), rotation: () => identity, translation: () => ({ x: 0, y: 0, z: 0 }) }, tyreLoad: 4400 })),
+      rollingRadius: () => 0.4,
+      wheelSpin: () => 30, // 12 m/s at the tread
+    };
+    const out = new Float64Array(4 * WHEEL_FIELDS.length);
+    const surfaces = [0, 1, 2, 3].map(() => ({ rock: 0, gravel: 0 }));
+    writeWheels({ controller }, out, 0, { rockAt: () => true }, surfaces, true);
+    const [contact, ground, roll, slipLong, slipLat, load, rock] = out;
+    expect(contact).toBe(1);
+    expect(ground).toBeCloseTo(Math.hypot(10, 1), 5);
+    expect(roll).toBeCloseTo(12, 5);
+    expect(slipLong).toBeCloseTo(2, 5);
+    expect(slipLat).toBeCloseTo(1, 5);
+    expect(load).toBeCloseTo(4400 / ((1800 * 9.81) / 4), 5);
+    expect(rock).toBe(1);
+    expect(surfaceAt({ world: 'canyon', sample: () => ({ rock: 0, road: 1 }) }, 0, 0).gravel).toBe(1);
   });
 });

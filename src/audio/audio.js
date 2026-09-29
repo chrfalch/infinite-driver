@@ -206,8 +206,16 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
   document.addEventListener('visibilitychange', onVisibility);
   const unsubscribe = onSettingsSaved((key) => key === AUDIO_KEY && apply());
 
-  // Per frame: only needed when the worklet cannot read the shared feed.
-  audio.update = (vehicle) => {
+  // Per frame: stones thrown and landing (soil.sounds, taken and cleared), and the engine's state
+  // when the worklet cannot read the shared feed.
+  audio.update = (vehicle, soil = null) => {
+    if (soil?.sounds?.length) {
+      if (node && ctx?.state === 'running') {
+        node.port.postMessage({ type: 'stones', events: soil.sounds });
+        audio.stonesSent = (audio.stonesSent ?? 0) + soil.sounds.length;
+      }
+      soil.sounds = [];
+    }
     if (!audio.manual || !node || !vehicle?.drivetrain) return;
     const d = vehicle.drivetrain;
     node.port.postMessage({ type: 'manual', values: { rpm: d.rpm ?? 0, fuel: d.fuel ?? 0, exhaustBrake: d.exhaustBrake ?? 0, throttle: d.throttle ?? 0 } });

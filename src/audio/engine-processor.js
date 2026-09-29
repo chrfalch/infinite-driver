@@ -9,10 +9,14 @@
 //        { type: 'feed' }             back to the feed
 //        { type: 'preset', preset }   a whole new engine preset (the engine lab's sliders)
 //        { type: 'layers', values }   levels of the sound's parts (EngineSynth LAYERS)
+//        { type: 'stones', events }   stones thrown and landing (GroundSynth.event)
+//        { type: 'groundPreset', preset }, { type: 'groundLayers', values }   as above, for the
+//                                     tyre and ground sounds (ground-synth.js)
 //   out: { type: 'status', feedSteps } once a second: how many steps the feed has seen
 import { EngineSynth } from './engine-synth.js';
 import { TURBO_DIESEL_I4 } from './engine-presets.js';
 import { AudioFeed, FeedReader } from './feed.js';
+import { GroundSynth } from './ground-synth.js';
 
 const IDLE = { rpm: TURBO_DIESEL_I4.idleRpm, fuel: 0.13, exhaustBrake: 0, throttle: 0 };
 const MANUAL_SMOOTHING = 0.05; // s
@@ -23,6 +27,9 @@ class EngineProcessor extends AudioWorkletProcessor {
     const { feedBuffer = null, mix = null, preset = null } = options.processorOptions ?? {};
     this.synth = new EngineSynth(sampleRate, preset ?? TURBO_DIESEL_I4, { seed: (Math.random() * 2 ** 31) | 0 });
     if (mix) this.synth.setMix(mix);
+    this.ground = new GroundSynth(sampleRate, undefined, { seed: (Math.random() * 2 ** 31) | 0 });
+    if (options.processorOptions?.groundPreset) this.ground.setPreset(options.processorOptions.groundPreset);
+    if (mix?.ground !== undefined) this.ground.level = mix.ground;
     this.reader = feedBuffer ? new FeedReader(new AudioFeed(feedBuffer)) : null;
     this.manual = null;
     this.prev = { ...IDLE };
@@ -30,7 +37,12 @@ class EngineProcessor extends AudioWorkletProcessor {
     this.sinceStatus = 0;
     this.port.onmessage = (e) => {
       const m = e.data;
-      if (m.type === 'mix') this.synth.setMix(m.values);
+      if (m.type === 'mix') {
+        this.synth.setMix(m.values);
+        if (m.values.ground !== undefined) this.ground.level = m.values.ground;
+      } else if (m.type === 'stones') for (const e of m.events) this.ground.event(e);
+      else if (m.type === 'groundPreset') this.ground.setPreset(m.preset);
+      else if (m.type === 'groundLayers') this.ground.setLayers(m.values);
       else if (m.type === 'preset') this.synth.setPreset(m.preset);
       else if (m.type === 'layers') this.synth.setLayers(m.values);
       else if (m.type === 'manual') this.manual = { ...IDLE, ...m.values };
@@ -51,14 +63,11 @@ class EngineProcessor extends AudioWorkletProcessor {
       next.throttle = this.manual.throttle;
     } else if (this.reader) {
       const v = this.reader.advance(dt);
-      if (this.reader.hasData) {
-        next.rpm = v.rpm;
-        next.fuel = v.fuel;
-        next.exhaustBrake = v.exhaustBrake;
-        next.throttle = v.throttle;
-      }
+      // All fields: the engine's and each wheel's.
+      if (this.reader.hasData) Object.assign(next, v);
     }
     this.synth.render(ch, this.prev, next);
+    this.ground.render(ch, this.prev, next);
     for (let c = 1; c < out.length; c++) out[c].set(ch);
     for (let i = 0; i < n; i++) this.peak = Math.max(this.peak ?? 0, Math.abs(ch[i]));
     Object.assign(this.prev, next);

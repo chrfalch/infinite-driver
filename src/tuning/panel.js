@@ -273,6 +273,7 @@ export function createTuningPanel(world, { heightAt }) {
   sound.add(AUDIO, 'engine', 0, 2, 0.05).name('Engine ×').onChange(saveAudio);
   sound.add(AUDIO, 'turbo', 0, 3, 0.05).name('Turbo whistle ×').onChange(saveAudio);
   sound.add(AUDIO, 'clatter', 0, 3, 0.05).name('Diesel clatter ×').onChange(saveAudio);
+  sound.add(AUDIO, 'ground', 0, 3, 0.05).name('Tyres & ground ×').onChange(saveAudio);
   sound.close();
 
   // Ground: softness sinks the tyres into the soil; gravel is what the tread rolls over.

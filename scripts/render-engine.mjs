@@ -11,6 +11,7 @@ import { writeFileSync } from 'node:fs';
 import { AudioFeed, FeedReader, createFeedBuffer } from '../src/audio/feed.js';
 import { EngineSynth } from '../src/audio/engine-synth.js';
 import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from '../src/audio/engine-presets.js';
+import { GroundSynth } from '../src/audio/ground-synth.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../src/vehicle/drivetrain.js';
 
 const out = process.argv[2] ?? 'engine.wav';
@@ -27,6 +28,22 @@ const SCENARIOS = {
   short: { seconds: 9, neutral: false, throttle: (t) => (t >= 1.5 && t < 7 ? 1 : 0) },
   rev: { seconds: 10, neutral: true, throttle: (t) => (t % 2.5 > 0.8 && t % 2.5 < 1.4 ? 1 : 0) },
   idle: { seconds: 5, neutral: true, throttle: () => 0 },
+  // Tyres and ground: pull away on a gravel road, slide on bare rock, spin up on soil (with stones).
+  ground: {
+    seconds: 16,
+    neutral: false,
+    throttle: (t) => (t < 1 ? 0 : t < 7 ? 1 : t < 9 ? 0 : t < 12 ? 0.6 : 1),
+    surface: (t) => (t < 7 ? 'gravel' : t < 12 ? 'rock' : 'soil'),
+    slide: (t) => (t > 8.5 && t < 11.5 ? 3 : 0),
+    wheelspin: (t) => (t > 12.5 ? 6 : 0),
+    stones: (t) => (t > 12.5 ? 20 : t < 7 && t > 2 ? 3 : 0), // thrown per second
+  },
+};
+// The ground under the scenario's wheels (as the worlds answer surfaceAt in wheels.js).
+const GROUNDS = {
+  gravel: { world: 'canyon', sample: () => ({ rock: 0, road: 1 }) },
+  soil: { world: 'canyon', sample: () => ({ rock: 0, road: 0 }) },
+  rock: { rockAt: () => true },
 };
 const s = SCENARIOS[scenario];
 if (!s) throw new Error(`unknown scenario ${scenario}`);
@@ -45,6 +62,18 @@ const preset = merge(ENGINE_PRESETS[base], changes);
 const synth = new EngineSynth(SR, preset);
 const drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN, automatic: !s.neutral });
 const samples = new Float32Array(Math.ceil(s.seconds * SR));
+const ground = new GroundSynth(SR);
+// Wheels rolling with the car (the scenario adds sliding and rear wheelspin), as wheels.js reads them.
+const identity = { x: 0, y: 0, z: 0, w: 1 };
+let slide = 0;
+let spin = 0;
+const controller = s.surface
+  ? {
+      wheels: [0, 1, 2, 3].map(() => ({ hub: { linvel: () => ({ x: v, y: 0, z: slide }), rotation: () => identity, translation: () => ({ x: 0, y: 0, z: 0 }) }, tyreLoad: 4400 })),
+      rollingRadius: () => 0.43,
+      wheelSpin: (i) => (v + (i >= 2 ? spin : 0)) / 0.43,
+    }
+  : null;
 
 let v = 0;
 let simTime = 0;
@@ -62,12 +91,17 @@ for (let i = 0; i < samples.length; i += BLOCK) {
       v = Math.max(0, v + (force / (MASS + (4 * 3.5) / (R * R))) * DT);
     }
     simTime += DT;
-    feed.writeStep(simTime, { drivetrain: drive, speed: v });
+    slide = s.slide?.(simTime) ?? 0;
+    spin = s.wheelspin?.(simTime) ?? 0;
+    feed.writeStep(simTime, { drivetrain: drive, speed: v, controller }, s.surface ? GROUNDS[s.surface(simTime)] : null);
+    const thrown = (s.stones?.(simTime) ?? 0) * DT;
+    if (Math.random() < thrown) ground.event({ kind: 'throw', size: 0.025 + Math.random() * 0.045, speed: 2 + Math.random() * 6 });
   }
   const end = Math.min(samples.length, i + BLOCK);
   const values = reader.advance((end - i) / SR);
-  const next = { rpm: values.rpm, fuel: values.fuel, exhaustBrake: values.exhaustBrake, throttle: values.throttle };
+  const next = { ...values };
   synth.render(samples, prev, next, i, end);
+  ground.render(samples, prev, next, i, end);
   prev = next;
   if (i % (SR / 2) < BLOCK) log.push({ t: tAudio.toFixed(1), rpm: Math.round(next.rpm), gear: values.gear, fuel: next.fuel.toFixed(2), brake: next.exhaustBrake.toFixed(2), spool: synth.spool.toFixed(2), kmh: (values.speed * 3.6).toFixed(0) });
 }

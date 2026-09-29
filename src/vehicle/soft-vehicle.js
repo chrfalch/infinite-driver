@@ -676,6 +676,7 @@ export class JointedVehicle {
     const o = step * MAX_TIRES * 8;
     this.wheels.forEach((w, t) => {
       const k = o + t * 8;
+      w.tyreLoad = f[k + 1]; // N, upward: what the ground carries (the sound reads it)
       w.hub.resetForces(true);
       w.hub.addForce({ x: f[k], y: f[k + 1], z: f[k + 2] }, true);
       w.hub.addTorque({ x: f[k + 4], y: f[k + 5], z: f[k + 6] }, true);
@@ -700,6 +701,7 @@ export class JointedVehicle {
       f = await this.gpu.solver.step(this.hubStates(), { readPositions });
     }
     this.wheels.forEach((w, t) => {
+      w.tyreLoad = f[t * 8 + 1];
       w.hub.resetForces(true);
       w.hub.addForce({ x: f[t * 8], y: f[t * 8 + 1], z: f[t * 8 + 2] }, true);
       w.hub.addTorque({ x: f[t * 8 + 4], y: f[t * 8 + 5], z: f[t * 8 + 6] }, true);
