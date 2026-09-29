@@ -9,8 +9,13 @@
 //   topOut  the suspension reaching full droop, in m/s
 //   rim     the rim striking (the tyre squashed flat), in static loads
 export const WHEEL_FIELDS = ['contact', 'ground', 'roll', 'slipLong', 'slipLat', 'load', 'rock', 'gravel', 'impact', 'bump', 'topOut', 'rim'];
-// The chassis: its contact force now (in the car's weights, for scrapes) and its hits (counting up).
-export const BODY_FIELDS = ['chassisForce', 'chassisHits'];
+// The chassis and the driveline:
+//   chassisForce  contact force now, in the car's weights (scrapes); chassisHits counting up
+//   steer         the front wheels' angle over the full lock (-1..1)
+//   low, locks    low range (0/1), and how many differentials are locked (0-3)
+//   shaft         torque out of the gearbox, kN·m (signed); clunks counting up (backlash taken up)
+//   heave, twist  how hard the chassis is shaken: vertical and rotational acceleration (m/s², rad/s²)
+export const BODY_FIELDS = ['chassisForce', 'chassisHits', 'steer', 'low', 'locks', 'shaft', 'clunks', 'heave', 'twist'];
 export const WHEELS = 4;
 const STATIC_LOAD = (1800 * 9.81) / 4; // N per wheel at rest
 const WEIGHT = 1800 * 9.81;
@@ -19,6 +24,10 @@ const WEIGHT = 1800 * 9.81;
 const IMPACT_JUMP = 0.7;
 const IMPACT_GAP = 0.06;
 const HIT_JUMP = 0.1; // the same for the chassis (car weights)
+// kN·m: a smaller swing through zero makes no clunk; and at most one per CLUNK_GAP s (the shaft
+// torque rings through zero a few times as the clutch takes up; 0.12 and no gap clunked constantly).
+const CLUNK_SWING = 0.4;
+const CLUNK_GAP = 0.35;
 
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -54,6 +63,41 @@ export function writeBody(vehicle, out, offset, state) {
   state.chassis = f;
   out[offset] = f;
   out[offset + 1] = state.chassisHits ?? 0;
+
+  const d = vehicle.drivetrain;
+  const p = d?.params;
+  out[offset + 2] = (vehicle.steer ?? 0) / (vehicle.controller?.car?.maxSteer ?? 0.62);
+  out[offset + 3] = p?.low ? 1 : 0;
+  out[offset + 4] = p ? (p.centerLock ? 1 : 0) + (p.frontLock ? 1 : 0) + (p.rearLock ? 1 : 0) : 0;
+  // The driveline's backlash: torque swapping sides (on and off the throttle) knocks the gears.
+  const shaft = (d?.shaftTorque ?? 0) / 1000;
+  state.sinceClunk = (state.sinceClunk ?? 1) + 1 / 120;
+  // Measured from the torque before the swing began, so a quick swing over a few steps counts.
+  if (Math.sign(shaft) !== Math.sign(state.before ?? shaft) && Math.abs(shaft - state.before) > CLUNK_SWING && state.sinceClunk > CLUNK_GAP) {
+    state.clunks = (state.clunks ?? 0) + Math.abs(shaft - state.before);
+    state.sinceClunk = 0;
+  }
+  if (Math.abs(shaft) > 0.06) state.before = shaft;
+  out[offset + 5] = shaft;
+  out[offset + 6] = state.clunks ?? 0;
+
+  // Shaking: the chassis' acceleration, smoothed over about 30 ms.
+  const body = vehicle.body;
+  if (body?.linvel) {
+    const v = body.linvel();
+    const w = body.angvel();
+    const dt = 1 / 120;
+    const heave = state.vy === undefined ? 0 : Math.abs(v.y - state.vy) / dt;
+    const twist = state.w === undefined ? 0 : Math.hypot(w.x - state.w.x, w.z - state.w.z) / dt;
+    state.vy = v.y;
+    state.w = { x: w.x, z: w.z };
+    const k = 0.25;
+    state.heave = (state.heave ?? 0) + (heave - (state.heave ?? 0)) * k;
+    state.twist = (state.twist ?? 0) + (twist - (state.twist ?? 0)) * k;
+  }
+  // The engine lab shakes a car that has no body.
+  out[offset + 7] = vehicle.shake?.heave ?? state.heave ?? 0;
+  out[offset + 8] = vehicle.shake?.twist ?? state.twist ?? 0;
 }
 
 // The wheel fields for every wheel into out (from `offset`), in WHEEL_FIELDS order.

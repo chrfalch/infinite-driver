@@ -12,6 +12,8 @@ import { AudioFeed, FeedReader, createFeedBuffer } from '../src/audio/feed.js';
 import { EngineSynth } from '../src/audio/engine-synth.js';
 import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from '../src/audio/engine-presets.js';
 import { GroundSynth } from '../src/audio/ground-synth.js';
+import { CarSynth } from '../src/audio/car-synth.js';
+import { softKnee } from '../src/audio/mix.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../src/vehicle/drivetrain.js';
 
 const out = process.argv[2] ?? 'engine.wav';
@@ -28,6 +30,17 @@ const SCENARIOS = {
   short: { seconds: 9, neutral: false, throttle: (t) => (t >= 1.5 && t < 7 ? 1 : 0) },
   rev: { seconds: 10, neutral: true, throttle: (t) => (t % 2.5 > 0.8 && t % 2.5 < 1.4 ? 1 : 0) },
   idle: { seconds: 5, neutral: true, throttle: () => 0 },
+  // Driveline and body: pull away in low range, full lock in a circle, a shaken body, then high
+  // range up to speed (wind).
+  driveline: {
+    seconds: 18,
+    neutral: false,
+    low: (t) => t < 8,
+    throttle: (t) => (t < 1 ? 0 : t < 5 ? 1 : t < 6 ? 0 : 1),
+    steer: (t) => (t > 2.5 && t < 5.5 ? 1 : 0),
+    shake: (t) => (t > 6 && t < 8 ? 14 : 0),
+    surface: () => 'soil',
+  },
   // Tyres and ground: pull away on a gravel road, slide on bare rock, spin up on soil (with stones).
   ground: {
     seconds: 16,
@@ -60,9 +73,11 @@ const merge = (base, changes) => {
 const { base = TURBO_DIESEL_V8.name, ...changes } = JSON.parse(process.argv[4] ?? '{}');
 const preset = merge(ENGINE_PRESETS[base], changes);
 const synth = new EngineSynth(SR, preset);
-const drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN, automatic: !s.neutral });
+const drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN, automatic: !s.neutral, low: false });
 const samples = new Float32Array(Math.ceil(s.seconds * SR));
 const ground = new GroundSynth(SR);
+const car = new CarSynth(SR);
+const right = new Float32Array(samples.length); // the WAV is mono: the left side
 // Wheels rolling with the car (the scenario adds sliding and rear wheelspin), as wheels.js reads them.
 const identity = { x: 0, y: 0, z: 0, w: 1 };
 let slide = 0;
@@ -93,7 +108,9 @@ for (let i = 0; i < samples.length; i += BLOCK) {
     simTime += DT;
     slide = s.slide?.(simTime) ?? 0;
     spin = s.wheelspin?.(simTime) ?? 0;
-    feed.writeStep(simTime, { drivetrain: drive, speed: v, controller }, s.surface ? GROUNDS[s.surface(simTime)] : null);
+    if (s.low) drive.params.low = s.low(simTime);
+    const shake = s.shake ? { heave: s.shake(simTime), twist: s.shake(simTime) * 2 } : undefined;
+    feed.writeStep(simTime, { drivetrain: drive, speed: v, controller, steer: (s.steer?.(simTime) ?? 0) * 0.62, shake }, s.surface ? GROUNDS[s.surface(simTime)] : null);
     const thrown = (s.stones?.(simTime) ?? 0) * DT;
     if (Math.random() < thrown) ground.event({ kind: 'throw', size: 0.025 + Math.random() * 0.045, speed: 2 + Math.random() * 6 });
   }
@@ -101,7 +118,9 @@ for (let i = 0; i < samples.length; i += BLOCK) {
   const values = reader.advance((end - i) / SR);
   const next = { ...values };
   synth.render(samples, prev, next, i, end);
-  ground.render(samples, prev, next, i, end);
+  ground.render(samples, right, prev, next, i, end);
+  car.render(samples, right, prev, next, i, end);
+  for (let k = i; k < end; k++) samples[k] = softKnee(samples[k]);
   prev = next;
   if (i % (SR / 2) < BLOCK) log.push({ t: tAudio.toFixed(1), rpm: Math.round(next.rpm), gear: values.gear, fuel: next.fuel.toFixed(2), brake: next.exhaustBrake.toFixed(2), spool: synth.spool.toFixed(2), kmh: (values.speed * 3.6).toFixed(0) });
 }

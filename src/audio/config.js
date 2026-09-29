@@ -12,6 +12,7 @@ export const DEFAULT_AUDIO = Object.freeze({
   turbo: 1,
   clatter: 1,
   ground: 1, // tyres, ground and stones
+  car: 1, // driveline, steering, body and wind
 });
 
 export const AUDIO = { ...DEFAULT_AUDIO };
@@ -28,4 +29,4 @@ export function resetAudio() {
   saveAudio();
 }
 
-export const audioMix = () => ({ engine: AUDIO.engine, turbo: AUDIO.turbo, clatter: AUDIO.clatter, ground: AUDIO.ground });
+export const audioMix = () => ({ engine: AUDIO.engine, turbo: AUDIO.turbo, clatter: AUDIO.clatter, ground: AUDIO.ground, car: AUDIO.car });

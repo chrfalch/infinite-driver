@@ -12,6 +12,67 @@ import processorUrl from './engine-processor.js?worker&url';
 import { onSettingsSaved } from '../settings-store.js';
 import { AUDIO, AUDIO_KEY, audioMix, saveAudio } from './config.js';
 import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from './engine-presets.js';
+import { panGains } from './mix.js';
+import { wheelMount } from '../vehicle/physics.js';
+
+// Where the car's parts sit (chassis-local metres: +x forward, +z right).
+const EXHAUST = { x: -2.1, y: -0.2, z: 0.55 };
+const ENGINE = { x: 1.3, y: 0.1, z: 0 };
+const BODY = { x: 0, y: 0.2, z: 0 };
+// The orthographic views are far away (about 100 m) but show the car as if from this close (m, at
+// zoom 1); the pan is widened so a car's width is heard (a real 2 m at 14 m would barely move it).
+const APPARENT_DISTANCE = 14;
+const PAN_WIDTH = 3;
+const MAX_PAN = 0.8;
+
+function rotate(q, v) {
+  const { x, y, z, w } = q;
+  const ix = w * v.x + y * v.z - z * v.y;
+  const iy = w * v.y + z * v.x - x * v.z;
+  const iz = w * v.z + x * v.y - y * v.x;
+  const iw = -x * v.x - y * v.y - z * v.z;
+  return { x: ix * w + iw * -x + iy * -z - iz * -y, y: iy * w + iw * -y + iz * -x - ix * -z, z: iz * w + iw * -z + ix * -y - iy * -x };
+}
+
+// Where each part is heard from the camera: { exhaust, body, wheels } of { l, r } gains.
+export function listenerPositions(camera, vehicle, out = { exhaust: {}, body: {}, wheels: [{}, {}, {}, {}] }) {
+  const p = vehicle.body.translation();
+  const q = vehicle.body.rotation();
+  camera.updateMatrixWorld?.();
+  const e = camera.matrixWorld.elements;
+  const right = { x: e[0], y: e[1], z: e[2] };
+  const cam = { x: e[12], y: e[13], z: e[14] };
+  // The listener: toward the camera from the car, at the distance the view shows it from.
+  let dx = cam.x - p.x;
+  let dy = cam.y - p.y;
+  let dz = cam.z - p.z;
+  const far = Math.hypot(dx, dy, dz) || 1;
+  const distance = camera.isOrthographicCamera ? APPARENT_DISTANCE / (camera.zoom || 1) : far;
+  dx = (dx / far) * distance;
+  dy = (dy / far) * distance;
+  dz = (dz / far) * distance;
+  const ear = { x: p.x + dx, y: p.y + dy, z: p.z + dz };
+  const place = (local, target) => {
+    const o = rotate(q, local);
+    const sx = p.x + o.x - ear.x;
+    const sy = p.y + o.y - ear.y;
+    const sz = p.z + o.z - ear.z;
+    const d = Math.hypot(sx, sy, sz) || 1;
+    const lateral = (sx * right.x + sy * right.y + sz * right.z) / d;
+    const pan = Math.max(-MAX_PAN, Math.min(MAX_PAN, lateral * PAN_WIDTH));
+    // Nearer is louder, gently (1 at the default view).
+    const gain = Math.max(0.3, Math.min(1.3, (APPARENT_DISTANCE + 4) / (d + 4)));
+    return panGains(pan, gain, target);
+  };
+  const ex = place(EXHAUST, out.exhaust);
+  const en = place(ENGINE, {});
+  // The engine sound is mostly the exhaust, some from the engine bay.
+  ex.l = 0.7 * ex.l + 0.3 * en.l;
+  ex.r = 0.7 * ex.r + 0.3 * en.r;
+  place(BODY, out.body);
+  for (let i = 0; i < 4; i++) place(wheelMount(i), out.wheels[i]);
+  return out;
+}
 
 // The engine sound picked in the settings.
 export const currentPreset = () => ENGINE_PRESETS[AUDIO.engineType] ?? TURBO_DIESEL_V8;
@@ -208,7 +269,8 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
 
   // Per frame: stones thrown and landing (soil.sounds, taken and cleared), and the engine's state
   // when the worklet cannot read the shared feed.
-  audio.update = (vehicle, soil = null) => {
+  audio.update = (vehicle, soil = null, camera = null) => {
+    if (camera && vehicle?.body && node) node.port.postMessage({ type: 'listener', pos: listenerPositions(camera, vehicle) });
     if (soil?.sounds?.length) {
       if (node && ctx?.state === 'running') {
         node.port.postMessage({ type: 'stones', events: soil.sounds });

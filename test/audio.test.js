@@ -3,6 +3,8 @@ import { AudioFeed, FeedReader, RECORDS, createFeedBuffer } from '../src/audio/f
 import { EngineSynth, LAYERS } from '../src/audio/engine-synth.js';
 import { TURBO_DIESEL_I4, TURBO_DIESEL_V8 } from '../src/audio/engine-presets.js';
 import { GroundSynth } from '../src/audio/ground-synth.js';
+import { panGains, softKnee } from '../src/audio/mix.js';
+import { CarSynth } from '../src/audio/car-synth.js';
 import { surfaceAt, writeWheels, WHEEL_FIELDS } from '../src/audio/wheels.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../src/vehicle/drivetrain.js';
 
@@ -265,7 +267,8 @@ describe('tyres and ground', () => {
   };
   const play = (state, synth = new GroundSynth(SR), seconds = 1) => {
     const out = new Float32Array(SR * seconds);
-    for (let i = 0; i < out.length; i += BLOCK) synth.render(out, state, state, i, i + BLOCK);
+    const right = new Float32Array(SR * seconds);
+    for (let i = 0; i < out.length; i += BLOCK) synth.render(out, right, state, state, i, i + BLOCK);
     return rms(out, SR / 4);
   };
 
@@ -293,9 +296,12 @@ describe('tyres and ground', () => {
   it('stays inside full scale added to a loud engine', () => {
     const synth = new GroundSynth(SR);
     const out = new Float32Array(SR).fill(0.8);
+    const right = new Float32Array(SR).fill(0.8);
     const s = wheels({ ground: 20, roll: 26, slipLong: 6, slipLat: 4, gravel: 1, load: 2 });
-    for (let i = 0; i < out.length; i += BLOCK) synth.render(out, s, s, i, i + BLOCK);
-    for (const x of out) expect(Math.abs(x)).toBeLessThanOrEqual(1);
+    for (let i = 0; i < out.length; i += BLOCK) synth.render(out, right, s, s, i, i + BLOCK);
+    // The worklet's soft knee on the sum.
+    for (const x of out) expect(Math.abs(softKnee(x))).toBeLessThanOrEqual(1);
+    expect(softKnee(0.5)).toBe(0.5);
   });
 
   it('ticks when a thrown stone hits the car, clicks when one lands on rock', () => {
@@ -303,7 +309,8 @@ describe('tyres and ground', () => {
       const synth = new GroundSynth(SR, { ...new GroundSynth(SR).preset, stones: { ...new GroundSynth(SR).preset.stones, hitChance: 1 } });
       synth.event(e);
       const out = new Float32Array(SR / 4);
-      for (let i = 0; i < out.length; i += BLOCK) synth.render(out, wheels({ contact: 0 }), wheels({ contact: 0 }), i, i + BLOCK);
+      const right = new Float32Array(SR / 4);
+      for (let i = 0; i < out.length; i += BLOCK) synth.render(out, right, wheels({ contact: 0 }), wheels({ contact: 0 }), i, i + BLOCK);
       expect(Math.max(...out.map(Math.abs)), e.kind).toBeGreaterThan(0.02);
     }
   });
@@ -368,15 +375,77 @@ describe('hits', () => {
     const peak = (a, b) => {
       const g = new GroundSynth(SR);
       const out = new Float32Array(SR / 4);
+      const right = new Float32Array(SR / 4);
       let s = a;
       for (let i = 0; i < out.length; i += BLOCK) {
         const next = i >= BLOCK * 4 ? b : a;
-        g.render(out, s, next, i, i + BLOCK);
+        g.render(out, right, s, next, i, i + BLOCK);
         s = next;
       }
       return Math.max(...out.map(Math.abs));
     };
     expect(peak({ w0impact: 0 }, { w0impact: 0 })).toBeLessThan(1e-4);
     for (const key of ['w0impact', 'w1bump', 'w2topOut', 'w3rim', 'chassisHits']) expect(peak({ [key]: 5 }, { [key]: 6 }), key).toBeGreaterThan(0.05);
+  });
+});
+
+describe('driveline, steering and body', () => {
+  const base = { rpm: 2400, gear: 3, clutch: 1, shaft: 2, speed: 10, w0roll: 10, w1roll: 10, w2roll: 10, w3roll: 10, w0contact: 1, w1contact: 1 };
+  const play = (state, layers = null, seconds = 1) => {
+    const c = new CarSynth(SR);
+    if (layers) c.setLayers(layers);
+    const L = new Float32Array(SR * seconds);
+    const R = new Float32Array(SR * seconds);
+    for (let i = 0; i < L.length; i += BLOCK) c.render(L, R, state, state, i, i + BLOCK);
+    return L;
+  };
+  const only = (k) => Object.fromEntries(['gearWhine', 'transfer', 'axle', 'clunk', 'shift', 'lock', 'cv', 'pump', 'rattle', 'creak', 'wind'].map((x) => [x, x === k ? 1 : 0]));
+
+  it('whines at engine speed × gearbox teeth, most in reverse', () => {
+    const x = play(base, only('gearWhine')).subarray(SR / 2);
+    const f = (2400 / 60) * 23;
+    expect(power(x, f)).toBeGreaterThan(power(x, f * 1.13) * 20);
+    const reverse = rms(play({ ...base, gear: -1 }, only('gearWhine')), SR / 2);
+    expect(reverse).toBeGreaterThan(rms(play(base, only('gearWhine')), SR / 2) * 3);
+  });
+
+  it('whines from the transfer case only in low range', () => {
+    expect(rms(play(base, only('transfer')), SR / 2)).toBeLessThan(1e-5);
+    expect(rms(play({ ...base, low: 1 }, only('transfer')), SR / 2)).toBeGreaterThan(0.005);
+  });
+
+  it('clicks at full lock under drive, not straight ahead', () => {
+    expect(rms(play({ ...base, steer: 0 }, only('cv')), SR / 2)).toBeLessThan(1e-5);
+    expect(rms(play({ ...base, steer: 1 }, only('cv')), SR / 2)).toBeGreaterThan(0.002);
+  });
+
+  it('blows louder the faster it goes', () => {
+    const slow = rms(play({ ...base, speed: 8 }, only('wind')), SR / 2);
+    const fast = rms(play({ ...base, speed: 28 }, only('wind')), SR / 2);
+    expect(fast).toBeGreaterThan(slow * 5);
+  });
+
+  it('clunks on backlash, a shift and a diff lock', () => {
+    for (const [a, b] of [[{ clunks: 1 }, { clunks: 2 }], [{ gear: 1 }, { gear: 2 }], [{ locks: 0 }, { locks: 1 }]]) {
+      const c = new CarSynth(SR);
+      const L = new Float32Array(SR / 4);
+      const R = new Float32Array(SR / 4);
+      let s = a;
+      for (let i = 0; i < L.length; i += BLOCK) {
+        const next = i >= BLOCK * 4 ? b : a;
+        c.render(L, R, s, next, i, i + BLOCK);
+        s = next;
+      }
+      expect(Math.max(...L.map(Math.abs)), JSON.stringify(b)).toBeGreaterThan(0.05);
+    }
+  });
+
+  it('pans with equal power, as loud as mono in the middle', () => {
+    const mid = panGains(0);
+    expect(mid.l).toBeCloseTo(1, 6);
+    expect(mid.r).toBeCloseTo(1, 6);
+    const left = panGains(-1);
+    expect(left.r).toBeCloseTo(0, 6);
+    expect(left.l ** 2 + left.r ** 2).toBeCloseTo(2, 6);
   });
 });

@@ -8,6 +8,7 @@ import { AudioFeed, createFeedBuffer } from '../audio/feed.js';
 import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from '../audio/engine-presets.js';
 import { LAYERS } from '../audio/engine-synth.js';
 import { GROUND_LAYERS, GROUND_SOUND } from '../audio/ground-synth.js';
+import { CAR_LAYERS, CAR_SOUND } from '../audio/car-synth.js';
 import { changedFrom, loadSettings, saveSettings } from '../settings-store.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../vehicle/drivetrain.js';
 
@@ -18,7 +19,8 @@ const DT = 1 / 120;
 const R = 0.46;
 const MASS = 1800;
 
-const LAB = { mode: 'drive', rpm: 850, fuel: 0.13, exhaustBrake: 0, throttle: false, coastStop: 1, surface: 'gravel road', slide: 0, wheelspin: 0, stoneHits: 0, scrape: false };
+const LAB = { mode: 'drive', rpm: 850, fuel: 0.13, exhaustBrake: 0, throttle: false, coastStop: 1, surface: 'gravel road', slide: 0, wheelspin: 0, stoneHits: 0, scrape: false, steer: 0, low: false, locks: 0, heave: 0, twist: 0 };
+const labShake = { heave: 0, twist: 0 };
 
 // The ground under the lab's car (as the worlds' height fields answer surfaceAt in wheels.js).
 const SURFACES = {
@@ -97,6 +99,12 @@ for (const [key, label] of [
   ['rim', 'Hit: rim strike'],
   ['chassis', 'Hit: chassis on a rock'],
 ]) tyres.add({ [key]: () => hitNow.add(key) }, key).name(label);
+const carControls = gui.addFolder('Driveline and body (drive, rev)');
+carControls.add(LAB, 'steer', -1, 1, 0.01).name('Steering (±1 = full lock)');
+carControls.add(LAB, 'low').name('Low range');
+carControls.add(LAB, 'locks', 0, 3, 1).name('Diffs locked');
+carControls.add(LAB, 'heave', 0, 30, 0.1).name('Body shaking (m/s²)');
+carControls.add(LAB, 'twist', 0, 60, 0.5).name('Body twisting (rad/s²)');
 const levels = gui.addFolder('Levels');
 levels.add(AUDIO, 'enabled').name('Sound on (M)').onChange(saveAudio).listen();
 levels.add(AUDIO, 'volume', 0, 1, 0.01).name('Volume').onChange(saveAudio);
@@ -104,6 +112,7 @@ levels.add(AUDIO, 'engine', 0, 2, 0.05).name('Engine ×').onChange(saveAudio);
 levels.add(AUDIO, 'turbo', 0, 3, 0.05).name('Turbo whistle ×').onChange(saveAudio);
 levels.add(AUDIO, 'clatter', 0, 3, 0.05).name('Diesel clatter ×').onChange(saveAudio);
 levels.add(AUDIO, 'ground', 0, 3, 0.05).name('Tyres & ground ×').onChange(saveAudio);
+levels.add(AUDIO, 'car', 0, 3, 0.05).name('Driveline, body & wind ×').onChange(saveAudio);
 
 // The engine model itself, live: every change goes to the worklet and is kept in this browser.
 // "Copy preset changes" puts the changed values on the clipboard, to paste into engine-presets.js.
@@ -211,16 +220,23 @@ const LAYER_NAMES = {
 // others at runtime without changing the preset.
 const soloChoice = { solo: 'none' };
 const groundSolo = { solo: 'none' };
+const carSolo = { solo: 'none' };
+// Any solo mutes every other part, engine, ground and car alike.
+const sendAllLayers = () => {
+  sendLayers();
+  sendGroundLayers();
+  sendCarLayers();
+};
 const sendLayers = () => {
   // A tyre or ground solo mutes the whole engine.
-  const values = Object.fromEntries(Object.keys(LAYERS).map((k) => [k, (soloChoice.solo === 'none' && groundSolo.solo === 'none') || k === soloChoice.solo ? 1 : 0]));
+  const values = Object.fromEntries(Object.keys(LAYERS).map((k) => [k, (soloChoice.solo === 'none' && groundSolo.solo === 'none' && carSolo.solo === 'none') || k === soloChoice.solo ? 1 : 0]));
   audio.node?.port.postMessage({ type: 'layers', values });
 };
 const layerFolder = gui.addFolder('Layers');
 layerFolder.add(soloChoice, 'solo', { 'none (all)': 'none', ...Object.fromEntries(Object.entries(LAYER_NAMES).map(([k, name]) => [name, k])) }).name('Solo').onChange(() => {
   groundSolo.solo = 'none';
-  sendLayers();
-  sendGroundLayers();
+  carSolo.solo = 'none';
+  sendAllLayers();
 }).listen();
 for (const [key, name] of Object.entries(LAYER_NAMES)) layerFolder.add(preset.layers, key, 0, 2, 0.01).name(name).onChange(sendPreset).listen();
 layerFolder
@@ -235,7 +251,7 @@ const sendGround = () => {
 };
 const sendGroundLayers = () => {
   // An engine solo mutes the tyres and ground.
-  const values = Object.fromEntries(Object.keys(GROUND_LAYERS).map((k) => [k, (groundSolo.solo === 'none' && soloChoice.solo === 'none') || k === groundSolo.solo ? 1 : 0]));
+  const values = Object.fromEntries(Object.keys(GROUND_LAYERS).map((k) => [k, (groundSolo.solo === 'none' && soloChoice.solo === 'none' && carSolo.solo === 'none') || k === groundSolo.solo ? 1 : 0]));
   audio.node?.port.postMessage({ type: 'groundLayers', values });
 };
 const GROUND_NAMES = {
@@ -258,8 +274,8 @@ const GROUND_NAMES = {
 const groundFolder = gui.addFolder('Tyre and ground layers');
 groundFolder.add(groundSolo, 'solo', { 'none (all)': 'none', ...Object.fromEntries(Object.entries(GROUND_NAMES).map(([k, name]) => [name, k])) }).name('Solo').onChange(() => {
   soloChoice.solo = 'none';
-  sendLayers();
-  sendGroundLayers();
+  carSolo.solo = 'none';
+  sendAllLayers();
 }).listen();
 for (const [key, name] of Object.entries(GROUND_NAMES)) groundFolder.add(ground.layers, key, 0, 3, 0.01).name(name).onChange(sendGround).listen();
 const groundModel = groundFolder.addFolder('Ground model');
@@ -297,10 +313,69 @@ for (const [obj, key, min, max, step, label] of [
 ]) groundModel.add(obj, key, min, max, step).name(label).onChange(sendGround).listen();
 groundModel.close();
 
+// The driveline, steering and body: layers and main levels, live, kept and copied like the others.
+const CAR_KEY = 'drift.enginelab.car.v1';
+const carSound = merge(clone(CAR_SOUND), loadSettings(CAR_KEY));
+const sendCar = () => {
+  audio.node?.port.postMessage({ type: 'carPreset', preset: clone(carSound) });
+  saveSettings(CAR_KEY, CAR_SOUND, carSound);
+};
+const sendCarLayers = () => {
+  const anySolo = soloChoice.solo !== 'none' || groundSolo.solo !== 'none';
+  const values = Object.fromEntries(Object.keys(CAR_LAYERS).map((k) => [k, (!anySolo && carSolo.solo === 'none') || k === carSolo.solo ? 1 : 0]));
+  audio.node?.port.postMessage({ type: 'carLayers', values });
+};
+const CAR_NAMES = {
+  gearWhine: 'Gearbox whine',
+  transfer: 'Transfer case (low range)',
+  axle: 'Axle whine',
+  clunk: 'Driveline clunk',
+  shift: 'Gear shift',
+  lock: 'Diff lock',
+  cv: 'CV joint clicks',
+  pump: 'Power steering pump',
+  rattle: 'Rattles',
+  creak: 'Creaks',
+  wind: 'Wind',
+};
+const carFolder = gui.addFolder('Driveline and body layers');
+carFolder.add(carSolo, 'solo', { 'none (all)': 'none', ...Object.fromEntries(Object.entries(CAR_NAMES).map(([k, name]) => [name, k])) }).name('Solo').onChange(() => {
+  soloChoice.solo = 'none';
+  groundSolo.solo = 'none';
+  sendAllLayers();
+}).listen();
+for (const [key, name] of Object.entries(CAR_NAMES)) carFolder.add(carSound.layers, key, 0, 3, 0.01).name(name).onChange(sendCar).listen();
+const carModel = carFolder.addFolder('Driveline and body model');
+for (const [obj, key, min, max, step, label] of [
+  [carSound.gearWhine, 'level', 0, 0.1, 0.001, 'Gearbox whine level'],
+  [carSound.gearWhine, 'teeth', 5, 60, 1, 'Gearbox whine teeth'],
+  [carSound.gearWhine, 'reverse', 0, 20, 0.1, 'Reverse whine ×'],
+  [carSound.transfer, 'level', 0, 0.2, 0.001, 'Transfer case level'],
+  [carSound.axle, 'level', 0, 0.1, 0.001, 'Axle whine level'],
+  [carSound.clunk, 'level', 0, 1, 0.01, 'Clunk level'],
+  [carSound.shift, 'level', 0, 1, 0.01, 'Shift level'],
+  [carSound.lock, 'level', 0, 1, 0.01, 'Diff lock level'],
+  [carSound.cv, 'level', 0, 0.3, 0.005, 'CV click level'],
+  [carSound.pump, 'steering', 0, 0.1, 0.001, 'Pump whine when steering'],
+  [carSound.pump, 'groan', 0, 0.3, 0.005, 'Pump groan at full lock'],
+  [carSound.rattle, 'level', 0, 0.5, 0.005, 'Rattle level'],
+  [carSound.rattle, 'perAccel', 0, 30, 0.5, 'Rattles per m/s²'],
+  [carSound.creak, 'level', 0, 0.3, 0.005, 'Creak level'],
+  [carSound.creak, 'f', 100, 2000, 10, 'Creak pitch (Hz)'],
+  [carSound.wind, 'level', 0, 1, 0.01, 'Wind level'],
+  [carSound, 'gain', 0, 3, 0.05, 'Driveline and body gain'],
+]) carModel.add(obj, key, min, max, step).name(label).onChange(sendCar).listen();
+carModel.close();
+
 const presetActions = {
   copy: async () => {
     const groundChanges = changedFrom(GROUND_SOUND, ground);
-    const text = JSON.stringify({ ...changedFrom(BASE, preset), ...(Object.keys(groundChanges).length ? { ground: groundChanges } : {}) }, null, 2);
+    const carChanges = changedFrom(CAR_SOUND, carSound);
+    const text = JSON.stringify(
+      { ...changedFrom(BASE, preset), ...(Object.keys(groundChanges).length ? { ground: groundChanges } : {}), ...(Object.keys(carChanges).length ? { car: carChanges } : {}) },
+      null,
+      2,
+    );
     try {
       await navigator.clipboard.writeText(text);
       copyButton.name('Copied ✓');
@@ -349,12 +424,19 @@ const frame = (now) => {
     }
     simTime += DT;
     applyLabHits();
-    feed.writeStep(simTime, { drivetrain: drive, speed: v, controller: labWheels, contacts: labContacts }, SURFACES[LAB.surface]);
+    drive.params.low = LAB.low;
+    drive.params.centerLock = LAB.locks >= 1;
+    drive.params.rearLock = LAB.locks >= 2;
+    drive.params.frontLock = LAB.locks >= 3;
+    labShake.heave = LAB.heave;
+    labShake.twist = LAB.twist;
+    feed.writeStep(simTime, { drivetrain: drive, speed: v, steer: LAB.steer * 0.62, controller: labWheels, contacts: labContacts, shake: labShake }, SURFACES[LAB.surface]);
   }
   if (audio.node && !presetSent) {
     presetSent = true;
     sendGround();
-    sendGroundLayers();
+    sendCar();
+    sendAllLayers();
     audio.node.port.postMessage({ type: 'preset', preset: clone(preset) });
     sendLayers();
   }

@@ -97,6 +97,7 @@ export class Drivetrain {
     // idle governor and shift blips) and how hard the exhaust brake works (0..1).
     this.fuel = 0;
     this.exhaustBrake = 0;
+    this.shaftTorque = 0; // N·m out of the gearbox (for the driveline's clunk and whine)
   }
 
   get rpm() {
@@ -306,6 +307,7 @@ export class Drivetrain {
 
     // Torque into the gearbox output; reverse flips the sign via the ratio.
     const shaftT = clutchT * ratio * p.efficiency;
+    this.shaftTorque = shaftT;
     const t = this.torques;
     t.fill(0);
     if (shaftT !== 0) {

@@ -19,6 +19,7 @@
 // and scraping (lasting contact while moving).
 import { Svf } from './engine-synth.js';
 import { WHEEL_FIELDS, WHEELS } from './wheels.js';
+import { CENTERED } from './mix.js';
 
 export const GROUND_LAYERS = Object.freeze({
   gravel: 1,
@@ -106,7 +107,6 @@ function rng(seed) {
 }
 
 const MAX_EVENTS = 64;
-const KNEE = 0.85;
 
 export class GroundSynth {
   constructor(sampleRate, preset = GROUND_SOUND, { seed = 777 } = {}) {
@@ -126,6 +126,7 @@ export class GroundSynth {
     this.scrub = new Svf();
     this.spin = new Svf();
     this.hum = new Svf();
+    this.humR = new Svf();
     this.squeal = Array.from({ length: WHEELS }, () => new Svf());
     this.humPhase = new Float64Array(WHEELS);
     this.wobble = new Float64Array(WHEELS);
@@ -155,6 +156,7 @@ export class GroundSynth {
     this.scrub.set(preset.scrub.f, preset.scrub.q, sr);
     this.spin.set(preset.spin.f, 0.7, sr);
     this.hum.set(preset.hum.cutoff, 0.7, sr);
+    this.humR.set(preset.hum.cutoff, 0.7, sr);
     this.air.set(preset.topCut ?? 8000, 0.6, sr);
     const modes = preset.stones.hitModes;
     while (this.hits.length < modes.length) this.hits.push(new Svf());
@@ -195,8 +197,9 @@ export class GroundSynth {
     }
   }
 
-  // Adds the ground sound to out[start..end), the wheels moving from state a to b (feed values).
-  render(out, a, b, start = 0, end = out.length) {
+  // Adds the ground sound to outL/outR[start..end), the wheels moving from state a to b (feed
+  // values). pos: where each wheel and the body are heard (mix.js CENTERED by default).
+  render(outL, outR, a, b, start = 0, end = outL.length, pos = CENTERED) {
     const n = end - start;
     if (n <= 0) return;
     const p = this.preset;
@@ -216,6 +219,11 @@ export class GroundSynth {
     let scrubAmp = 0;
     let spinAmp = 0;
     let fastest = 0;
+    // The shared parts (gravel, soil, rock, scrub, spin, stones landing) are heard where the wheels
+    // making them are.
+    let busL = 0;
+    let busR = 0;
+    let busW = 0;
     const hum = p.hum;
     for (let i = 0; i < WHEELS; i++) {
       const w = this.wheel[i];
@@ -233,6 +241,12 @@ export class GroundSynth {
       const slip = Math.hypot(slipLong, slipLat);
       const press = contact * (0.4 + 0.6 * Math.min(1.5, load));
       fastest = Math.max(fastest, speed * contact);
+      const wp = pos.wheels[i];
+      w.pan = wp;
+      const weight = press * (0.2 + speed + slip);
+      busL += weight * wp.l;
+      busR += weight * wp.r;
+      busW += weight;
 
       gravelRate += contact * gravel * (p.gravel.perMetre * speed + p.gravel.perSlip * Math.max(0, slip - 0.3));
       gravelAmp += press * gravel;
@@ -250,6 +264,14 @@ export class GroundSynth {
       w.squealAmp = p.squeal.level * press * rock * smoothstep(p.squeal.from, p.squeal.full, slip) * L.squeal * this.level;
       this.squeal[i].set(p.squeal.f * (1 + 0.035 * i) + p.squeal.perSlip * slip, p.squeal.q, sr);
     }
+    if (busW > 1e-6) {
+      busL /= busW;
+      busR /= busW;
+    } else {
+      busL = (pos.wheels[0].l + pos.wheels[1].l + pos.wheels[2].l + pos.wheels[3].l) / 4;
+      busR = (pos.wheels[0].r + pos.wheels[1].r + pos.wheels[2].r + pos.wheels[3].r) / 4;
+    }
+    const body = pos.body;
     const level = this.level;
     gravelAmp = (p.gravel.level * gravelAmp * L.gravel * level) / WHEELS;
     crushAmp *= (p.gravel.crush.level * L.gravel * level) / WHEELS;
@@ -277,21 +299,23 @@ export class GroundSynth {
       this.counters[key] = now;
       return last === undefined || now < last ? 0 : now - last;
     };
-    const strike = (kind, strength) => {
+    const strike = (kind, strength, at) => {
       if (strength <= 0) return;
       const spec = p[kind];
       const bank = this.hitBanks[kind];
+      bank.pan = at;
       const a = spec.level * Math.min(spec.max, Math.sqrt(strength)) * L[kind] * level;
       bank.kick = Math.min(spec.level * spec.max * L[kind] * level, bank.kick + a);
       bank.env = Math.max(bank.env, a);
     };
     for (let i = 0; i < WHEELS; i++) {
-      strike('tyreHit', rise(`w${i}impact`));
-      strike('bumpStop', rise(`w${i}bump`));
-      strike('topOut', rise(`w${i}topOut`));
-      strike('rimHit', rise(`w${i}rim`));
+      const at = pos.wheels[i];
+      strike('tyreHit', rise(`w${i}impact`), at);
+      strike('bumpStop', rise(`w${i}bump`), at);
+      strike('topOut', rise(`w${i}topOut`), at);
+      strike('rimHit', rise(`w${i}rim`), at);
     }
-    strike('chassisHit', rise('chassisHits'));
+    strike('chassisHit', rise('chassisHits'), body);
     const scrapeAmp = p.scrape.level * Math.sqrt(Math.min(2, (a.chassisForce + b.chassisForce) / 2 || 0)) * Math.min(1, Math.abs((a.speed + b.speed) / 2 || 0) / p.scrape.fullSpeed) * L.scrape * level;
     const scrapeK = 1 - Math.exp((-2 * Math.PI * p.scrape.rough) / sr);
     const scrapeNorm = 1 / Math.sqrt(scrapeK / (2 - scrapeK) / 3);
@@ -323,24 +347,33 @@ export class GroundSynth {
       x += scrubAmp * this.scrub.band;
       x += spinAmp * this.spin.tick(noise2) * 2;
 
-      // Tread hum and squeal, per wheel.
-      let tread = 0;
+      // Tread hum and squeal, per wheel, each where its wheel is.
+      let treadL = 0;
+      let treadR = 0;
+      let xl = 0;
+      let xr = 0;
       for (let i = 0; i < WHEELS; i++) {
         const w = this.wheel[i];
         if (w.humAmp > 0) {
           this.humPhase[i] += w.humF * dt;
           if (this.humPhase[i] >= 1) this.humPhase[i] -= 1;
           // A saw: the blocks strike and release.
-          tread += w.humAmp * (2 * this.humPhase[i] - 1);
+          const saw = w.humAmp * (2 * this.humPhase[i] - 1);
+          treadL += saw * w.pan.l;
+          treadR += saw * w.pan.r;
         }
         if (w.squealAmp > 0) {
           this.wobble[i] += (r() * 2 - 1) * 0.02;
           this.wobble[i] *= 0.999;
           this.squeal[i].tick(noise * (1 + this.wobble[i]));
-          x += w.squealAmp * this.squeal[i].band * 0.6;
+          const sq = w.squealAmp * this.squeal[i].band * 0.6;
+          xl += sq * w.pan.l;
+          xr += sq * w.pan.r;
         }
       }
-      x += this.hum.tick(tread);
+      xl += this.hum.tick(treadL);
+      xr += this.humR.tick(treadR);
+      let xb = 0; // heard at the body
 
       // Stone events due now.
       let hit = 0;
@@ -357,7 +390,7 @@ export class GroundSynth {
       }
       for (let m = 0; m < this.hits.length; m++) {
         this.hits[m].tick(hit * 2.5);
-        x += this.hits[m].band * hitAmp;
+        xb += this.hits[m].band * hitAmp;
       }
       this.landMode.tick(land * 6);
       x += this.landMode.band * landAmp;
@@ -376,28 +409,29 @@ export class GroundSynth {
           ring += bank.modes[m].band * spec.modes[m].gain;
         }
         bank.burst.tick(bank.env * noise2);
-        x += ring + bank.burst.band;
+        const at = bank.pan ?? body;
+        xl += (ring + bank.burst.band) * at.l;
+        xr += (ring + bank.burst.band) * at.r;
         bank.env *= burstDecay[kind];
         bank.ringing = Math.abs(ring) > 1e-6 || kick !== 0;
       }
       if (scrapeAmp > 0) {
         this.scrapeShake += (noise - this.scrapeShake) * scrapeK;
         this.scrapeFilter.tick(noise2 * (0.4 + Math.abs(this.scrapeShake) * scrapeNorm));
-        x += scrapeAmp * this.scrapeFilter.band;
+        xb += scrapeAmp * this.scrapeFilter.band;
       }
 
       this.clock++;
-      // Added to the engine; a soft knee keeps the sum inside full scale without touching the
-      // engine's own level below it.
-      const sum = out[start + j] + this.air.tick(x) * p.gain;
-      const m = Math.abs(sum);
-      out[start + j] = m < KNEE ? sum : Math.sign(sum) * (KNEE + (1 - KNEE) * Math.tanh((m - KNEE) / (1 - KNEE)));
+      // The shared parts through the top cut, then everything added where it is heard.
+      const shared = this.air.tick(x) * p.gain;
+      outL[start + j] += shared * busL + (xb * body.l + xl) * p.gain;
+      outR[start + j] += shared * busR + (xb * body.r + xr) * p.gain;
     }
-    if (!Number.isFinite(out[end - 1])) this.recover(out, start, end);
+    if (!Number.isFinite(outL[end - 1]) || !Number.isFinite(outR[end - 1])) this.recover(outL, outR, start, end);
   }
 
-  recover(out, start, end) {
-    for (const f of [this.air, this.crush, this.thump, ...this.cracks, this.soil, this.rock, this.scrub, this.spin, this.hum, this.landMode, ...this.squeal, ...this.hits]) f.ic1 = f.ic2 = 0;
+  recover(outL, outR, start, end) {
+    for (const f of [this.humR, this.air, this.crush, this.thump, ...this.cracks, this.soil, this.rock, this.scrub, this.spin, this.hum, this.landMode, ...this.squeal, ...this.hits]) f.ic1 = f.ic2 = 0;
     this.crackEnv.fill(0);
     for (const bank of Object.values(this.hitBanks)) {
       for (const f of [bank.burst, ...bank.modes]) f.ic1 = f.ic2 = 0;
@@ -407,7 +441,8 @@ export class GroundSynth {
     this.crushShake = 0;
     this.wobble.fill(0);
     this.events.length = 0;
-    out.fill(0, start, end);
+    outL.fill(0, start, end);
+    outR.fill(0, start, end);
   }
 }
 
