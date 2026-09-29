@@ -51,7 +51,8 @@ export function createColliderStreamer({ rapier, world: physicsWorld, ecs, RockF
 
   function buildGround(c) {
     const heights = sampleChunk(heightAt, c.cx, c.cz);
-    const desc = rapier.ColliderDesc.trimesh(chunkVertices(heights, c.cx, c.cz), chunkIndices()).setFriction(1.0);
+    // The chassis slides easily on snow.
+    const desc = rapier.ColliderDesc.trimesh(chunkVertices(heights, c.cx, c.cz), chunkIndices()).setFriction(heightAt.snow?.chassisFriction ?? 1.0);
     c.ground = physicsWorld.createCollider(desc);
   }
 

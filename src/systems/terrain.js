@@ -106,7 +106,8 @@ function chunkVertices(heights, cx, cz, size = CHUNK_SIZE, res = CHUNK_RES) {
 // Ground trimesh collider. Soft bodies collide with triangle meshes but not heightfields.
 function addGroundCollider(physics, chunk) {
   const { rapier, world } = physics;
-  const desc = rapier.ColliderDesc.trimesh(chunkVertices(chunk.heights, chunk.cx, chunk.cz), chunkIndices()).setFriction(1.0);
+  // The chassis slides easily on snow.
+  const desc = rapier.ColliderDesc.trimesh(chunkVertices(chunk.heights, chunk.cx, chunk.cz), chunkIndices()).setFriction(chunk.heightAt.snow?.chassisFriction ?? 1.0);
   chunk.collider = world.createCollider(desc);
   chunk.collidersEnabled = true;
   // The dry river's rock sheet lies on top of the ground (all bands at once here; the physics

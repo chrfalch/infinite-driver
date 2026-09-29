@@ -32,7 +32,8 @@ const RECENTRE = 1; // metres the car may drift from the grid centre before it i
 // matches the deformation map, so ruts are read cell for cell. The grid only moves when the car is
 // RECENTRE metres off its centre (terrain heights of the overlap are kept), and rut changes are
 // patched in from the deformation's dirty rectangle, so most frames do little or nothing. Each cell
-// also carries a bare-rock flag (heightAt.rockAt; the dry river's rock sheet) for the solver.
+// also carries a bare-rock flag (heightAt.rockAt; the dry river's rock sheet) for the solver, or on
+// snow how packed the snow is (see snowPacking).
 export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell = 0.125) {
   const N = GROUND_N;
   const half = ((N - 1) * cell) / 2;
@@ -100,6 +101,7 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
       // The whole grid is fresh, so restart the deformation's change tracking.
       deformation.changedSince(version);
     }
+    if (heightAt.snow) snowPacking(g, heightAt.snow, 0, 0, N - 1, N - 1);
   } else {
     // Same grid, the ruts changed: refresh only the changed cells inside it.
     const r = deformation.changedSince(g.version);
@@ -118,11 +120,25 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
       heights.set(g.base.subarray(o, o + nx), o);
     }
     deformation.accumulate(g.ix0 + x0, g.iz0 + z0, nx, z1 - z0 + 1, heights, N, z0 * N + x0);
+    if (heightAt.snow) snowPacking(g, heightAt.snow, x0, z0, x1, z1);
   }
   g.version = version;
   solver.setGround(g.grid, g.ix0 * cell, g.iz0 * cell, cell);
   solver.groundReady = true;
   solver.groundVersion = version;
+}
+
+// Snow: the grid's second channel over cells [x0..x1] x [z0..z1] is how far the snow there is
+// packed, 0 (fresh) to 1 (a rut SNOW.packDepth deep). Snow piled up beside a rut stays fresh.
+export function snowPacking(g, snow, x0, z0, x1, z1) {
+  const N = GROUND_N;
+  const { base, heights, grid } = g;
+  for (let iz = z0; iz <= z1; iz++) {
+    for (let ix = x0; ix <= x1; ix++) {
+      const i = iz * N + ix;
+      grid[N * N + i] = Math.min(1, Math.max(0, (base[i] - heights[i]) / snow.packDepth));
+    }
+  }
 }
 
 // Ground height (terrain plus ruts) at (x, z) from the solver's grid, interpolated on the same

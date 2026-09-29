@@ -50,6 +50,8 @@ const Params = d.struct({
   radius: d.f32,
   relaxation: d.f32,
   soilStiffness: d.f32, // N/m per particle; 0 = hard ground
+  snow: d.f32, // 1: the grid's second channel is snow packing (0 fresh .. 1 packed), not rock flags
+  packedStiffness: d.f32, // N/m per particle, fully packed snow
   pressureLead: d.f32, // substeps of wheel spin the pressure normal is turned ahead
   groundStiffness: d.f32, // N/m per particle, hard ground and rocks
   groundDamping: d.f32, // N·s/m per particle
@@ -229,7 +231,7 @@ export class GpuTireSolver {
       }
       return normalize(vec3f(-sx, 1.0, -sz));
     }`.$uses({ params: this.params, ground: this.ground });
-    // 1 on bare rock (the nearest grid cell's flag), else 0.
+    // The nearest grid cell's second channel: 1 on bare rock, else 0 (on snow: how packed, 0..1).
     const groundRock = tgpu.fn([d.f32, d.f32], d.f32)/* wgsl */ `(x, z) {
       let last = f32(${GROUND_N - 1});
       let ix = u32(clamp(round((x - params.groundOriginX) / params.groundCell), 0.0, last));
@@ -277,14 +279,18 @@ export class GpuTireSolver {
     // vTrial is the particle velocity after all other forces this substep.
     const contactForce = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32], d.vec3f)/* wgsl */ `(x, vTrial, m, dt) {
       var f = vec3f(0.0);
-      // Bare rock does not give like soil.
-      let soft = params.soilStiffness > 0.0 && groundRock(x.x, x.z) < 0.5;
+      // Bare rock does not give like soil. Snow gives, less as it packs: from the soft fresh-snow
+      // spring to one as firm as hard ground (squared, so it firms up late, near the rut's floor).
+      let surf = groundRock(x.x, x.z);
+      let snowy = params.snow > 0.5;
+      let soft = params.soilStiffness > 0.0 && (snowy || surf < 0.5);
+      let soilK = select(params.soilStiffness, mix(params.soilStiffness, params.packedStiffness, surf * surf), snowy);
       // The ground pushes along its normal (the triangle's slope), by the depth along it: on a steep
       // face a straight-up push let a tyre pressed sideways sink into the rock.
       let gn = groundNormal(x.x, x.z);
       let depth = (groundHeight(x.x, x.z) + params.radius - x.y) * gn.y;
       if (depth > 0.0) {
-        var push = select(params.groundStiffness, params.soilStiffness, soft) * depth;
+        var push = select(params.groundStiffness, soilK, soft) * depth;
         let vn0 = dot(vTrial, gn);
         if (soft && vn0 > 0.0) {
           // Soil pushes back fully while compressed, only partly as the tread lifts (it absorbs energy).
@@ -328,7 +334,7 @@ export class GpuTireSolver {
     // contact springs normally hold it).
     const floorClamp = tgpu.fn([d.vec3f], d.vec3f)/* wgsl */ `(pIn) {
       var p = pIn;
-      let floorDepth = select(params.rockFloor, params.maxSink, params.soilStiffness > 0.0 && groundRock(p.x, p.z) < 0.5);
+      let floorDepth = select(params.rockFloor, params.maxSink, params.soilStiffness > 0.0 && (params.snow > 0.5 || groundRock(p.x, p.z) < 0.5));
       let floor = groundHeight(p.x, p.z) + params.radius - floorDepth;
       if (p.y < floor) { p.y = floor; }
       return p;
@@ -542,7 +548,9 @@ export class GpuTireSolver {
             let moved = p - pr.xyz;
             let slide = moved - gn * dot(moved, gn);
             let len = length(slide);
-            let mu = select(params.friction, params.rockFriction, groundRock(p.x, p.z) > 0.5);
+            // On snow, rockFriction is the grip on fully packed snow, blended in as it packs.
+            let surfF = groundRock(p.x, p.z);
+            let mu = select(select(params.friction, params.rockFriction, surfF > 0.5), mix(params.friction, params.rockFriction, surfF), params.snow > 0.5);
             let limit = mu * push * dt * dt / m;
             var cut = slide;
             if (len > limit) { cut = slide * (limit / len); }
@@ -717,6 +725,8 @@ export class GpuTireSolver {
       relaxation: s.relaxation,
       // Soft ground is an explicit soil spring, capped below the stability limit for this substep.
       soilStiffness: s.soilStiffness > 0 ? Math.min(s.soilStiffness, (3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)) : 0,
+      snow: s.snow ?? 0,
+      packedStiffness: Math.min(s.packedStiffness ?? 0, (3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)),
       soilRebound: s.soilRebound ?? 0.35,
       pressureLead: s.pressureLead ?? 1,
       // Hard ground and rocks: the stiffest contact spring the substep allows, lightly damped.

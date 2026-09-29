@@ -1,6 +1,6 @@
 import { Deformation, HeightField, IsPlayer, Time, Tracks, Vehicle } from '../ecs/traits.js';
 import { compactSoil } from '../terrain/deformation.js';
-import { GROUND, TIRE } from '../tire/config.js';
+import { GPU_TIRE, GROUND, TIRE, currentSnow } from '../tire/config.js';
 import { gpuGroundHeight } from '../tire/gpu-tires.js';
 import { CAR } from '../vehicle/config.js';
 import { count, sample } from '../perf.js';
@@ -41,7 +41,9 @@ export function updateTracks(world) {
   const tracks = trackState.renderer;
   if (!tracks) return;
   trackState.contacts.fill(null);
-  tracks.mesh.visible = GROUND.tracks;
+  // On snow the ruts are drawn by the snow surface itself (render/snow-surface.js).
+  const snow = currentSnow();
+  tracks.mesh.visible = GROUND.tracks && !snow;
   const car = world.queryFirst(IsPlayer, Vehicle);
   if (!car) return;
   const { heightAt, surfaceAt } = world.get(HeightField);
@@ -112,7 +114,7 @@ export function updateTracks(world) {
     }
     // Deeper sinking and softer soil leave darker tracks.
     const strength = Math.min(1, 0.25 + contact.depth * 5 + softness * 0.5);
-    if (GROUND.tracks) tracks.add(i, heightAt, contact, right, width, strength, maxGap);
+    if (GROUND.tracks && !snow) tracks.add(i, heightAt, contact, right, width, strength, maxGap);
   }
   const soilPressed = heightAt.rockAt ? pressed.filter((p) => !heightAt.rockAt(p.x, p.z)) : pressed;
   if (deformation && soilPressed.length) {
@@ -121,6 +123,8 @@ export function updateTracks(world) {
       dt: delta,
       right,
       bermOffset: TIRE.width * 0.5 + 0.1,
+      snow,
+      pressureKpa: solver ? GPU_TIRE.pressureKpa : 100,
     });
   }
   tracks.update(delta);

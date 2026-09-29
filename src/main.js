@@ -33,11 +33,12 @@ import { updateSoil } from './systems/soil.js';
 import { updateBushes } from './systems/vegetation.js';
 import { SoilParticles } from './render/soil-particles.js';
 import { TireTracks } from './render/tracks.js';
-import { GROUND } from './tire/config.js';
+import { GROUND, setSnowCover } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
 import { worldMode } from './world.js';
-import { setTerrainWorld } from './render/terrain-mesh.js';
+import { setSnowPatch, setTerrainWorld } from './render/terrain-mesh.js';
+import { SnowSurface } from './render/snow-surface.js';
 import { applyPendingCarAction, footprint, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
 import { updateInstanceBatchers } from './render/instance-batcher.js';
@@ -66,8 +67,24 @@ async function main() {
     render.scene.background.set('#e4e1d6');
     render.scene.fog.color.set('#e4e1d6');
   }
+  // The snowfield: an overcast-bright winter haze, and light thrown back up off the snow.
+  if (mode === 'snow') {
+    render.scene.background.set('#e6ecf2');
+    render.scene.fog.color.set('#e6ecf2');
+    render.scene.traverse((o) => {
+      if (o.isHemisphereLight) {
+        o.color.set('#eef4ff');
+        o.groundColor.set('#d5dee9');
+      }
+    });
+    render.sun.color.set('#fffaf2');
+  }
   const heightAt = createHeightField({ mode });
+  // The tyres, compaction and spray treat the ground as snow in the snowfield.
+  setSnowCover(heightAt.snow);
   const deformation = new GroundDeformation();
+  const snowSurface = heightAt.snow ? new SnowSurface(render.scene, heightAt, deformation) : null;
+  if (snowSurface) snowSurface.onMove = setSnowPatch;
 
   // Physics runs in a worker (with its own GPU device) for the GPU tyres when the browser has
   // WebGPU in workers; ?physics=main keeps it on this thread. Other tyre modes stay here.
@@ -99,7 +116,8 @@ async function main() {
   const surfaceAt = (x, z) => heightAt(x, z) + deformation.at(x, z);
   world.add(HeightField({ heightAt, surfaceAt }));
   world.add(Deformation({ map: deformation }));
-  world.add(Soil({ particles: new SoilParticles(render.scene), carry: [0, 0, 0, 0], spin: [0, 0, 0, 0] }));
+  // Powder snow hangs in the air longer than clumps of soil, and light shines through it.
+  world.add(Soil({ particles: new SoilParticles(render.scene, heightAt.snow ? { drag: 3, powder: true } : undefined), carry: [0, 0, 0, 0], spin: [0, 0, 0, 0] }));
   world.add(
     Tracks({
       renderer: new TireTracks(render.scene, { segments: GROUND.trackLength, deformation }),
@@ -217,6 +235,7 @@ async function main() {
       timed('sys.syncBrakeLights', () => syncBrakeLights(world));
       timed('sys.updateTracks', () => updateTracks(world));
       timed('sys.updateSoil', () => updateSoil(world));
+      if (snowSurface) timed('sys.snowSurface', () => updateSnowSurface(world, snowSurface));
       timed('sys.updateBushes', () => updateBushes(world));
       orbitCamera(readCameraKeys(), time.delta);
       timed('sys.followCamera', () => followCamera(world));
@@ -250,6 +269,14 @@ async function main() {
     heightAt,
     traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig, RockField },
   };
+}
+
+// The snow surface follows the car and picks up the new ruts.
+function updateSnowSurface(world, snowSurface) {
+  const car = world.queryFirst(IsPlayer, Vehicle);
+  if (!car) return;
+  const p = car.get(Vehicle).body.translation();
+  snowSurface.update(p.x, p.z);
 }
 
 // Worker physics: the draw side keeps its own copy of the tyre solver's ground grid (for the

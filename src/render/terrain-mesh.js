@@ -1,6 +1,6 @@
 import { createNoise2D } from 'simplex-noise';
 import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, dot, exp, fract, fwidth, mix, positionWorld, sin, smoothstep, uniform, vec2, vec3, vec4 } from 'three/tsl';
+import { attribute, dot, exp, fract, fwidth, mix, positionLocal, positionWorld, sin, smoothstep, step, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import { gravelShade } from '../terrain/gravel.js';
 import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
@@ -50,9 +50,20 @@ const strata = mix(redStrata, yellowStrata, sandstone);
 const seam = smoothstep(0.86, 0.97, fract(layer)).mul(0.25);
 const rock = strata.mul(seam.oneMinus());
 const ground = mix(attribute('color', 'vec3'), rock, attribute('steep', 'float'));
+// Fresh snow, per pixel: bright, faintly blue, with wind ripples and a fine sparkle of grains. The
+// snow surface near the car (render/snow-surface.js) uses the same, so the two meet unseen.
+const snowHash = (p) => fract(sin(dot(p, vec2(12.9898, 78.233))).mul(43758.5453));
+const snowRipple = sin(positionWorld.x.mul(2.3).add(sin(positionWorld.z.mul(0.7)).mul(1.8))).mul(0.5).add(0.5);
+const snowGrain = snowHash(positionWorld.xz.div(0.04).floor());
+export const freshSnowColor = mix(vec3(0.86, 0.9, 0.95), vec3(0.93, 0.95, 0.98), snowRipple.mul(0.6).add(snowGrain.mul(0.4)));
+const snowWorld = uniform(0);
 terrainMaterial.colorNode = vec4(
-  mix(ground, roadColor, roadMask).mul(
-    mix(vec3(1), gravelShade(), gravelAmount.clamp(0, 1).sqrt().mul(attribute('gravel', 'float'))),
+  mix(
+    mix(ground, roadColor, roadMask).mul(
+      mix(vec3(1), gravelShade(), gravelAmount.clamp(0, 1).sqrt().mul(attribute('gravel', 'float'))),
+    ),
+    freshSnowColor,
+    snowWorld,
   ),
   1,
 );
@@ -60,6 +71,20 @@ terrainMaterial.colorNode = vec4(
 // The world's rock colours for the shader (steep faces): red sandstone, or yellow for the river.
 export function setTerrainWorld(world) {
   sandstone.value = world === 'river' ? 1 : 0;
+  snowWorld.value = world === 'snow' ? 1 : 0;
+}
+
+// On snow the fine snow surface (render/snow-surface.js) draws the ground near the car, with its
+// ruts. The terrain mesh inside that square sinks out of sight under it; the vertices on its edge
+// stay, so the two meet there.
+const snowPatch = uniform(vec4(0, 0, -1, -1)); // x0, z0, x1, z1 (m); empty by default
+const insidePatch = step(snowPatch.x.add(0.5), positionLocal.x)
+  .mul(step(positionLocal.x, snowPatch.z.sub(0.5)))
+  .mul(step(snowPatch.y.add(0.5), positionLocal.z))
+  .mul(step(positionLocal.z, snowPatch.w.sub(0.5)));
+terrainMaterial.positionNode = positionLocal.sub(vec3(0, insidePatch.mul(0.8), 0));
+export function setSnowPatch({ x0, z0, x1, z1 }) {
+  snowPatch.value.set(x0, z0, x1, z1);
 }
 
 const DIRT = new Color('#c2ab82');
@@ -126,6 +151,17 @@ function riverColor(s, slope, x, z, out) {
 }
 const tmp2 = new Color();
 
+// Snowfield palette (the terrain mesh far off; near the car the snow surface draws its own):
+// bright snow with faint blue-grey hollows and wind-blown patches.
+const SNOW_BRIGHT = new Color('#f3f6fa');
+const SNOW_SHADE = new Color('#dde5ee');
+function snowColor(h, x, z, out) {
+  const p = patchNoise(x * 0.03, z * 0.03) * 0.6 + patchNoise(x * 0.1, z * 0.1) * 0.4;
+  out.copy(SNOW_BRIGHT).lerp(SNOW_SHADE, Math.min(1, Math.max(0, p * 0.6 + 0.25 - h * 0.4)));
+  out.offsetHSL(0, 0, fineNoise(x * 0.6, z * 0.6) * 0.01);
+  return out;
+}
+
 function slopeAt(heightAt, x, z) {
   const e = 0.5;
   const dx = (heightAt(x + e, z) - heightAt(x - e, z)) / (2 * e);
@@ -135,6 +171,7 @@ function slopeAt(heightAt, x, z) {
 
 // Ground colour at a world position, matching the terrain mesh (used by the tyre tracks and soil).
 export function terrainColorAt(heightAt, x, z, out = new Color()) {
+  if (heightAt.world === 'snow') return snowColor(heightAt(x, z), x, z, out);
   const slope = slopeAt(heightAt, x, z);
   if (heightAt.world === 'river') return riverColor(heightAt.sample(x, z), slope, x, z, out);
   if (heightAt.sample) {
@@ -186,7 +223,8 @@ export function chunkMeshData(heightAt, heights, cx, cz, size = CHUNK_SIZE, res 
       const len = Math.hypot(dx, 1, dz);
       normals.set([-dx / len, 1 / len, -dz / len], i * 3);
       const slope = Math.hypot(dx, dz);
-      if (heightAt.world === 'river') {
+      if (heightAt.world === 'snow') snowColor(h, x, z, tmp);
+      else if (heightAt.world === 'river') {
         // No gravel road paint in the river bed (roadDist stays far): the sand is in the colours.
         riverColor(heightAt.sample(x, z), slope, x, z, tmp);
       } else if (heightAt.sample) {
@@ -195,7 +233,8 @@ export function chunkMeshData(heightAt, heights, cx, cz, size = CHUNK_SIZE, res 
         roadDist[i] = s.dist;
       } else colorFor(h, slope, x, z, tmp);
       colors.set([tmp.r, tmp.g, tmp.b], i * 3);
-      gravel[i] = 1 - Math.min(1, Math.max(0, (slope - 0.4) / 0.4));
+      // No stones under snow.
+      gravel[i] = heightAt.snow ? 0 : 1 - Math.min(1, Math.max(0, (slope - 0.4) / 0.4));
       if (heightAt.sample) steep[i] = Math.min(1, Math.max(0, (slope - 0.55) / 0.5));
     }
   }

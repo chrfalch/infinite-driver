@@ -176,10 +176,16 @@ export class GroundDeformation {
 // Compacts soil under tyre particles. `contacts` is a list of { x, z, depth } where depth is how
 // far the tread is below the (already deformed) surface. Each cell deepens toward a softness-
 // dependent limit, and a share of the displaced soil is pushed up beside the tyre as berms.
-export function compactSoil(deformation, contacts, { softness, dt, right, bermOffset, maxRut = 0.22 }) {
-  if (softness <= 0 || contacts.length === 0) return;
-  const limit = maxRut * softness;
-  const rate = Math.min(1, 6 * softness * dt);
+// Snow (terrain/snow.js) packs by pressure instead: a cell under the tread packs down until it
+// bears the tread's pressure, from nothing for fresh snow to `snow.bearing` kPa for a rut
+// `snow.packDepth` deep (bearing grows with the square of the rut depth). A soft tyre presses on
+// the ground with about its air pressure (the patch grows with the load), so aired-down tyres
+// float higher on snow, as they do for real. A parked car sinks into its ruts, then stops.
+export function compactSoil(deformation, contacts, { softness, dt, right, bermOffset, maxRut = 0.22, snow = null, pressureKpa = 100 }) {
+  if ((!snow && softness <= 0) || contacts.length === 0) return;
+  const limit = snow ? snow.packDepth : maxRut * softness;
+  const rate = Math.min(1, (snow ? snow.packRate : 6 * softness) * dt);
+  const bermShare = snow ? snow.bermShare : 0.18;
   // Deepest press per cell, so many particles on one cell do not stack up.
   const cells = new Map();
   const cell = deformation.cell;
@@ -198,12 +204,16 @@ export function compactSoil(deformation, contacts, { softness, dt, right, bermOf
   }
   for (const c of cells.values()) {
     const current = -deformation.cellValue(c.ix, c.iz);
-    const room = Math.max(0, 1 - current / limit);
-    const dig = c.depth * rate * room;
+    let dig;
+    if (snow) {
+      // Treads only just touching (the patch's edge) press less.
+      const target = limit * Math.min(1, Math.sqrt(pressureKpa / snow.bearing)) * Math.min(1, c.depth / 0.01);
+      dig = (target - current) * rate;
+    } else dig = c.depth * rate * Math.max(0, 1 - current / limit);
     if (dig <= 1e-5) continue;
     deformation.addCell(c.ix, c.iz, -dig);
     // About a third of the soil ends up in low ridges on both sides.
-    const berm = dig * 0.18;
+    const berm = dig * bermShare;
     deformation.add(c.x + right.x * bermOffset, c.z + right.z * bermOffset, berm);
     deformation.add(c.x - right.x * bermOffset, c.z - right.z * bermOffset, berm);
   }

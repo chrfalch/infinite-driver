@@ -107,10 +107,34 @@ export function effectiveTire(tire, performance) {
 // Tyre friction on rock, as a multiple of the tyre's friction setting.
 export const ROCK_GRIP = 2;
 
-export function effectiveGpuTire(gpu, performance, ground = GROUND) {
+// The world's snow (terrain/snow.js), or null on soil. Set once per page (and per worker) from the
+// height field, as the world is fixed for a page load.
+let snowCover = null;
+export function setSnowCover(snow) {
+  snowCover = snow ?? null;
+}
+export function currentSnow() {
+  return snowCover;
+}
+
+export function effectiveGpuTire(gpu, performance, ground = GROUND, snow = snowCover) {
   // Loose soil grips less than firm ground.
   // Bare rock grips better than dusty ground (rubber on sandstone), and soil does not soften it.
-  const withSoil = { ...gpu, soilStiffness: soilStiffness(ground.softness), friction: gpu.friction * (1 - 0.4 * ground.softness), rockFriction: gpu.friction * ROCK_GRIP, gravel: ground.gravel };
+  // On snow the ground grid's second channel is how packed the snow is (0 fresh, 1 packed) instead
+  // of the rock flag: the solver blends from fresh to packed stiffness and grip by it.
+  const withSoil = snow
+    ? {
+        ...gpu,
+        snow: 1,
+        soilStiffness: snow.freshStiffness,
+        packedStiffness: snow.packedStiffness,
+        soilRebound: snow.rebound,
+        friction: gpu.friction * snow.freshGrip,
+        rockFriction: gpu.friction * snow.packedGrip,
+        maxSink: snow.maxSink,
+        gravel: 0,
+      }
+    : { ...gpu, soilStiffness: soilStiffness(ground.softness), friction: gpu.friction * (1 - 0.4 * ground.softness), rockFriction: gpu.friction * ROCK_GRIP, gravel: ground.gravel };
   if (!performance) return withSoil;
   return { ...withSoil, substeps: Math.min(gpu.substeps, 3), iterations: Math.min(gpu.iterations, 6), segmentsAround: 32, segmentsAcross: 8 };
 }

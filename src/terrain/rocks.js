@@ -88,6 +88,8 @@ export function makeRock(heightAt, x, z, size, rand, noise) {
 // Deterministic rocks for one chunk. Each rock has a world transform baked into its vertices.
 export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) {
   if (heightAt.world === 'river') return generateRiverRocks(heightAt, cx, cz, { seed, count });
+  // The snowfield is open snow for now.
+  if (heightAt.world === 'snow') return [];
   const rand = mulberry32(hashChunk(seed, cx, cz));
   const noise = createNoise3D(rand);
   const rocks = [];

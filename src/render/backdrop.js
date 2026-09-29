@@ -14,6 +14,8 @@ const LOOKS = {
   canyon: { horizon: HORIZON, skyTop: SKY_TOP, far: ['#8a3f24', '#e08a52'], near: ['#8a3f24', '#e08a52'], steps: 4, scale: 1 },
   // Dry river: a deeper blue sky, blue-grey forested hills far off and a yellow sandstone escarpment.
   river: { horizon: new Color('#d3dde2'), skyTop: new Color('#2f78cf'), far: ['#56675e', '#8d9c93'], near: ['#5d6148', '#b59a66'], steps: 3, scale: 0.5 },
+  // Snowfield: a pale winter sky over snow-capped ranges, blue-grey rock at their feet.
+  snow: { horizon: new Color('#e6ecf2'), skyTop: new Color('#6f9fd0'), far: ['#aeb8c4', '#f6f8fb'], near: ['#9ea9b6', '#f2f5f8'], steps: 40, scale: 0.8, haze: [0.75, 0.55], glow: 0.45 },
 };
 export function worldLook(world) {
   return LOOKS[world] ?? LOOKS.canyon;
@@ -21,7 +23,7 @@ export function worldLook(world) {
 
 // One ring of mountains: a strip of flat-shaded quads around the target at radius ~r, with a
 // mesa-like skyline (terraced noise), coloured from shadowed red at the foot to lit sandstone.
-function mountainRing({ radius, height, seed, haze, colors: [footColor, topColor], horizon, steps: terraces = 4, segments = 180 }) {
+function mountainRing({ radius, height, seed, haze, colors: [footColor, topColor], horizon, steps: terraces = 4, glow = 0, segments = 180 }) {
   const noise = createNoise2D(mulberry32(seed));
   const rows = 4;
   const positions = [];
@@ -63,7 +65,8 @@ function mountainRing({ radius, height, seed, haze, colors: [footColor, topColor
   geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
   geometry.setAttribute('color', new BufferAttribute(new Float32Array(colors), 3));
   geometry.computeVertexNormals();
-  const material = new MeshLambertMaterial({ vertexColors: true, fog: false, flatShading: true, side: DoubleSide });
+  // `glow`: skylight scattered back off snowfields, so faces away from the sun do not go grey.
+  const material = new MeshLambertMaterial({ vertexColors: true, fog: false, flatShading: true, side: DoubleSide, emissive: horizon.clone().multiplyScalar(glow) });
   return new Mesh(geometry, material);
 }
 
@@ -77,8 +80,9 @@ export function createBackdrop(scene, world = 'canyon') {
   const sky = new Mesh(new SphereGeometry(1500, 32, 16), skyMaterial);
   sky.renderOrder = -2;
   group.add(sky);
-  const far = mountainRing({ radius: 900, height: 170 * look.scale, seed: 5, haze: 0.55, colors: look.far, horizon: look.horizon, steps: look.steps });
-  const near = mountainRing({ radius: 520, height: 110 * look.scale, seed: 11, haze: 0.28, colors: look.near, horizon: look.horizon, steps: look.steps });
+  const [farHaze, nearHaze] = look.haze ?? [0.55, 0.28];
+  const far = mountainRing({ radius: 900, height: 170 * look.scale, seed: 5, haze: farHaze, colors: look.far, horizon: look.horizon, steps: look.steps, glow: look.glow });
+  const near = mountainRing({ radius: 520, height: 110 * look.scale, seed: 11, haze: nearHaze, colors: look.near, horizon: look.horizon, steps: look.steps, glow: look.glow });
   group.add(far, near);
   group.visible = false;
   scene.add(group);
