@@ -79,6 +79,7 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
   const removeButton = button && typeof document !== 'undefined' ? createSoundButton(audio) : () => {};
   if (!Context || typeof AudioWorkletNode === 'undefined' || !globalThis.isSecureContext) {
     audio.state = 'unsupported';
+    console.warn('[sound] unsupported:', { AudioContext: !!Context, AudioWorkletNode: typeof AudioWorkletNode !== 'undefined', secure: globalThis.isSecureContext });
     return audio;
   }
 
@@ -96,8 +97,13 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
     master.gain.linearRampToValueAtTime(value, now + FADE);
   };
 
+  // Each step of starting the sound is logged, so a browser that stays silent shows where it stopped.
+  const log = (...args) => console.info('[sound]', ...args);
+
   async function load() {
+    log('loading the engine worklet', processorUrl);
     await ctx.audioWorklet.addModule(processorUrl);
+    log('worklet loaded');
     const options = { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { mix: audioMix(), preset: audio.preset ?? currentPreset() } };
     try {
       node = new AudioWorkletNode(ctx, 'engine', { ...options, processorOptions: { ...options.processorOptions, feedBuffer: audio.manual ? null : feed.buffer } });
@@ -121,6 +127,7 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
     node.connect(master);
     audio.node = node;
     audio.state = 'running';
+    log('engine playing:', (audio.preset ?? currentPreset()).name, audio.manual ? '(per frame)' : '(shared feed)', 'context', ctx.state, ctx.sampleRate, 'Hz');
     fadeTo(level());
   }
 
@@ -141,6 +148,8 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
       }
       ctx = new Context({ latencyHint: 'interactive' });
       audio.ctx = ctx;
+      log('context created on', lastGesture, '- state', ctx.state);
+      ctx.onstatechange = () => log('context state', ctx.state);
       master = ctx.createGain();
       master.gain.value = 0;
       master.connect(ctx.destination);
@@ -156,11 +165,21 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
         console.warn('Engine sound failed to start', error);
       });
     }
-    if (ctx.state !== 'running' && !document.hidden) ctx.resume().catch((error) => (audio.resumeError = String(error?.message ?? error)));
+    if (ctx.state !== 'running' && !document.hidden) {
+      ctx.resume().then(
+        () => log('resumed on', lastGesture, '- state', ctx.state),
+        (error) => {
+          audio.resumeError = String(error?.message ?? error);
+          log('resume refused on', lastGesture, audio.resumeError);
+        },
+      );
+    }
   }
   audio.unlock = unlock;
 
+  let lastGesture = '';
   const onGesture = (e) => {
+    lastGesture = e.type;
     if (e.type === 'keydown' && e.code === 'KeyM' && !e.repeat && !isTyping(e)) {
       AUDIO.enabled = !AUDIO.enabled;
       saveAudio(); // applies it (below)
