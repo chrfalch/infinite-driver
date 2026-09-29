@@ -3,7 +3,9 @@
 //
 // Per wheel (from the audio feed, see wheels.js): contact, ground speed, tread speed, slip along and
 // across the wheel, load, and the ground's rock and gravel shares.
-//   gravel   many tiny clicks, as many per metre as stones under the tread, more when sliding
+//   gravel   short broadband cracks, each stone at its own pitch (a few loud, most faint), a
+//            grinding crush from stones rubbing under the load, and low thumps over the bigger
+//            ones; more cracks when sliding. (Clicks through two fixed bands sounded like drips.)
 //   soil     soft low noise that opens up with speed
 //   rock     a low road drone
 //   hum      the mud-terrain tread blocks hitting the ground: a tone at wheel speed × blocks
@@ -30,13 +32,20 @@ export const GROUND_LAYERS = Object.freeze({
 export const GROUND_SOUND = Object.freeze({
   name: 'Mud-terrain tyres',
   gravel: {
-    perMetre: 40, // clicks per metre rolled on full gravel
-    perSlip: 90, // extra clicks per second per m/s of sliding
-    level: 0.35,
-    decay: 0.0008, // s, one click
-    high: { f: 3800, q: 1.2 },
-    low: { f: 1300, q: 1.4 },
-    highShare: 0.55,
+    perMetre: 140, // cracks per metre rolled on full gravel
+    perSlip: 260, // extra cracks per second per m/s of sliding
+    level: 0.5,
+    decay: 0.00025, // s, one crack
+    // Each crack rings one of these wide bands, picked at random: no pitch to hear.
+    bands: [
+      { f: 900, q: 0.55 },
+      { f: 1800, q: 0.55 },
+      { f: 3300, q: 0.6 },
+      { f: 5600, q: 0.6 },
+    ],
+    loud: 4, // spread of crack strength: higher, fewer loud ones among many faint
+    crush: { level: 0.35, f: 650, q: 0.6, flutter: 140 }, // grinding: noise at f, shaken at flutter Hz
+    thump: { perMetre: 2.5, level: 0.6, f: 130, q: 1.1 }, // rolling over the bigger stones
   },
   soil: { level: 0.4, f: 220, perSpeed: 30, fullSpeed: 14 }, // f: low-pass Hz + perSpeed × m/s
   rock: { level: 0.3, f: 150, fullSpeed: 15 },
@@ -85,10 +94,11 @@ export class GroundSynth {
     this.effective = { ...GROUND_LAYERS };
     this.level = 1; // the sound settings' tyres & ground level
     this.wheel = Array.from({ length: WHEELS }, () => ({}));
-    this.gravelHigh = new Svf();
-    this.gravelLow = new Svf();
-    this.envHigh = 0;
-    this.envLow = 0;
+    this.cracks = [];
+    this.crackEnv = new Float64Array(8);
+    this.crush = new Svf();
+    this.crushShake = 0;
+    this.thump = new Svf();
     this.soil = new Svf();
     this.rock = new Svf();
     this.scrub = new Svf();
@@ -109,8 +119,11 @@ export class GroundSynth {
     const sr = this.sr;
     this.preset = preset;
     const g = preset.gravel;
-    this.gravelHigh.set(g.high.f, g.high.q, sr);
-    this.gravelLow.set(g.low.f, g.low.q, sr);
+    while (this.cracks.length < g.bands.length) this.cracks.push(new Svf());
+    this.cracks.length = g.bands.length;
+    g.bands.forEach((b, i) => this.cracks[i].set(b.f, b.q, sr));
+    this.crush.set(g.crush.f, g.crush.q, sr);
+    this.thump.set(g.thump.f, g.thump.q, sr);
     this.rock.set(preset.rock.f, 0.7, sr);
     this.scrub.set(preset.scrub.f, preset.scrub.q, sr);
     this.spin.set(preset.spin.f, 0.7, sr);
@@ -159,6 +172,9 @@ export class GroundSynth {
     // Per wheel, from the block's middle: levels of each part, and the tread tone.
     let gravelRate = 0;
     let gravelAmp = 0;
+    let crushAmp = 0;
+    let thumpRate = 0;
+    let thumpPress = 0;
     let soilAmp = 0;
     let rockAmp = 0;
     let scrubAmp = 0;
@@ -184,6 +200,9 @@ export class GroundSynth {
 
       gravelRate += contact * gravel * (p.gravel.perMetre * speed + p.gravel.perSlip * Math.max(0, slip - 0.3));
       gravelAmp += press * gravel;
+      thumpPress += press * gravel;
+      crushAmp += press * gravel * Math.min(1, speed / 10 + Math.max(0, slip - 0.3) / 3);
+      thumpRate += contact * gravel * p.gravel.thump.perMetre * speed;
       soilAmp += press * soil * Math.min(1, speed / p.soil.fullSpeed);
       rockAmp += press * rock * Math.min(1, speed / p.rock.fullSpeed);
       scrubAmp += press * (soil + gravel) * smoothstep(p.scrub.from, p.scrub.full, slip);
@@ -197,6 +216,13 @@ export class GroundSynth {
     }
     const level = this.level;
     gravelAmp = (p.gravel.level * gravelAmp * L.gravel * level) / WHEELS;
+    crushAmp *= (p.gravel.crush.level * L.gravel * level) / WHEELS;
+    const thumpP = Math.min(0.5, thumpRate / sr);
+    const thumpAmp = (p.gravel.thump.level * thumpPress * L.gravel * level) / WHEELS;
+    const shakeK = 1 - Math.exp((-2 * Math.PI * p.gravel.crush.flutter) / sr);
+    const shakeNorm = 1 / Math.sqrt(shakeK / (2 - shakeK) / 3);
+    const bands = this.cracks.length;
+    const loud = p.gravel.loud;
     soilAmp *= (p.soil.level * L.soil * level) / WHEELS;
     rockAmp *= (p.rock.level * L.rock * level) / WHEELS;
     scrubAmp *= (p.scrub.level * L.scrub * level) / WHEELS;
@@ -204,7 +230,6 @@ export class GroundSynth {
     this.soil.set(p.soil.f + p.soil.perSpeed * fastest, 0.7, sr);
     const clickP = Math.min(0.5, gravelRate / sr);
     const decay = Math.exp(-dt / p.gravel.decay);
-    const highShare = p.gravel.highShare;
     const stones = p.stones;
     const hitAmp = L.stoneHits * level;
     const landAmp = L.stoneLand * level;
@@ -214,17 +239,20 @@ export class GroundSynth {
       const noise = r() * 2 - 1;
       const noise2 = r() * 2 - 1;
 
-      // Gravel: each click adds to the high or low band's envelope.
-      if (gravelAmp > 0 && r() < clickP) {
-        const amp = gravelAmp * (0.3 + 0.7 * r());
-        if (r() < highShare) this.envHigh += amp;
-        else this.envLow += amp;
+      // Gravel cracks: each one rings a random band, a few loud among many faint.
+      if (gravelAmp > 0 && r() < clickP) this.crackEnv[(r() * bands) | 0] += gravelAmp * r() ** loud * 3;
+      let x = 0;
+      for (let c = 0; c < bands; c++) {
+        this.cracks[c].tick(this.crackEnv[c] * (c & 1 ? noise2 : noise));
+        x += this.cracks[c].band;
+        this.crackEnv[c] *= decay;
       }
-      this.gravelHigh.tick(this.envHigh * noise);
-      this.gravelLow.tick(this.envLow * noise2);
-      this.envHigh *= decay;
-      this.envLow *= decay;
-      let x = this.gravelHigh.band + this.gravelLow.band;
+      // Crush: noise shaken fast by low-passed noise; and thumps over the bigger stones.
+      this.crushShake += (noise2 - this.crushShake) * shakeK;
+      this.crush.tick(noise * Math.abs(this.crushShake) * shakeNorm);
+      x += crushAmp * this.crush.band;
+      this.thump.tick(thumpAmp > 0 && r() < thumpP ? thumpAmp * (0.4 + 0.6 * r()) * 8 : 0);
+      x += this.thump.band;
 
       x += soilAmp * this.soil.tick(noise2) * 2;
       x += rockAmp * this.rock.tick(noise) * 3;
@@ -282,8 +310,9 @@ export class GroundSynth {
   }
 
   recover(out, start, end) {
-    for (const f of [this.air, this.gravelHigh, this.gravelLow, this.soil, this.rock, this.scrub, this.spin, this.hum, this.landMode, ...this.squeal, ...this.hits]) f.ic1 = f.ic2 = 0;
-    this.envHigh = this.envLow = 0;
+    for (const f of [this.air, this.crush, this.thump, ...this.cracks, this.soil, this.rock, this.scrub, this.spin, this.hum, this.landMode, ...this.squeal, ...this.hits]) f.ic1 = f.ic2 = 0;
+    this.crackEnv.fill(0);
+    this.crushShake = 0;
     this.wobble.fill(0);
     this.events.length = 0;
     out.fill(0, start, end);

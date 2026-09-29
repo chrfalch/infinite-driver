@@ -237,10 +237,16 @@ groundFolder.add(groundSolo, 'solo', { 'none (all)': 'none', ...Object.fromEntri
 for (const [key, name] of Object.entries(GROUND_NAMES)) groundFolder.add(ground.layers, key, 0, 3, 0.01).name(name).onChange(sendGround).listen();
 const groundModel = groundFolder.addFolder('Ground model');
 for (const [obj, key, min, max, step, label] of [
-  [ground.gravel, 'perMetre', 0, 150, 1, 'Gravel clicks per metre'],
-  [ground.gravel, 'decay', 0.0002, 0.004, 0.0001, 'Gravel click length (s)'],
-  [ground.gravel.high, 'f', 800, 9000, 50, 'Gravel high band (Hz)'],
-  [ground.gravel.low, 'f', 200, 4000, 50, 'Gravel low band (Hz)'],
+  [ground.gravel, 'perMetre', 0, 400, 1, 'Gravel cracks per metre'],
+  [ground.gravel, 'decay', 0.00005, 0.002, 0.00001, 'Gravel crack length (s)'],
+  [ground.gravel, 'loud', 1, 10, 0.1, 'Gravel: fewer loud cracks'],
+  [ground.gravel, 'level', 0, 2, 0.01, 'Gravel cracks level'],
+  [ground.gravel.crush, 'level', 0, 2, 0.01, 'Gravel crush level'],
+  [ground.gravel.crush, 'f', 100, 3000, 10, 'Gravel crush band (Hz)'],
+  [ground.gravel.crush, 'flutter', 10, 600, 5, 'Gravel crush shake (Hz)'],
+  [ground.gravel.thump, 'level', 0, 3, 0.01, 'Gravel thump level'],
+  [ground.gravel.thump, 'perMetre', 0, 15, 0.1, 'Gravel thumps per metre'],
+  [ground.gravel.thump, 'f', 40, 400, 5, 'Gravel thump pitch (Hz)'],
   [ground.soil, 'f', 50, 1500, 10, 'Soil low-pass (Hz)'],
   [ground.rock, 'f', 40, 800, 5, 'Rock drone low-pass (Hz)'],
   [ground.hum, 'blocks', 10, 80, 1, 'Tread blocks around'],
