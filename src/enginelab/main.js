@@ -18,7 +18,7 @@ const DT = 1 / 120;
 const R = 0.46;
 const MASS = 1800;
 
-const LAB = { mode: 'drive', rpm: 850, fuel: 0.13, exhaustBrake: 0, throttle: false, coastStop: 1, surface: 'gravel road', slide: 0, wheelspin: 0, stoneHits: 0 };
+const LAB = { mode: 'drive', rpm: 850, fuel: 0.13, exhaustBrake: 0, throttle: false, coastStop: 1, surface: 'gravel road', slide: 0, wheelspin: 0, stoneHits: 0, scrape: false };
 
 // The ground under the lab's car (as the worlds' height fields answer surfaceAt in wheels.js).
 const SURFACES = {
@@ -39,7 +39,20 @@ const labWheels = {
   })),
   rollingRadius: () => 0.43,
   wheelSpin: (i) => (v + (i >= 2 ? LAB.wheelspin : 0)) / 0.43,
+  car: { suspensionRestLength: 0.52, maxSuspensionTravel: 0.36 },
 };
+// Hits from the lab's buttons, played for one physics step as the real car reports them.
+const hitNow = new Set();
+const labContacts = { chassis: 0, rims: [0, 0, 0, 0] };
+function applyLabHits() {
+  const w = labWheels.wheels;
+  w[0].tyreLoad = hitNow.has('tyre') ? 4400 * 3 : 4400;
+  w[1].suspensionLength = hitNow.has('bump') ? 0.52 - 0.36 : hitNow.has('topOut') ? 0.6 : 0.52;
+  w[1].travelSpeed = hitNow.has('bump') ? -1.5 : hitNow.has('topOut') ? 1.2 : 0;
+  labContacts.rims[2] = hitNow.has('rim') ? 8000 : 0;
+  labContacts.chassis = hitNow.has('chassis') ? 9000 : LAB.scrape && v > 0.5 ? 5000 : 0;
+  hitNow.clear();
+}
 const feed = new AudioFeed(createFeedBuffer());
 // The preset is sent below (the lab's tuned copy of BASE), so the settings' pick is not applied.
 const audio = createAudio({ feed, preset: BASE });
@@ -76,6 +89,14 @@ tyres.add(LAB, 'surface', Object.keys(SURFACES)).name('Ground');
 tyres.add(LAB, 'slide', 0, 6, 0.1).name('Slide sideways (m/s)');
 tyres.add(LAB, 'wheelspin', 0, 12, 0.1).name('Rear wheelspin (m/s)');
 tyres.add(LAB, 'stoneHits', 0, 30, 1).name('Stones thrown / s');
+tyres.add(LAB, 'scrape').name('Chassis scraping (when moving)');
+for (const [key, label] of [
+  ['tyre', 'Hit: tyre over a rock edge'],
+  ['bump', 'Hit: bump stop'],
+  ['topOut', 'Hit: full droop (top-out)'],
+  ['rim', 'Hit: rim strike'],
+  ['chassis', 'Hit: chassis on a rock'],
+]) tyres.add({ [key]: () => hitNow.add(key) }, key).name(label);
 const levels = gui.addFolder('Levels');
 levels.add(AUDIO, 'enabled').name('Sound on (M)').onChange(saveAudio).listen();
 levels.add(AUDIO, 'volume', 0, 1, 0.01).name('Volume').onChange(saveAudio);
@@ -227,6 +248,12 @@ const GROUND_NAMES = {
   spin: 'Wheelspin roar',
   stoneHits: 'Stones hitting the car',
   stoneLand: 'Stones landing on rock',
+  tyreHit: 'Tyre hit (rock edge)',
+  bumpStop: 'Bump stop',
+  topOut: 'Top-out',
+  rimHit: 'Rim strike',
+  chassisHit: 'Chassis hit',
+  scrape: 'Chassis scrape',
 };
 const groundFolder = gui.addFolder('Tyre and ground layers');
 groundFolder.add(groundSolo, 'solo', { 'none (all)': 'none', ...Object.fromEntries(Object.entries(GROUND_NAMES).map(([k, name]) => [name, k])) }).name('Solo').onChange(() => {
@@ -256,6 +283,16 @@ for (const [obj, key, min, max, step, label] of [
   [ground.stones, 'hitChance', 0, 1, 0.01, 'Share of stones hitting the car'],
   [ground.stones.hitModes[0], 'f', 500, 6000, 50, 'Stone hit ring 1 (Hz)'],
   [ground.stones.hitModes[1], 'f', 500, 8000, 50, 'Stone hit ring 2 (Hz)'],
+  [ground.tyreHit, 'level', 0, 2, 0.01, 'Tyre hit level'],
+  [ground.tyreHit.modes[0], 'f', 30, 400, 1, 'Tyre hit thud (Hz)'],
+  [ground.bumpStop, 'level', 0, 2, 0.01, 'Bump stop level'],
+  [ground.bumpStop.modes[1], 'f', 200, 3000, 10, 'Bump stop knock (Hz)'],
+  [ground.topOut, 'level', 0, 2, 0.01, 'Top-out level'],
+  [ground.rimHit, 'level', 0, 0.5, 0.005, 'Rim strike level'],
+  [ground.chassisHit, 'level', 0, 2, 0.01, 'Chassis hit level'],
+  [ground.chassisHit.modes[0], 'f', 40, 600, 1, 'Chassis hit body (Hz)'],
+  [ground.scrape, 'level', 0, 2, 0.01, 'Scrape level'],
+  [ground.scrape, 'f', 300, 6000, 10, 'Scrape band (Hz)'],
   [ground, 'gain', 0, 3, 0.05, 'Ground gain'],
 ]) groundModel.add(obj, key, min, max, step).name(label).onChange(sendGround).listen();
 groundModel.close();
@@ -311,7 +348,8 @@ const frame = (now) => {
       v = Math.max(0, v + (force / (MASS + (4 * 3.5) / (R * R))) * DT);
     }
     simTime += DT;
-    feed.writeStep(simTime, { drivetrain: drive, speed: v, controller: labWheels }, SURFACES[LAB.surface]);
+    applyLabHits();
+    feed.writeStep(simTime, { drivetrain: drive, speed: v, controller: labWheels, contacts: labContacts }, SURFACES[LAB.surface]);
   }
   if (audio.node && !presetSent) {
     presetSent = true;

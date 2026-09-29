@@ -329,3 +329,54 @@ describe('tyres and ground', () => {
     expect(surfaceAt({ world: 'canyon', sample: () => ({ rock: 0, road: 1 }) }, 0, 0).gravel).toBe(1);
   });
 });
+
+describe('hits', () => {
+  const identity = { x: 0, y: 0, z: 0, w: 1 };
+  const car = { suspensionRestLength: 0.52, maxSuspensionTravel: 0.36 };
+  const makeController = () => ({
+    car,
+    wheels: [0, 1, 2, 3].map(() => ({ hub: { linvel: () => ({ x: 5, y: 0, z: 0 }), rotation: () => identity, translation: () => ({ x: 0, y: 0, z: 0 }) }, tyreLoad: 4400, suspensionLength: 0.52, travelSpeed: 0 })),
+    rollingRadius: () => 0.43,
+    wheelSpin: () => 5 / 0.43,
+  });
+  const step = (controller, contacts, out, surfaces) => writeWheels({ controller, contacts }, out, 0, null, surfaces, false);
+  const I = (field, wheel = 0) => wheel * WHEEL_FIELDS.length + WHEEL_FIELDS.indexOf(field);
+
+  it('counts a tyre hit, a bump stop and a rim strike once each', () => {
+    const c = makeController();
+    const out = new Float64Array(4 * WHEEL_FIELDS.length);
+    const surfaces = [0, 1, 2, 3].map(() => ({ rock: 0, gravel: 0 }));
+    const contacts = { chassis: 0, rims: [0, 0, 0, 0] };
+    step(c, contacts, out, surfaces);
+    // One step: the load triples on wheel 0, wheel 1 reaches its bump stop, rim 2 strikes.
+    c.wheels[0].tyreLoad = 4400 * 3;
+    c.wheels[1].suspensionLength = 0.52 - 0.36;
+    c.wheels[1].travelSpeed = -1.5;
+    contacts.rims[2] = 8000;
+    step(c, contacts, out, surfaces);
+    // Held there for a few steps: no more hits.
+    c.wheels[1].travelSpeed = 0;
+    for (let k = 0; k < 5; k++) step(c, contacts, out, surfaces);
+    expect(out[I('impact', 0)]).toBeCloseTo((4400 * 2) / ((1800 * 9.81) / 4) - 0.7, 5);
+    expect(out[I('bump', 1)]).toBeCloseTo(1.5, 5);
+    expect(out[I('rim', 2)]).toBeCloseTo(8000 / ((1800 * 9.81) / 4), 5);
+    expect(out[I('impact', 3)]).toBe(0);
+    expect(out[I('bump', 0)]).toBe(0);
+  });
+
+  it('plays each hit, and nothing without one', () => {
+    const peak = (a, b) => {
+      const g = new GroundSynth(SR);
+      const out = new Float32Array(SR / 4);
+      let s = a;
+      for (let i = 0; i < out.length; i += BLOCK) {
+        const next = i >= BLOCK * 4 ? b : a;
+        g.render(out, s, next, i, i + BLOCK);
+        s = next;
+      }
+      return Math.max(...out.map(Math.abs));
+    };
+    expect(peak({ w0impact: 0 }, { w0impact: 0 })).toBeLessThan(1e-4);
+    for (const key of ['w0impact', 'w1bump', 'w2topOut', 'w3rim', 'chassisHits']) expect(peak({ [key]: 5 }, { [key]: 6 }), key).toBeGreaterThan(0.05);
+  });
+});

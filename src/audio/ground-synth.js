@@ -14,6 +14,9 @@
 //   spin     wheelspin roar on loose ground
 // Stones (events from the main thread's soil particles): thrown stones sometimes hit the body
 // (a tick with a panel ring); stones landing on rock click.
+// Hits (the feed's counters, see wheels.js): a tyre thud over a rock edge, the suspension's bump
+// stop and full droop, the rim striking rock, and the chassis hitting (a bang with panel modes)
+// and scraping (lasting contact while moving).
 import { Svf } from './engine-synth.js';
 import { WHEEL_FIELDS, WHEELS } from './wheels.js';
 
@@ -27,7 +30,16 @@ export const GROUND_LAYERS = Object.freeze({
   spin: 1,
   stoneHits: 1,
   stoneLand: 1,
+  tyreHit: 1,
+  bumpStop: 1,
+  topOut: 1,
+  rimHit: 1,
+  chassisHit: 1,
+  scrape: 1,
 });
+
+// A struck object: resonant modes { f, q, gain } rung by an impulse, and a short noise burst.
+const HIT_SOUNDS = ['tyreHit', 'bumpStop', 'topOut', 'rimHit', 'chassisHit'];
 
 export const GROUND_SOUND = Object.freeze({
   name: 'Mud-terrain tyres',
@@ -63,6 +75,15 @@ export const GROUND_SOUND = Object.freeze({
     landLevel: 0.25, // on rock
     landModes: { f: 2600, q: 10 },
   },
+  // Hits: modes rung by each hit, a noise burst (s) with it, and how loud a hit of strength 1 is
+  // (the strength: static loads for tyre and rim, m/s for the suspension, car weights for the
+  // chassis). Strength is compressed (square root), capped at `max`.
+  tyreHit: { level: 0.35, max: 2, burst: 0.006, burstF: 380, modes: [{ f: 85, q: 1.4, gain: 1 }, { f: 380, q: 1, gain: 0.4 }] },
+  bumpStop: { level: 0.45, max: 2, burst: 0.004, burstF: 900, modes: [{ f: 65, q: 2, gain: 1 }, { f: 850, q: 7, gain: 0.35 }] },
+  topOut: { level: 0.25, max: 2, burst: 0.003, burstF: 1400, modes: [{ f: 220, q: 3, gain: 0.6 }, { f: 1300, q: 9, gain: 0.5 }] },
+  rimHit: { level: 0.04, max: 1, burst: 0.002, burstF: 2500, modes: [{ f: 750, q: 30, gain: 0.6 }, { f: 1900, q: 22, gain: 0.5 }, { f: 3400, q: 18, gain: 0.3 }] },
+  chassisHit: { level: 0.5, max: 2, burst: 0.012, burstF: 700, modes: [{ f: 140, q: 3, gain: 1 }, { f: 380, q: 5, gain: 0.6 }, { f: 1050, q: 8, gain: 0.35 }] },
+  scrape: { level: 0.6, f: 1800, q: 0.9, rough: 60, fullSpeed: 4 },
   gain: 0.8,
   topCut: 8000, // Hz: the clicks' noise stops here
   // Levels of the parts, as tuned by ear (the gravel at half).
@@ -110,6 +131,11 @@ export class GroundSynth {
     this.wobble = new Float64Array(WHEELS);
     this.hits = [];
     this.landMode = new Svf();
+    // Hits: per kind, its modes and burst filter, the impulse and burst envelope due.
+    this.hitBanks = Object.fromEntries(HIT_SOUNDS.map((k) => [k, { modes: [], burst: new Svf(), kick: 0, env: 0 }]));
+    this.counters = {}; // the feed's hit counters as last played
+    this.scrapeFilter = new Svf();
+    this.scrapeShake = 0;
     this.air = new Svf();
     this.events = []; // { at (samples from now), kind, amp, f }
     this.clock = 0;
@@ -134,6 +160,15 @@ export class GroundSynth {
     while (this.hits.length < modes.length) this.hits.push(new Svf());
     this.hits.length = modes.length;
     modes.forEach((m, i) => this.hits[i].set(m.f, m.q, sr));
+    for (const k of HIT_SOUNDS) {
+      const bank = this.hitBanks[k];
+      const spec = preset[k];
+      while (bank.modes.length < spec.modes.length) bank.modes.push(new Svf());
+      bank.modes.length = spec.modes.length;
+      spec.modes.forEach((m, i) => bank.modes[i].set(m.f, m.q, sr));
+      bank.burst.set(spec.burstF, 0.8, sr);
+    }
+    this.scrapeFilter.set(preset.scrape.f, preset.scrape.q, sr);
   }
 
   setLayers(layers) {
@@ -235,6 +270,33 @@ export class GroundSynth {
     const hitAmp = L.stoneHits * level;
     const landAmp = L.stoneLand * level;
 
+    // Hits since the last block: the rise of each counter.
+    const rise = (key) => {
+      const now = b[key] ?? 0;
+      const last = this.counters[key];
+      this.counters[key] = now;
+      return last === undefined || now < last ? 0 : now - last;
+    };
+    const strike = (kind, strength) => {
+      if (strength <= 0) return;
+      const spec = p[kind];
+      const bank = this.hitBanks[kind];
+      const a = spec.level * Math.min(spec.max, Math.sqrt(strength)) * L[kind] * level;
+      bank.kick = Math.min(spec.level * spec.max * L[kind] * level, bank.kick + a);
+      bank.env = Math.max(bank.env, a);
+    };
+    for (let i = 0; i < WHEELS; i++) {
+      strike('tyreHit', rise(`w${i}impact`));
+      strike('bumpStop', rise(`w${i}bump`));
+      strike('topOut', rise(`w${i}topOut`));
+      strike('rimHit', rise(`w${i}rim`));
+    }
+    strike('chassisHit', rise('chassisHits'));
+    const scrapeAmp = p.scrape.level * Math.sqrt(Math.min(2, (a.chassisForce + b.chassisForce) / 2 || 0)) * Math.min(1, Math.abs((a.speed + b.speed) / 2 || 0) / p.scrape.fullSpeed) * L.scrape * level;
+    const scrapeK = 1 - Math.exp((-2 * Math.PI * p.scrape.rough) / sr);
+    const scrapeNorm = 1 / Math.sqrt(scrapeK / (2 - scrapeK) / 3);
+    const burstDecay = Object.fromEntries(HIT_SOUNDS.map((k) => [k, Math.exp(-dt / p[k].burst)]));
+
     for (let j = 0; j < n; j++) {
       const r = this.random;
       const noise = r() * 2 - 1;
@@ -300,6 +362,30 @@ export class GroundSynth {
       this.landMode.tick(land * 6);
       x += this.landMode.band * landAmp;
 
+      // Hits: the impulse rings the modes once; the burst decays.
+      for (let h = 0; h < HIT_SOUNDS.length; h++) {
+        const kind = HIT_SOUNDS[h];
+        const bank = this.hitBanks[kind];
+        if (bank.kick === 0 && bank.env < 1e-5 && !bank.ringing) continue;
+        const spec = p[kind];
+        const kick = bank.kick * 20;
+        bank.kick = 0;
+        let ring = 0;
+        for (let m = 0; m < bank.modes.length; m++) {
+          bank.modes[m].tick(kick);
+          ring += bank.modes[m].band * spec.modes[m].gain;
+        }
+        bank.burst.tick(bank.env * noise2);
+        x += ring + bank.burst.band;
+        bank.env *= burstDecay[kind];
+        bank.ringing = Math.abs(ring) > 1e-6 || kick !== 0;
+      }
+      if (scrapeAmp > 0) {
+        this.scrapeShake += (noise - this.scrapeShake) * scrapeK;
+        this.scrapeFilter.tick(noise2 * (0.4 + Math.abs(this.scrapeShake) * scrapeNorm));
+        x += scrapeAmp * this.scrapeFilter.band;
+      }
+
       this.clock++;
       // Added to the engine; a soft knee keeps the sum inside full scale without touching the
       // engine's own level below it.
@@ -313,6 +399,11 @@ export class GroundSynth {
   recover(out, start, end) {
     for (const f of [this.air, this.crush, this.thump, ...this.cracks, this.soil, this.rock, this.scrub, this.spin, this.hum, this.landMode, ...this.squeal, ...this.hits]) f.ic1 = f.ic2 = 0;
     this.crackEnv.fill(0);
+    for (const bank of Object.values(this.hitBanks)) {
+      for (const f of [bank.burst, ...bank.modes]) f.ic1 = f.ic2 = 0;
+      bank.kick = bank.env = 0;
+    }
+    this.scrapeFilter.ic1 = this.scrapeFilter.ic2 = 0;
     this.crushShake = 0;
     this.wobble.fill(0);
     this.events.length = 0;

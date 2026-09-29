@@ -82,7 +82,10 @@ export async function stepPhysics(world, frameDelta = null) {
         vehicle.speed = vehicle.controller.currentVehicleSpeed();
       }
       const tr = performance.now();
-      physics.world.step();
+      // Contact forces on the car's chassis and rims, for the sound (only those report them).
+      physics.contactEvents ??= new physics.rapier.EventQueue(true);
+      physics.world.step(physics.contactEvents);
+      collectContacts(physics.contactEvents, vehicles);
       tRapier += performance.now() - tr;
       physics.accumulator -= physics.step;
       physics.simTime += physics.step;
@@ -114,6 +117,27 @@ export async function stepPhysics(world, frameDelta = null) {
     sample('step.rapier', tRapier / steps);
   }
   if (steps) physics.stepMs = physics.stepMs * 0.95 + ((performance.now() - t0) / steps) * 0.05;
+}
+
+// The largest contact force this step on each vehicle's chassis and on each rim (N), in
+// vehicle.contacts; the sound turns rises into hits and lasting force into scrapes.
+function collectContacts(queue, vehicles) {
+  for (const v of vehicles) {
+    v.contacts ??= { chassis: 0, rims: [0, 0, 0, 0] };
+    v.contacts.chassis = 0;
+    v.contacts.rims.fill(0);
+  }
+  queue.drainContactForceEvents((e) => {
+    for (const v of vehicles) {
+      const map = v.controller.soundColliders;
+      if (!map) continue;
+      const what = map.get(e.collider1()) ?? map.get(e.collider2());
+      if (what === undefined) continue;
+      const f = e.totalForceMagnitude();
+      if (what === 'chassis') v.contacts.chassis = Math.max(v.contacts.chassis, f);
+      else v.contacts.rims[what] = Math.max(v.contacts.rims[what], f);
+    }
+  });
 }
 
 // Pose history per Rapier body, for drawing between physics steps (see interpolation.js).

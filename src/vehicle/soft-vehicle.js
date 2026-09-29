@@ -81,6 +81,8 @@ export class JointedVehicle {
     this.world = world;
     this.body = chassis;
     this.car = car;
+    // Collider handle -> what hit (a wheel index for a rim, 'chassis'), for the sound.
+    this.soundColliders = new Map();
     this.rackGeo = ifsRack(car); // the rack moves with the front of the frame (wheelbase)
     this.tire = tire;
     this.wheels = [];
@@ -156,9 +158,12 @@ export class JointedVehicle {
       const hub = world.createRigidBody(
         this.RAPIER.RigidBodyDesc.dynamic().setTranslation(at.x, at.y, at.z).setRotation(hubRotation).setCanSleep(false),
       );
-      // The rim only meets the ground if the tyre is squashed flat.
-      world.createCollider(
+      // The rim only meets the ground if the tyre is squashed flat. Its contact forces are reported
+      // for the sound (a rim strike; see systems/physics.js).
+      const rim = world.createCollider(
         this.RAPIER.ColliderDesc.cylinder(tire.width / 2 - 0.03, tire.rimRadius - 0.02)
+          .setActiveEvents(this.RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+          .setContactForceEventThreshold(300)
           .setRotation({ x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 })
           // GPU tyres carry their rubber outside Rapier, so the hub holds a whole wheel's spin
           // inertia; that also keeps the once-per-step torque exchange with the GPU stable.
@@ -187,6 +192,7 @@ export class JointedVehicle {
         this.softBodies.push(soft);
       }
 
+      this.soundColliders.set(rim.handle, this.wheels.length);
       this.wheels.push({
         mount,
         front,
@@ -736,15 +742,19 @@ export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIR
     y: (m / 12) * (4 * hx * hx + 4 * hz * hz),
     z: (m / 12) * (4 * hx * hx + 4 * hy * hy),
   };
-  world.createCollider(
+  const chassis = world.createCollider(
     RAPIER.ColliderDesc.cuboid(hx, hy, hz)
       .setMassProperties(m, car.centerOfMass, inertia, { w: 1, x: 0, y: 0, z: 0 })
       .setFriction(0.5)
       .setRestitution(0.05)
-      .setCollisionGroups(groups(GROUP.CHASSIS, GROUP.WORLD)),
+      .setCollisionGroups(groups(GROUP.CHASSIS, GROUP.WORLD))
+      // Its contact forces are reported for the sound (hits and scrapes; see systems/physics.js).
+      .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+      .setContactForceEventThreshold(300),
     body,
   );
   const controller = new JointedVehicle(RAPIER, world, body, car, tire, options);
+  controller.soundColliders.set(chassis.handle, 'chassis');
   // Every part moves with the chassis as one rigid body: v = v0 + ω × r.
   for (const part of [body, ...controller.bodies]) {
     const t = part.translation();

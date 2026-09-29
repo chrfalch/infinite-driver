@@ -4,11 +4,12 @@
 // sometimes late), so the audio plays the records a little behind the newest one and interpolates
 // between them; values sent once per frame made the engine pitch step.
 
-import { WHEEL_FIELDS, WHEELS, writeWheels } from './wheels.js';
+import { BODY_FIELDS, WHEEL_FIELDS, WHEELS, writeBody, writeWheels } from './wheels.js';
 
 // The engine's fields, then each wheel's (w0contact, w0ground, …; see wheels.js).
 const ENGINE_FIELDS = ['time', 'rpm', 'throttle', 'fuel', 'exhaustBrake', 'clutch', 'speed', 'gear'];
-export const FIELDS = [...ENGINE_FIELDS, ...Array.from({ length: WHEELS }, (_, i) => WHEEL_FIELDS.map((f) => `w${i}${f}`)).flat()];
+const HEAD = ENGINE_FIELDS.length + BODY_FIELDS.length;
+export const FIELDS = [...ENGINE_FIELDS, ...BODY_FIELDS, ...Array.from({ length: WHEELS }, (_, i) => WHEEL_FIELDS.map((f) => `w${i}${f}`)).flat()];
 const SURFACE_EVERY = 6; // steps between ground lookups per wheel
 const STRIDE = FIELDS.length;
 export const RECORDS = 512; // about 4 s at 120 steps per second
@@ -59,7 +60,9 @@ export class AudioFeed {
     r[7] = d.gear ?? 0;
     this.surfaces ??= Array.from({ length: WHEELS }, () => ({ rock: 0, gravel: 0 }));
     this.steps = (this.steps ?? 0) + 1;
-    writeWheels(vehicle, r, ENGINE_FIELDS.length, heightAt, this.surfaces, this.steps % SURFACE_EVERY === 1);
+    this.body ??= {};
+    writeBody(vehicle, r, ENGINE_FIELDS.length, this.body);
+    writeWheels(vehicle, r, HEAD, heightAt, this.surfaces, this.steps % SURFACE_EVERY === 1);
     this.write(r);
   }
 
