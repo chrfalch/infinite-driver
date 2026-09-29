@@ -2,9 +2,8 @@
 // work goes into how it drives: the tyres sink into fresh snow, pack it down into ruts that are
 // firmer and slicker than the snow around them, and throw fine powder when they spin or slide.
 //
-// The snow has a depth that varies (snowAt): 30 cm of fresh snow on the plain; on the road a thin
-// layer of snow packed by traffic, worn through to bare asphalt in the four wheel tracks and in
-// patches; and along both road edges the plough banks ("brøytekanter"), humps of firm snow up to
+// The snow has a depth that varies (snowAt): 30 cm of fresh snow on the plain; on the road bare
+// asphalt with spots and patches of thin, packed snow; and along both road edges the plough banks ("brøytekanter"), humps of firm snow up to
 // about 60 cm above the snow beside them. The ground under the snow is flat but for a broad, slow
 // swell. Everything else about snow lives in SNOW below and in the systems that read it (tyre
 // solver, compaction, spray, the snow surface mesh).
@@ -42,28 +41,54 @@ export const COVER_DEPTH = 0.012;
 export const ROAD = Object.freeze({
   halfWidth: 3.2, // asphalt either side of the centre line
   tracks: [0.75, 2.25], // wheel tracks of both lanes (distance from the centre line)
-  trackWidth: 0.28, // width of a worn track
-  thin: 0.025, // m of packed snow on the road between the tracks (it varies in patches)
+  trackWidth: 0.35, // width of a wheel track (a little less snow there)
+  thin: 0.025, // m of packed snow in the spots of snow on the road
   bankCentre: 4.3, // the plough bank's crest
   bankHalfWidth: 1.1,
   bankHeight: 0.6, // above the fresh snow beside the road
   bankFirmness: 0.6, // thrown snow is dense, already more than half packed (less where it is thin)
 });
 
-// Patches of thicker and thinner snow along the road (-1..1), a few tens of metres long, and
-// smaller blotches (a few metres) where snow lies in the tracks too.
+// Snow on the road lies in spots and patches on bare asphalt: value noise of two sizes (spots of
+// about 1.5 m and 0.5 m), cut at a threshold that moves with larger areas of more and less snow
+// (roadPatch, tens of metres), is a little higher in the wheel tracks (traffic clears them) and
+// lower toward the road edges, where the snow lies more. The shaders repeat this (snowCover in
+// render/terrain-mesh.js) so the drawn spots are where the tyres find snow; the hash only uses
+// arithmetic that float32 on the GPU gets (nearly) the same.
 export const roadPatch = (x, z) => Math.sin(x * 0.21 + Math.sin(z * 0.17) * 2) * Math.sin(z * 0.23 + x * 0.05);
-export const roadBlotch = (x, z) => Math.sin(x * 1.3 + Math.sin(z * 1.1) * 1.7) * Math.sin(z * 1.7 + Math.sin(x * 0.9) * 1.4);
-// The wheel tracks wander a little across the lane, and each is wider in places.
-const trackAt = (d, t, x, z) => {
-  const wander = 0.12 * Math.sin(x * 0.09 + z * 0.05 + t);
-  const width = ROAD.trackWidth * (1 + 0.25 * Math.sin(x * 0.31 + z * 0.13 + 2 * t));
-  return Math.exp(-(((d - t - wander) / width) ** 2));
+const fract = (v) => v - Math.floor(v);
+function hash(ix, iz) {
+  let a = fract(ix * 0.1031);
+  let b = fract(iz * 0.1031);
+  let c = a;
+  const d = a * (b + 33.33) + b * (c + 33.33) + c * (a + 33.33);
+  a += d;
+  b += d;
+  c += d;
+  return fract((a + b) * c);
+}
+function valueNoise(x, z) {
+  const ix = Math.floor(x);
+  const iz = Math.floor(z);
+  const fx = x - ix;
+  const fz = z - iz;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uz = fz * fz * (3 - 2 * fz);
+  const a = hash(ix, iz) + (hash(ix + 1, iz) - hash(ix, iz)) * ux;
+  const b = hash(ix, iz + 1) + (hash(ix + 1, iz + 1) - hash(ix, iz + 1)) * ux;
+  return a + (b - a) * uz;
+}
+export const roadSpots = (x, z) => 0.6 * valueNoise(x / 1.7, z / 1.7) + 0.4 * valueNoise(x / 0.6 + 17, z / 0.6 + 5);
+const trackAt = (d, t) => Math.exp(-(((d - t) / ROAD.trackWidth) ** 2));
+export const wheelTracks = (d) => trackAt(d, ROAD.tracks[0]) + trackAt(d, ROAD.tracks[1]);
+// Where the snow spots start (spots above it are snow): see above.
+export const spotThreshold = (d, x, z) =>
+  0.6 - 0.12 * roadPatch(x, z) + 0.08 * wheelTracks(d) - 0.22 * smoothstep(ROAD.halfWidth - 1.2, ROAD.halfWidth - 0.2, d);
+// Snow on the road itself (m): spots up to ROAD.thin deep, with soft edges.
+export const roadSnowDepth = (d, x, z) => {
+  const t = spotThreshold(d, x, z);
+  return ROAD.thin * smoothstep(t, t + 0.1, roadSpots(x, z));
 };
-export const wheelTracks = (d, x, z) => trackAt(d, ROAD.tracks[0], x, z) + trackAt(d, ROAD.tracks[1], x, z);
-// Snow on the road itself (m): thin, and worn away in the wheel tracks (less so in the blotches).
-export const roadSnowDepth = (d, x, z) =>
-  Math.max(0, ROAD.thin * (0.55 + 0.5 * roadPatch(x, z)) - 0.03 * wheelTracks(d, x, z) * (0.8 - 0.35 * roadBlotch(x, z)));
 
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));

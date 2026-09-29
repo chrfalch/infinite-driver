@@ -1,6 +1,6 @@
 import { createNoise2D } from 'simplex-noise';
 import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, dot, exp, float, fract, fwidth, max, mix, positionLocal, positionWorld, sin, smoothstep, step, uniform, vec2, vec3, vec4 } from 'three/tsl';
+import { attribute, dot, exp, float, floor, fract, fwidth, mix, positionLocal, positionWorld, sin, smoothstep, step, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import { gravelShade } from '../terrain/gravel.js';
 import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
@@ -60,31 +60,45 @@ export const freshSnowColor = mix(vec3(0.86, 0.9, 0.95), vec3(0.93, 0.95, 0.98),
 
 // The snowfield's road, per pixel from the distance to its centre line: how much snow covers the
 // asphalt (0 bare .. 1), the same as roadSnowDepth in terrain/snow.js (the tyres' bare asphalt), so
-// the wheel tracks and patches worn to asphalt are where they are drawn. `side`: signed distance
-// (interpolated between vertices; |d| would dip across the centre line).
+// the spots of snow are where they are drawn. `side`: signed distance (interpolated between
+// vertices; |d| would dip across the centre line).
+const snowHash2 = (ix, iz) => {
+  const a = fract(ix.mul(0.1031));
+  const b = fract(iz.mul(0.1031));
+  const d = a.mul(b.add(33.33)).add(b.mul(a.add(33.33))).add(a.mul(a.add(33.33)));
+  return fract(a.add(d).add(b.add(d)).mul(a.add(d)));
+};
+const valueNoise = (x, z) => {
+  const ix = floor(x);
+  const iz = floor(z);
+  const fx = x.sub(ix);
+  const fz = z.sub(iz);
+  const ux = fx.mul(fx).mul(fx.mul(-2).add(3));
+  const uz = fz.mul(fz).mul(fz.mul(-2).add(3));
+  const a = mix(snowHash2(ix, iz), snowHash2(ix.add(1), iz), ux);
+  const b = mix(snowHash2(ix, iz.add(1)), snowHash2(ix.add(1), iz.add(1)), ux);
+  return mix(a, b, uz);
+};
 export function snowCover(side) {
   const dist = side.abs();
   const x = positionWorld.x;
   const z = positionWorld.z;
   const patch = sin(x.mul(0.21).add(sin(z.mul(0.17)).mul(2))).mul(sin(z.mul(0.23).add(x.mul(0.05))));
-  const blotch = sin(x.mul(1.3).add(sin(z.mul(1.1)).mul(1.7))).mul(sin(z.mul(1.7).add(sin(x.mul(0.9)).mul(1.4))));
-  const track = (t) => {
-    const wander = sin(x.mul(0.09).add(z.mul(0.05)).add(t)).mul(0.12);
-    const width = sin(x.mul(0.31).add(z.mul(0.13)).add(2 * t)).mul(0.25).add(1).mul(SNOW_ROAD.trackWidth);
-    return exp(dist.sub(t).sub(wander).div(width).pow(2).negate());
-  };
+  const spots = valueNoise(x.div(1.7), z.div(1.7)).mul(0.6).add(valueNoise(x.div(0.6).add(17), z.div(0.6).add(5)).mul(0.4));
+  const track = (t) => exp(dist.sub(t).div(SNOW_ROAD.trackWidth).pow(2).negate());
   const tracks = track(SNOW_ROAD.tracks[0]).add(track(SNOW_ROAD.tracks[1]));
-  const depth = max(float(0), patch.mul(0.5).add(0.55).mul(SNOW_ROAD.thin).sub(tracks.mul(0.03).mul(blotch.mul(-0.35).add(0.8))));
+  const edge = smoothstep(SNOW_ROAD.halfWidth - 1.2, SNOW_ROAD.halfWidth - 0.2, dist);
+  const threshold = float(0.6).sub(patch.mul(0.12)).add(tracks.mul(0.08)).sub(edge.mul(0.22));
+  const depth = smoothstep(threshold, threshold.add(0.1), spots).mul(SNOW_ROAD.thin);
   const onRoad = step(dist, SNOW_ROAD.halfWidth - 0.2);
-  return { cover: mix(float(1), smoothstep(0, COVER_DEPTH, depth), onRoad), tracks };
+  return mix(float(1), smoothstep(0, COVER_DEPTH, depth), onRoad);
 }
-// Snow ground colour: bare asphalt (darker and damp in the wheel tracks) under a cover of snow,
-// fresh or packed (packed road snow is greyer, gritted).
+// Snow ground colour: bare asphalt under a cover of snow, fresh or packed (packed road snow is
+// greyer, gritted).
 export function snowGroundColor(side, packed) {
-  const { cover, tracks } = snowCover(side);
-  const asphalt = vec3(0.075, 0.078, 0.082).mul(snowGrain.mul(0.35).add(0.8)).mul(tracks.clamp(0, 1).mul(-0.25).add(1));
+  const asphalt = vec3(0.075, 0.078, 0.082).mul(snowGrain.mul(0.35).add(0.8));
   const snow = mix(freshSnowColor, vec3(0.7, 0.72, 0.75), packed);
-  return mix(asphalt, snow, cover);
+  return mix(asphalt, snow, snowCover(side));
 }
 const snowWorld = uniform(0);
 // Far from the car (the terrain mesh): on snow the 'gravel' attribute holds how packed the snow is

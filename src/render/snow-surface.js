@@ -81,7 +81,7 @@ function snowMaterial(texture, road, origin) {
   const pack = smoothstep(0.05, 0.9, varying(textureLoad(texture, cell).y));
   const side = varying(textureLoad(road, cell).x);
   material.colorNode = vec4(snowGroundColor(side, pack), 1);
-  material.roughnessNode = mix(float(0.8), mix(float(0.95), float(0.6), pack), snowCover(side).cover);
+  material.roughnessNode = mix(float(0.8), mix(float(0.95), float(0.6), pack), snowCover(side));
   return material;
 }
 

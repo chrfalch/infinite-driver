@@ -29,35 +29,39 @@ describe('snowfield', () => {
     expect(createHeightField({ mode: 'snow' })(123.4, -56.7)).toBe(snowField(123.4, -56.7));
   });
 
-  it('has a ploughed road through the origin, worn to asphalt in the wheel tracks', () => {
+  it('has a ploughed road through the origin: bare asphalt with spots of packed snow', () => {
     expect(snowField.roadDistance(0, 0)).toBeLessThan(0.01);
     // Walk along the road: the car's heading follows it.
     let x = 0;
     let z = 0;
+    let bare = 0;
+    let spots = 0;
+    let bareInTracks = 0;
+    let inTracks = 0;
     for (let i = 0; i < 200; i++) {
       const yaw = snowField.roadHeading(x, z);
-      x += Math.cos(yaw);
-      z -= Math.sin(yaw);
+      // Across the road: (sin, cos) of the heading is perpendicular to it.
+      for (let off = -2.9; off <= 2.9; off += 0.1) {
+        const s = snowField.snowAt(x + Math.sin(yaw) * off, z + Math.cos(yaw) * off);
+        expect(s.depth).toBeLessThan(0.03);
+        expect(s.firm).toBe(1);
+        const isBare = s.depth < BARE_DEPTH;
+        if (isBare) bare++;
+        else spots++;
+        if (ROAD.tracks.some((t) => Math.abs(Math.abs(off) - t) < 0.2)) {
+          inTracks++;
+          if (isBare) bareInTracks++;
+        }
+      }
+      x += Math.cos(yaw) * 0.5;
+      z -= Math.sin(yaw) * 0.5;
     }
     expect(snowField.roadDistance(x, z)).toBeLessThan(0.3);
-    // Across the road at x = 0 (the road runs about along +x there, so z is the distance).
-    let bare = 0;
-    let covered = 0;
-    for (let zz = -2.9; zz <= 2.9; zz += 0.05) {
-      const s = snowField.snowAt(0, zz);
-      expect(s.depth).toBeLessThan(0.03);
-      expect(s.firm).toBe(1);
-      if (s.depth < BARE_DEPTH) bare++;
-      else covered++;
-    }
-    expect(bare).toBeGreaterThan(10);
-    expect(covered).toBeGreaterThan(10);
-    // Each wheel track is worn bare somewhere near where it should be.
-    for (const t of ROAD.tracks) {
-      let found = false;
-      for (let zz = t - 0.3; zz <= t + 0.3; zz += 0.05) found ||= snowField.bareAt(0, zz);
-      expect(found).toBe(true);
-    }
+    const share = bare / (bare + spots);
+    expect(share).toBeGreaterThan(0.5);
+    expect(share).toBeLessThan(0.9);
+    // Traffic keeps the wheel tracks a little clearer.
+    expect(bareInTracks / inTracks).toBeGreaterThan(share);
   });
 
   it('has firm plough banks along both road edges, standing above the fresh snow', () => {
@@ -152,17 +156,19 @@ describe('GPU tyres on snow', () => {
     updateGpuGround(solver, snowField, 1.1, 40, d, cell);
     expect(at(12, iz + 12)).toBeCloseTo(1, 2);
 
-    // On the road: packed snow (1) between the wheel tracks, bare asphalt (2) in them.
+    // On the road: spots of packed snow (1) on bare asphalt (2).
     updateGpuGround(solver, snowField, 0, 0, d, cell);
     const road = solver.groundCache;
     const on = (x, z) => road.grid[GROUND_N * GROUND_N + (Math.round(z / cell) - road.iz0) * GROUND_N + (Math.round(x / cell) - road.ix0)];
     let packed = 0;
     let bare = 0;
-    for (let z = -2.9; z <= 2.9; z += cell) {
-      if (on(0, z) === 1) packed++;
-      if (on(0, z) === 2) bare++;
+    for (let x = -4; x <= 4; x += cell) {
+      for (let z = -2; z <= 2; z += cell) {
+        if (on(x, z) === 1) packed++;
+        if (on(x, z) === 2) bare++;
+      }
     }
-    expect(packed).toBeGreaterThan(5);
-    expect(bare).toBeGreaterThan(2);
+    expect(packed).toBeGreaterThan(50);
+    expect(bare).toBeGreaterThan(50);
   });
 });
