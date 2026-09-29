@@ -145,7 +145,7 @@ export class Drivetrain {
   }
 
   // One physics step.
-  // input: { throttle 0..1, reverseRequest bool, climb, mass } — the vehicle decides when the driver
+  // input: { throttle 0..1, reverseRequest bool, climb, mass, holdInSpin } — the vehicle decides when the driver
   // wants reverse; climb is the slope's pull against the direction of travel (m/s², optional) and
   // mass the vehicle's, so the automatic holds a gear that can pull up a hill.
   // spins: wheel spin rates (rad/s, forward positive). speed: forward vehicle speed (m/s).
@@ -181,7 +181,10 @@ export class Drivetrain {
       } else if (this.gear > 0 && this.sinceShift > p.minShiftInterval) {
         const now = gearboxRpm(this.gear);
         // Upshift on road speed, or on engine speed when the wheels are spinning up with the clutch in.
-        const revving = this.clutch > 0.95 && this.rpm > p.upshiftRpm + 300;
+        // With input.holdInSpin (snow) a gear is held while the wheels spin well past the road
+        // speed, so a slide under power (a donut) keeps its torque instead of shifting it away.
+        const spinning = input.holdInSpin && Math.abs(shaftW * radius) > Math.abs(speed) + 2;
+        const revving = this.clutch > 0.95 && this.rpm > p.upshiftRpm + 300 && !spinning;
         const atLimiter = now > p.limiterRpm - 150;
         const climbing = throttle > 0 && input.climb > 0.4 && input.mass > 0; // from about 2.3°
         if ((now > p.upshiftRpm || revving) && this.gear < p.gears.length && throttle > 0 && (atLimiter || !climbing || this.pull(this.gear + 1, speed - Math.sign(speed) * input.climb * p.shiftTime, radius, input) > 0.3)) this.shiftUp();

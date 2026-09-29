@@ -20,7 +20,7 @@ describe('snowfield', () => {
         const h = snowField(x, z);
         lo = Math.min(lo, h);
         hi = Math.max(hi, h);
-        expect(snowField.snowAt(x, z).depth).toBeGreaterThan(0.2);
+        expect(snowField.snowAt(x, z).depth).toBeGreaterThan(0.05);
         expect(snowField.snowAt(x, z).firm).toBe(0);
       }
     }

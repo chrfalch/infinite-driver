@@ -17,16 +17,17 @@ import { mulberry32 } from './height.js';
 // throttle with the rear wheels spinning, and brakes and corners at about 0.35 g (0.7 g and more
 // on hard ground).
 export const SNOW = Object.freeze({
-  depth: 0.3, // m of fresh snow on the plain
+  depth: 0.12, // m of fresh snow on the plain
   packRatio: 0.57, // fresh snow packs down by this share of its depth (a 30 cm layer to 17 cm ruts)
   packRate: 30, // 1/s: how fast the snow under the tread packs (fast; snow does not wait)
   bearing: 140, // kPa a fully packed rut bears (see compactSoil): 45 kPa tyres sink ~10 cm
   bermShare: 0.12, // share of the packed snow pushed up beside the rut
-  freshStiffness: 450, // N/m per particle
+  freshStiffness: 1200, // N/m per particle
   packedStiffness: 22000, // N/m per particle (capped at the solver's stable limit)
-  rebound: 0.12, // share of the push kept as the tread lifts: packed snow does not spring back
+  rebound: 0.3, // share of the push kept as the tread lifts: packed snow does not spring back
   freshGrip: 0.36, // x the tyre's friction setting: rubber on fresh snow (with the lugs biting)
   packedGrip: 0.2, // x the tyre's friction setting: polished, packed snow in a rut or on the road
+  slideGrip: 0.8, // once sliding on snow, this share of the grip is left (so slides carry on)
   asphaltGrip: 0.8, // x the tyre's friction setting: bare, cold asphalt
   drag: 1.0, // drag through deep, loose snow (plough banks), as a share of the tyre's load there
   maxSink: 0.22, // m below the (packed) surface a particle may go before it is stopped
@@ -126,7 +127,7 @@ export function createSnowField(seed = 2024) {
       // Lumpy: big chunks thrown by the plough on a bank that swells and dips along the road.
       const lumpy = 0.85 + 0.18 * lumps(x * 0.45, z * 0.45) + 0.1 * lumps(x * 1.6 + 40, z * 1.6);
       const bank = ROAD.bankHeight * Math.max(0, 1 - u * u) * lumpy * (0.9 + 0.2 * lumps(x * 0.04, z * 0.04));
-      const fresh = (SNOW.depth + drifts(x * 0.012, z * 0.035) * 0.06) * smoothstep(W, W + 1, d);
+      const fresh = (SNOW.depth + drifts(x * 0.012, z * 0.035) * 0.04) * smoothstep(W, W + 1, d);
       // The plough throws the road's snow on top of the snow already lying beside it.
       depth = Math.max(verge, fresh + bank);
       firm = depth === verge ? 1 : (ROAD.bankFirmness * bank) / (bank + fresh + 1e-6);
