@@ -42,9 +42,11 @@ export const CAR_SOUND = Object.freeze({
   clunk: { level: 0.25, max: 1.5, burst: 0.006, burstF: 500, modes: [{ f: 170, q: 4, gain: 1 }, { f: 640, q: 8, gain: 0.5 }] },
   shift: { level: 0.12, max: 1, burst: 0.003, burstF: 1800, modes: [{ f: 260, q: 5, gain: 0.6 }, { f: 1800, q: 14, gain: 0.5 }] },
   lock: { level: 0.1, max: 1, burst: 0.002, burstF: 2400, modes: [{ f: 520, q: 4, gain: 0.6 }, { f: 2400, q: 12, gain: 0.6 }] },
-  cv: { balls: 6, level: 0.04, from: 0.8, full: 0.97, burst: 0.0015, burstF: 3000, modes: [{ f: 2800, q: 12, gain: 1 }] },
+  // Small ticks are mostly a short burst with wide, low rings (a narrow ring sounds like a drip).
+  cv: { balls: 6, level: 0.04, from: 0.8, full: 0.97, burst: 0.0008, burstF: 2600, modes: [{ f: 1600, q: 2.5, gain: 0.6 }] },
   pump: { vanes: 10, pulley: 1.3, level: 0.003, steering: 0.015, groan: 0.04, groanF: 380 },
-  rattle: { from: 2, perAccel: 5, level: 0.06, burst: 0.002, burstF: 2500, modes: [{ f: 1250, q: 16, gain: 0.7 }, { f: 2150, q: 18, gain: 0.6 }, { f: 3450, q: 20, gain: 0.4 }] },
+  // A rattle rings one of these, each time at a random pitch around it (±25 %).
+  rattle: { from: 2, perAccel: 5, level: 0.06, burst: 0.0015, burstF: 2500, modes: [{ f: 1250, q: 5, gain: 0.7 }, { f: 2150, q: 6, gain: 0.6 }, { f: 3450, q: 6, gain: 0.4 }] },
   creak: { from: 10, full: 35, level: 0.05, f: 420, q: 30 }, // twist in rad/s²
   wind: { level: 0.25, full: 30, f: 700, gust: 0.4 }, // full: m/s
   gain: 1,
@@ -238,10 +240,12 @@ export class CarSynth {
         // One loose part: rings one mode.
         const bank = this.banks.rattle;
         const m = (r() * bank.modes.length) | 0;
+        const spec = p.rattle.modes[m];
+        bank.modes[m].set(spec.f * (0.75 + 0.5 * r()), spec.q, sr);
         const amp = p.rattle.level * (0.3 + 0.7 * r()) * L.rattle * level;
         bank.modeKick = m;
         bank.modeKickAmp = amp * 20;
-        bank.env = Math.max(bank.env, amp * 0.5);
+        bank.env = Math.max(bank.env, amp * 1.5);
         bank.pan = body;
       }
       if (creakAmp > 0) {

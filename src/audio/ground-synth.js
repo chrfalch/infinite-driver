@@ -69,12 +69,12 @@ export const GROUND_SOUND = Object.freeze({
   stones: {
     hitChance: 0.3, // share of thrown stones that hit the body
     hitLevel: 0.35,
-    hitModes: [
-      { f: 1900, q: 14 },
-      { f: 3300, q: 18 },
-    ],
+    // A stone is a crack (as the gravel's: a 0.3 ms burst through a random wide band, so no pitch)
+    // and, hitting the car, a dull knock of the panel under it. Narrow rings (Q 10-18) sounded
+    // like water drops.
+    crack: 0.0003, // s
+    hitModes: [{ f: 750, q: 2.2, gain: 0.6 }],
     landLevel: 0.25, // on rock
-    landModes: { f: 2600, q: 10 },
   },
   // Hits: modes rung by each hit, a noise burst (s) with it, and how loud a hit of strength 1 is
   // (the strength: static loads for tyre and rim, m/s for the suspension, car weights for the
@@ -131,7 +131,11 @@ export class GroundSynth {
     this.humPhase = new Float64Array(WHEELS);
     this.wobble = new Float64Array(WHEELS);
     this.hits = [];
-    this.landMode = new Svf();
+    // Stone cracks heard at the body (hits on the car); landing ones go with the gravel's.
+    this.ticks = [];
+    this.tickEnv = new Float64Array(8);
+    this.landTicks = [];
+    this.landEnv = new Float64Array(8);
     // Hits: per kind, its modes and burst filter, the impulse and burst envelope due.
     this.hitBanks = Object.fromEntries(HIT_SOUNDS.map((k) => [k, { modes: [], burst: new Svf(), kick: 0, env: 0 }]));
     this.counters = {}; // the feed's hit counters as last played
@@ -162,6 +166,12 @@ export class GroundSynth {
     while (this.hits.length < modes.length) this.hits.push(new Svf());
     this.hits.length = modes.length;
     modes.forEach((m, i) => this.hits[i].set(m.f, m.q, sr));
+    while (this.ticks.length < g.bands.length) this.ticks.push(new Svf());
+    this.ticks.length = g.bands.length;
+    g.bands.forEach((b, i) => this.ticks[i].set(b.f, b.q, sr));
+    while (this.landTicks.length < g.bands.length) this.landTicks.push(new Svf());
+    this.landTicks.length = g.bands.length;
+    g.bands.forEach((b, i) => this.landTicks[i].set(b.f, b.q, sr));
     for (const k of HIT_SOUNDS) {
       const bank = this.hitBanks[k];
       const spec = preset[k];
@@ -191,9 +201,9 @@ export class GroundSynth {
     } else if (e.kind === 'land' && e.rock) {
       // e.rock: how hard the ground is (1 bare rock, less for gravel).
       const amp = s.landLevel * Math.min(1, e.rock) * (0.3 + 0.7 * big) * (0.5 + r());
-      // Smaller stones click higher.
-      const f = s.landModes.f * (1.6 - big) * (0.85 + 0.3 * r());
-      this.events.push({ at: this.clock + Math.round(this.sr * 0.01 * r()), kind: 'land', amp, f });
+      // Smaller stones crack higher: they pick from the upper bands.
+      const band = Math.min(this.cracks.length - 1, ((1 - big) * 0.5 + r() * 0.6) * this.cracks.length) | 0;
+      this.events.push({ at: this.clock + Math.round(this.sr * 0.01 * r()), kind: 'land', amp, band });
     }
   }
 
@@ -289,6 +299,7 @@ export class GroundSynth {
     const clickP = Math.min(0.5, gravelRate / sr);
     const decay = Math.exp(-dt / p.gravel.decay);
     const stones = p.stones;
+    const tickDecay = Math.exp(-dt / stones.crack);
     const hitAmp = L.stoneHits * level;
     const landAmp = L.stoneLand * level;
 
@@ -375,25 +386,35 @@ export class GroundSynth {
       xr += this.humR.tick(treadR);
       let xb = 0; // heard at the body
 
-      // Stone events due now.
+      // Stone events due now: a crack in a random wide band, and for a hit the panel's knock.
       let hit = 0;
-      let land = 0;
       for (let e = this.events.length - 1; e >= 0; e--) {
         const ev = this.events[e];
         if (ev.at > this.clock) continue;
-        if (ev.kind === 'hit') hit += ev.amp;
-        else {
-          this.landMode.set(ev.f, stones.landModes.q, sr);
-          land += ev.amp;
-        }
+        if (ev.kind === 'hit') {
+          hit += ev.amp;
+          this.tickEnv[(r() * this.ticks.length) | 0] += ev.amp * 4 * hitAmp;
+        } else this.landEnv[ev.band] = (this.landEnv[ev.band] ?? 0) + ev.amp * 10 * landAmp;
         this.events.splice(e, 1);
       }
       for (let m = 0; m < this.hits.length; m++) {
-        this.hits[m].tick(hit * 2.5);
-        xb += this.hits[m].band * hitAmp;
+        this.hits[m].tick(hit * 1.5);
+        xb += this.hits[m].band * hitAmp * stones.hitModes[m].gain;
       }
-      this.landMode.tick(land * 6);
-      x += this.landMode.band * landAmp;
+      for (let c = 0; c < this.ticks.length; c++) {
+        if (this.tickEnv[c] > 1e-6) {
+          this.ticks[c].tick(this.tickEnv[c] * noise);
+          this.tickEnv[c] *= tickDecay;
+        } else this.ticks[c].tick(0);
+        xb += this.ticks[c].band;
+        // Landing stones: cracks with the gravel's, where the wheels are.
+        const land = this.landEnv[c] ?? 0;
+        if (land > 1e-6) {
+          this.landTicks[c].tick(land * noise2);
+          this.landEnv[c] = land * tickDecay;
+        } else this.landTicks[c].tick(0);
+        x += this.landTicks[c].band;
+      }
 
       // Hits: the impulse rings the modes once; the burst decays.
       for (let h = 0; h < HIT_SOUNDS.length; h++) {
@@ -431,7 +452,9 @@ export class GroundSynth {
   }
 
   recover(outL, outR, start, end) {
-    for (const f of [this.humR, this.air, this.crush, this.thump, ...this.cracks, this.soil, this.rock, this.scrub, this.spin, this.hum, this.landMode, ...this.squeal, ...this.hits]) f.ic1 = f.ic2 = 0;
+    for (const f of [this.humR, this.air, this.crush, this.thump, ...this.cracks, this.soil, this.rock, this.scrub, this.spin, this.hum, ...this.ticks, ...this.landTicks, ...this.squeal, ...this.hits]) f.ic1 = f.ic2 = 0;
+    this.tickEnv.fill(0);
+    this.landEnv.fill(0);
     this.crackEnv.fill(0);
     for (const bank of Object.values(this.hitBanks)) {
       for (const f of [bank.burst, ...bank.modes]) f.ic1 = f.ic2 = 0;
