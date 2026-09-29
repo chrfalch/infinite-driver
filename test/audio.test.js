@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AudioFeed, FeedReader, RECORDS, createFeedBuffer } from '../src/audio/feed.js';
-import { EngineSynth } from '../src/audio/engine-synth.js';
+import { EngineSynth, LAYERS } from '../src/audio/engine-synth.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../src/vehicle/drivetrain.js';
 
 const SR = 48000;
@@ -153,6 +153,36 @@ describe('engine synth', () => {
     const out = render(0.5, { rpm: 1500, fuel: 0.5 }, synth).out;
     const loud = render(0.5, { rpm: 1500, fuel: 0.5 }).out;
     expect(rms(out, SR / 4)).toBeLessThan(rms(loud, SR / 4) * 0.3);
+  });
+
+  it('plays one layer alone, or none', () => {
+    const silent = new EngineSynth(SR);
+    silent.setLayers(Object.fromEntries(Object.keys(LAYERS).map((k) => [k, 0])));
+    expect(rms(render(0.5, { rpm: 2000, fuel: 0.6 }, silent).out, SR / 4)).toBeLessThan(1e-4);
+    for (const layer of ['pulses', 'echo', 'silencer1', 'block', 'clatter']) {
+      const solo = new EngineSynth(SR);
+      solo.setLayers(Object.fromEntries(Object.keys(LAYERS).map((k) => [k, k === layer ? 1 : 0])));
+      expect(rms(render(0.5, { rpm: 2000, fuel: 0.6 }, solo).out, SR / 4), layer).toBeGreaterThan(1e-3);
+    }
+  });
+
+  it('lets the boost off through the wastegate when the throttle lifts', () => {
+    const synth = new EngineSynth(SR);
+    render(3, { rpm: 3500, fuel: 1, throttle: 1 }, synth);
+    render(0.01, { rpm: 3400, fuel: 0, throttle: 0 }, synth);
+    expect(synth.wastegate).toBeGreaterThan(0.3);
+    render(1.5, { rpm: 2500, fuel: 0, throttle: 0 }, synth);
+    expect(synth.wastegate).toBeLessThanOrEqual(0);
+  });
+
+  it('recovers from a NaN instead of staying silent', () => {
+    const synth = new EngineSynth(SR);
+    render(0.1, { rpm: 1500, fuel: 0.5 }, synth);
+    synth.tone.ic1 = NaN;
+    const { out } = render(0.5, { rpm: 1500, fuel: 0.5 }, synth);
+    expect(synth.recoveries).toBeGreaterThan(0);
+    expect(out.every(Number.isFinite)).toBe(true);
+    expect(rms(out, SR / 4)).toBeGreaterThan(0.01);
   });
 
   it('renders the same with the same seed', () => {

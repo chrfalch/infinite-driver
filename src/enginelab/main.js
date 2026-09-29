@@ -6,6 +6,7 @@ import { createAudio } from '../audio/audio.js';
 import { AUDIO, saveAudio } from '../audio/config.js';
 import { AudioFeed, createFeedBuffer } from '../audio/feed.js';
 import { TURBO_DIESEL_I4 } from '../audio/engine-presets.js';
+import { LAYERS } from '../audio/engine-synth.js';
 import { changedFrom, loadSettings, saveSettings } from '../settings-store.js';
 import { DEFAULT_DRIVETRAIN, Drivetrain } from '../vehicle/drivetrain.js';
 
@@ -16,6 +17,7 @@ const MASS = 1800;
 const LAB = { mode: 'drive', rpm: 850, fuel: 0.13, exhaustBrake: 0, throttle: false, coastStop: 1 };
 const feed = new AudioFeed(createFeedBuffer());
 const audio = createAudio({ feed });
+window.__lab = { audio }; // for debugging from the console
 let drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN });
 let v = 0;
 let simTime = 0;
@@ -115,7 +117,39 @@ group('Turbo', [
   [preset.turbo, 'hissQ', 0.2, 5, 0.05, 'Whoosh Q'],
   [preset.turbo, 'flutter', 0, 1, 0.01, 'Lift-off flutter'],
   [preset.turbo, 'upTime', 0.1, 3, 0.05, 'Spool-up time (s)'],
+  [preset.turbo.wastegate, 'level', 0, 2, 0.01, 'Wastegate pssh'],
+  [preset.turbo.wastegate, 'time', 0.1, 2, 0.05, 'Wastegate pssh time (s)'],
+  [preset.turbo.wastegate, 'f', 500, 8000, 50, 'Wastegate pssh pitch (Hz)'],
+  [preset.turbo.wastegate, 'q', 0.3, 5, 0.05, 'Wastegate pssh Q'],
+  [preset.turbo.wastegate, 'bleed', 0, 0.5, 0.005, 'Wastegate bleed at full boost'],
 ]);
+
+// The parts of the sound, each with its own level; Solo plays one part alone (at its level).
+const LAYER_NAMES = {
+  pulses: 'Exhaust pulses (dry)',
+  echo: 'Pipe echo',
+  silencer1: `Silencer resonance 1 (${preset.muffler[0]?.f} Hz)`,
+  silencer2: `Silencer resonance 2 (${preset.muffler[1]?.f} Hz)`,
+  silencer3: `Silencer resonance 3 (${preset.muffler[2]?.f} Hz)`,
+  block: 'Block ring',
+  clatter: 'Diesel clatter',
+  rasp: 'Exhaust brake rasp',
+  whistle: 'Turbo whistle',
+  whoosh: 'Turbo whoosh',
+  flutter: 'Lift-off flutter',
+  wastegate: 'Wastegate',
+  gear: 'Timing gear whine',
+};
+const layers = { ...LAYERS };
+const soloChoice = { solo: 'none' };
+const sendLayers = () => {
+  const values = soloChoice.solo === 'none' ? { ...layers } : Object.fromEntries(Object.keys(layers).map((k) => [k, k === soloChoice.solo ? layers[k] : 0]));
+  audio.node?.port.postMessage({ type: 'layers', values });
+};
+const layerFolder = gui.addFolder('Layers');
+layerFolder.add(soloChoice, 'solo', { 'none (all)': 'none', ...Object.fromEntries(Object.entries(LAYER_NAMES).map(([k, name]) => [name, k])) }).name('Solo').onChange(sendLayers);
+for (const [key, name] of Object.entries(LAYER_NAMES)) layerFolder.add(layers, key, 0, 2, 0.01).name(name).onChange(sendLayers).listen();
+layerFolder.add({ all: () => { Object.assign(layers, LAYERS); soloChoice.solo = 'none'; layerFolder.controllersRecursive().forEach((c) => c.updateDisplay()); sendLayers(); } }, 'all').name('All layers back to 1');
 const presetActions = {
   copy: async () => {
     const text = JSON.stringify(changedFrom(TURBO_DIESEL_I4, preset), null, 2);
@@ -171,12 +205,15 @@ const frame = (now) => {
   if (audio.node && !presetSent) {
     presetSent = true;
     audio.node.port.postMessage({ type: 'preset', preset: clone(preset) });
+    sendLayers();
   }
   if (LAB.mode === 'manual') audio.node?.port.postMessage({ type: 'manual', values: manualValues() });
   else audio.update({ drivetrain: drive });
   const d = LAB.mode === 'manual' ? { ...manualValues(), label: '-' } : { rpm: drive.rpm, fuel: drive.fuel, exhaustBrake: drive.exhaustBrake, label: drive.label };
   readout.textContent = [
-    `sound    ${audio.state}${audio.ctx ? ` (${audio.ctx.state}, ${audio.ctx.sampleRate} Hz)` : ''}${audio.manual ? ', per frame' : ''}`,
+    `sound    ${audio.state}${audio.ctx ? ` (${audio.ctx.state}, ${audio.ctx.sampleRate} Hz)` : ''}${audio.manual ? ', per frame' : ''}${AUDIO.enabled ? '' : ', OFF (M or Levels → Sound on)'}`,
+    `output   peak ${audio.status?.peak?.toFixed(3) ?? '-'} (worklet, last second)${audio.status?.recoveries ? `, ${audio.status.recoveries} NaN recoveries` : ''}`,
+    `volume   ${AUDIO.volume.toFixed(2)} × engine ${AUDIO.engine.toFixed(2)}`,
     `rpm      ${Math.round(d.rpm)}`,
     `gear     ${d.label}`,
     `fuel     ${d.fuel.toFixed(2)}`,

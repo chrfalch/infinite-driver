@@ -48,6 +48,24 @@ function rng(seed) {
 
 const MAX_PULSES = 6;
 
+// The parts of the sound, each with its own level (1 = as the preset has it). The engine lab's
+// layer sliders set these to pick out one part at a time.
+export const LAYERS = Object.freeze({
+  pulses: 1, // the exhaust pulses straight out of the pipe
+  echo: 1, // their reflection in the pipe
+  silencer1: 1, // silencer resonances, in preset order
+  silencer2: 1,
+  silencer3: 1,
+  block: 1, // the block ringing with each combustion
+  clatter: 1, // diesel knock
+  rasp: 1, // exhaust brake
+  whistle: 1, // turbo compressor tones
+  whoosh: 1, // turbo intake
+  flutter: 1, // compressor surge on lift-off
+  wastegate: 1, // boost let off on lift-off, and the bleed at full boost
+  gear: 1, // timing gear whine
+});
+
 export class EngineSynth {
   constructor(sampleRate, preset = TURBO_DIESEL_I4, { seed = 12345 } = {}) {
     this.sr = sampleRate;
@@ -55,6 +73,7 @@ export class EngineSynth {
     this.random = rng(seed);
     // Level multipliers from the sound settings (see audio/config.js).
     this.mix = { engine: 1, turbo: 1, clatter: 1 };
+    this.layers = { ...LAYERS };
 
     this.phase = 0; // position in the 720° cycle, 0..1
     this.firings = 0; // count of firings so far (tests read it)
@@ -75,6 +94,10 @@ export class EngineSynth {
     this.hiss = new Svf();
     this.flutterFilter = new Svf();
     this.flutterFilter.set(900, 1.5, sampleRate);
+    this.wastegateFilter = new Svf();
+    this.bleedFilter = new Svf();
+    this.wastegate = 0; // time left of a wastegate release (s)
+    this.wastegateLength = 1;
     // The last stage: no fizz above what an exhaust makes.
     this.air = new Svf();
     this.setPreset(preset);
@@ -107,6 +130,12 @@ export class EngineSynth {
     filters(this.clatter, preset.clatter.bands);
     this.block.set(preset.block.f, preset.block.q, sr);
     this.air.set(preset.topCut ?? 7000, 0.6, sr);
+    const w = preset.turbo.wastegate;
+    if (w) this.bleedFilter.set(w.bleedF, 0.7, sr);
+  }
+
+  setLayers(layers) {
+    Object.assign(this.layers, layers);
   }
 
   setMix(mix) {
@@ -169,13 +198,29 @@ export class EngineSynth {
     const spool = this.spool;
     // Lifting off at boost starts a compressor flutter.
     const throttle = b.throttle ?? 0;
-    if (this.lastThrottle > 0.5 && throttle <= 0.5 && spool > 0.4) this.flutter = t.flutterTime;
+    const wg = t.wastegate;
+    if (this.lastThrottle > 0.5 && throttle <= 0.5 && spool > 0.4) {
+      this.flutter = t.flutterTime;
+      // The boost is let off: a "pssh" as long and as loud as the boost was high.
+      if (wg) {
+        this.wastegateLength = wg.time * (0.5 + 0.5 * spool);
+        this.wastegate = this.wastegateLength;
+        this.wastegateLevel = wg.level * spool;
+      }
+    }
+    // The release sweeps down as the pressure falls.
+    if (wg && this.wastegate > 0) this.wastegateFilter.set(wg.f * (0.5 + 0.5 * (this.wastegate / this.wastegateLength)), wg.q, sr);
+    const L = this.layers;
+    // Held at full boost, the wastegate bleeds a little.
+    const bleedAmp = wg ? wg.bleed * Math.max(0, (spool - 0.8) / 0.2) * fuelMid * mix.turbo * L.wastegate : 0;
     this.lastThrottle = throttle;
-    const whineAmp = t.whine * spool ** 1.5 * (0.4 + 0.6 * fuelMid) * mix.turbo;
-    const hissAmp = t.hiss * spool * (0.2 + 0.8 * fuelMid) * mix.turbo;
-    const flutterAmp = t.flutter * spool * mix.turbo;
+    const whineAmp = t.whine * spool ** 1.5 * (0.4 + 0.6 * fuelMid) * mix.turbo * L.whistle;
+    const hissAmp = t.hiss * spool * (0.2 + 0.8 * fuelMid) * mix.turbo * L.whoosh;
+    const flutterAmp = t.flutter * spool * mix.turbo * L.flutter;
+    const wastegateAmp = (this.wastegateLevel ?? 0) * mix.turbo * L.wastegate;
     const whineF = t.whineMin + (t.whineMax - t.whineMin) * spool;
-    const gearAmp = p.gearWhine.level * Math.min(1, rpmMid / 3000);
+    const gearAmp = p.gearWhine.level * Math.min(1, rpmMid / 3000) * L.gear;
+    const silencerLayers = [L.silencer1, L.silencer2, L.silencer3];
     const cylinders = p.cylinders;
     const firing = p.firing;
 
@@ -222,7 +267,7 @@ export class EngineSynth {
 
       const noise = this.random() * 2 - 1;
       // The exhaust brake makes the pulses raspy.
-      pressure += rasp * p.exhaustBrake.rasp * noise;
+      pressure += rasp * p.exhaustBrake.rasp * noise * L.rasp;
       // Turbulence: the gas does not flow smoothly, so each pulse is roughened by low-passed noise.
       // Smooth pulses through the pipe sounded like blowing through a hose; rough ones rumble.
       this.roughNoise += (noise - this.roughNoise) * roughK;
@@ -236,10 +281,10 @@ export class EngineSynth {
       this.delayIndex = (this.delayIndex + 1) % this.delay.length;
 
       // Silencer: body resonances, then the load-dependent low-pass.
-      let silenced = piped * 0.5;
+      let silenced = (pressure * L.pulses + pipeFb * this.delayLp * L.echo) * 0.5;
       for (let m = 0; m < this.muffler.length; m++) {
         this.muffler[m].tick(piped);
-        silenced += this.muffler[m].band * p.muffler[m].gain;
+        silenced += this.muffler[m].band * p.muffler[m].gain * (silencerLayers[m] ?? 1);
       }
       // The silencer overdriven a little, harder on the pressure peaks: grit in the low mids.
       const drive = p.drive;
@@ -248,14 +293,14 @@ export class EngineSynth {
 
       // Block ring and diesel clatter.
       this.block.tick(pressure);
-      const blockOut = this.block.band * p.block.gain;
+      const blockOut = this.block.band * p.block.gain * L.block;
       const knockNoise = knock * noise;
       let clatter = 0;
       for (let c = 0; c < this.clatter.length; c++) {
         this.clatter[c].tick(knockNoise);
         clatter += this.clatter[c].band * p.clatter.bands[c].gain;
       }
-      clatter *= mix.clatter;
+      clatter *= mix.clatter * L.clatter;
 
       // Turbo whistle, intake hiss and lift-off flutter.
       this.whinePhase += whineF * dt;
@@ -275,6 +320,17 @@ export class EngineSynth {
         turbo += flutterAmp * (this.flutter / t.flutterTime) * gate * gate * this.flutterFilter.band;
       }
 
+      if (this.wastegate > 0) {
+        this.wastegate -= dt;
+        const env = this.wastegate / this.wastegateLength;
+        this.wastegateFilter.tick(noise);
+        turbo += wastegateAmp * env * env * this.wastegateFilter.band;
+      }
+      if (bleedAmp > 0) {
+        this.bleedFilter.tick(noise);
+        turbo += bleedAmp * this.bleedFilter.band;
+      }
+
       // Timing gear whine.
       this.gearPhase += ((rpm / 60) * p.gearWhine.teeth) * dt;
       if (this.gearPhase >= 1) this.gearPhase -= 1;
@@ -287,5 +343,17 @@ export class EngineSynth {
       const x = (this.dc + turbo + gear) * p.gain;
       out[start + i] = Math.tanh(this.air.tick(x));
     }
+    // A filter that ever holds NaN stays silent for good: start the filters over instead.
+    if (!Number.isFinite(out[end - 1])) this.recover(out, start, end);
+  }
+
+  recover(out, start, end) {
+    this.recoveries = (this.recoveries ?? 0) + 1;
+    for (const f of [this.tone, this.block, this.hiss, this.flutterFilter, this.wastegateFilter, this.bleedFilter, this.air, ...this.muffler, ...this.clatter]) f.ic1 = f.ic2 = 0;
+    this.delay.fill(0);
+    this.delayLp = this.dc = this.dcIn = this.roughNoise = this.wander = 0;
+    this.pulses.length = 0;
+    if (!Number.isFinite(this.spool)) this.spool = 0;
+    out.fill(0, start, end);
   }
 }

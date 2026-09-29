@@ -58,6 +58,9 @@ export const TURBO_DIESEL_I4 = Object.freeze({
     flutter: 0.3,
     flutterRate: 19, // Hz
     flutterTime: 0.4, // s
+    // Lifting off at boost the wastegate lets the boost off: a "pssh", band-passed noise at f
+    // sweeping down to half as the pressure falls. Held at full boost it bleeds a little (bleedF).
+    wastegate: { level: 0.5, time: 0.7, f: 3200, q: 1.1, bleed: 0.05, bleedF: 5200 },
   },
   // The exhaust brake closes a valve in the exhaust: a hard, raspy note on the overrun.
   exhaustBrake: { level: 0.35, rasp: 0.5 },

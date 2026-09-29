@@ -53,6 +53,7 @@ export function createAudio({ feed = null } = {}) {
       node = new AudioWorkletNode(ctx, 'engine', options);
     }
     node.port.onmessage = (e) => {
+      if (e.data.type === 'status') audio.status = e.data;
       if (e.data.type !== 'status' || audio.manual || !feed) return;
       // The worklet sees no steps though physics writes them: its buffer is a copy, not shared.
       if (e.data.feedSteps === 0 && feed.written() > 0) staleReports++;
