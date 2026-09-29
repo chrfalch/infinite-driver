@@ -132,6 +132,7 @@ export function effectiveGpuTire(gpu, performance, ground = GROUND, snow = snowC
         friction: gpu.friction * snow.freshGrip,
         rockFriction: gpu.friction * snow.packedGrip,
         bareFriction: gpu.friction * snow.asphaltGrip,
+        iceFriction: gpu.friction * snow.iceGrip,
         snowSlide: snow.slideGrip,
         maxSink: snow.maxSink,
         gravel: 0,

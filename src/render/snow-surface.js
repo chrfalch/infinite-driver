@@ -6,9 +6,9 @@
 // the deformation) and how packed the snow there is. It follows the car in whole metres, so its
 // edges stay on the terrain mesh's grid lines, and toward the edge it fades into the terrain mesh's
 // coarser surface and the deformation fades out, so the edge meets the terrain mesh exactly.
-import { BufferAttribute, BufferGeometry, DataTexture, FloatType, Mesh, MeshStandardNodeMaterial, NearestFilter, RedFormat, RGFormat } from 'three/webgpu';
+import { BufferAttribute, BufferGeometry, DataTexture, FloatType, Mesh, MeshStandardNodeMaterial, NearestFilter, RGFormat } from 'three/webgpu';
 import { Fn, float, ivec2, mix, normalize, positionLocal, smoothstep, textureLoad, transformNormalToView, uniform, varying, vec2, vec3, vec4 } from 'three/tsl';
-import { snowCover, snowGroundColor } from './terrain-mesh.js';
+import { snowGroundColor, snowGroundRoughness } from './terrain-mesh.js';
 import { DEFORM_CELL } from '../terrain/deformation.js';
 import { drawnSurface } from '../terrain/drawn-surface.js';
 
@@ -63,8 +63,9 @@ function patchGeometry() {
 
 // Snow colours (as on the terrain mesh, see snowGroundColor): fresh snow is bright and slightly
 // blue; packed snow in a rut or on the road is greyer and smoother (it shines more), and where the
-// road's snow is worn through, the asphalt shows. `texture`: height and packing per vertex; `road`:
-// signed distance to the road's centre line per vertex (only rewritten when the patch moves).
+// road's snow is worn through, the asphalt shows; on the lake, black ice. `texture`: height and
+// packing per vertex; `road`: signed distance to the road's centre line and distance inside the
+// lake's shoreline per vertex (only rewritten when the patch moves).
 function snowMaterial(texture, road, origin) {
   const material = new MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
   // The vertex's cell (the geometry holds cell indices in x and z).
@@ -79,9 +80,9 @@ function snowMaterial(texture, road, origin) {
   })();
   material.normalNode = transformNormalToView(normalize(varying(normal)));
   const pack = smoothstep(0.05, 0.9, varying(textureLoad(texture, cell).y));
-  const side = varying(textureLoad(road, cell).x);
-  material.colorNode = vec4(snowGroundColor(side, pack), 1);
-  material.roughnessNode = mix(float(0.8), mix(float(0.95), float(0.6), pack), snowCover(side));
+  const place = varying(textureLoad(road, cell).xy);
+  material.colorNode = vec4(snowGroundColor(place.x, pack, place.y), 1);
+  material.roughnessNode = snowGroundRoughness(place.x, pack, place.y);
   return material;
 }
 
@@ -95,15 +96,15 @@ export class SnowSurface {
     this.texture = new DataTexture(this.data, N, N, RGFormat, FloatType);
     this.texture.minFilter = NearestFilter;
     this.texture.magFilter = NearestFilter;
-    this.road = new DataTexture(new Float32Array(N * N), N, N, RedFormat, FloatType);
+    this.road = new DataTexture(new Float32Array(N * N * 2), N, N, RGFormat, FloatType);
     this.road.minFilter = NearestFilter;
     this.road.magFilter = NearestFilter;
     this.origin = uniform(vec2(0, 0));
     // Per vertex, kept across moves: the snow surface's height, the terrain mesh's there (the patch
     // blends into it at its edge, so the two meet without a crack), the snow's firmness and pack depth
-    // (see terrain/snow.js), and the distance to the road.
-    this.cells = { base: new Float32Array(N * N), coarse: new Float32Array(N * N), firm: new Float32Array(N * N), pack: new Float32Array(N * N), dist: this.road.image.data };
-    this.spare = { base: new Float32Array(N * N), coarse: new Float32Array(N * N), firm: new Float32Array(N * N), pack: new Float32Array(N * N), dist: new Float32Array(N * N) };
+    // (see terrain/snow.js), and where it is: the distances to the road and into the lake.
+    this.cells = { base: new Float32Array(N * N), coarse: new Float32Array(N * N), firm: new Float32Array(N * N), pack: new Float32Array(N * N), side: new Float32Array(N * N), lake: new Float32Array(N * N) };
+    this.spare = { base: new Float32Array(N * N), coarse: new Float32Array(N * N), firm: new Float32Array(N * N), pack: new Float32Array(N * N), side: new Float32Array(N * N), lake: new Float32Array(N * N) };
     this.def = new Float32Array(N * N);
     this.weights = edgeWeights();
     this.ix0 = null;
@@ -149,7 +150,8 @@ export class SnowSurface {
             next.coarse[i] = prev.coarse[j];
             next.firm[i] = prev.firm[j];
             next.pack[i] = prev.pack[j];
-            next.dist[i] = prev.dist[j];
+            next.side[i] = prev.side[j];
+            next.lake[i] = prev.lake[j];
           } else {
             const wx = (ix0 + ix) * CELL;
             const wz = (iz0 + iz) * CELL;
@@ -158,13 +160,18 @@ export class SnowSurface {
             next.coarse[i] = this.coarse(wx, wz);
             next.firm[i] = s.firm;
             next.pack[i] = s.packDepth;
-            next.dist[i] = this.heightAt.roadSide(wx, wz);
+            next.side[i] = this.heightAt.roadSide(wx, wz);
+            next.lake[i] = s.lake;
           }
         }
       }
       this.spare = prev;
       this.cells = next;
-      this.road.image.data = next.dist;
+      const place = this.road.image.data;
+      for (let i = 0; i < N * N; i++) {
+        place[i * 2] = next.side[i];
+        place[i * 2 + 1] = next.lake[i];
+      }
       this.road.needsUpdate = true;
       this.ix0 = ix0;
       this.iz0 = iz0;

@@ -52,6 +52,7 @@ const Params = d.struct({
   soilStiffness: d.f32, // N/m per particle; 0 = hard ground
   snow: d.f32, // 1: the grid's second channel is snow (0 fresh .. 1 packed .. 2 bare asphalt), not rock flags
   bareFriction: d.f32, // snow: grip on bare asphalt
+  iceFriction: d.f32, // snow: grip on bare ice
   snowSlide: d.f32, // snow: sliding grip as a share of the grip before it slides
   packedStiffness: d.f32, // N/m per particle, fully packed snow
   pressureLead: d.f32, // substeps of wheel spin the pressure normal is turned ahead
@@ -235,7 +236,7 @@ export class GpuTireSolver {
       return normalize(vec3f(-sx, 1.0, -sz));
     }`.$uses({ params: this.params, ground: this.ground });
     // The nearest grid cell's second channel: 1 on bare rock, else 0 (on snow: 0..1 how packed,
-    // up to 2 where worn to bare asphalt).
+    // up to 2 where worn to bare asphalt, 2..3 bare ice).
     const groundRock = tgpu.fn([d.f32, d.f32], d.f32)/* wgsl */ `(x, z) {
       let last = f32(${GROUND_N - 1});
       let ix = u32(clamp(round((x - params.groundOriginX) / params.groundCell), 0.0, last));
@@ -579,7 +580,9 @@ export class GpuTireSolver {
             // On snow, rockFriction is the grip on fully packed snow, blended in as it packs, and then
             // toward bare asphalt where the snow is worn through.
             let surfF = groundRock(p.x, p.z);
-            let snowMu = mix(mix(params.friction, params.rockFriction, min(surfF, 1.0)), params.bareFriction, clamp(surfF - 1.0, 0.0, 1.0));
+            // Channel 2..3: snow worn to bare ice instead (see snowPacking in gpu-tires.js).
+            let onSnow = mix(mix(params.friction, params.rockFriction, min(surfF, 1.0)), params.bareFriction, clamp(surfF - 1.0, 0.0, 1.0));
+            let snowMu = select(onSnow, mix(params.rockFriction, params.iceFriction, clamp(surfF - 2.0, 0.0, 1.0)), surfF > 2.0);
             let mu = select(select(params.friction, params.rockFriction, surfF > 0.5), snowMu, params.snow > 0.5);
             let limit = mu * push * dt * dt / m;
             var cut = slide;
@@ -761,6 +764,7 @@ export class GpuTireSolver {
       soilStiffness: s.soilStiffness > 0 ? Math.min(s.soilStiffness, (3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)) : 0,
       snow: s.snow ?? 0,
       bareFriction: s.bareFriction ?? s.friction,
+      iceFriction: s.iceFriction ?? s.friction,
       snowSlide: s.snowSlide ?? 1,
       packedStiffness: Math.min(s.packedStiffness ?? 0, (3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)),
       soilRebound: s.soilRebound ?? 0.35,

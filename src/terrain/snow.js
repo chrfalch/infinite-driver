@@ -2,11 +2,13 @@
 // work goes into how it drives: the tyres sink into fresh snow, pack it down into ruts that are
 // firmer and slicker than the snow around them, and throw fine powder when they spin or slide.
 //
-// The snow has a depth that varies (snowAt): 30 cm of fresh snow on the plain; on the road bare
-// asphalt with spots and patches of thin, packed snow; and along both road edges the plough banks ("brøytekanter"), humps of firm snow up to
-// about 60 cm above the snow beside them. The ground under the snow is flat but for a broad, slow
-// swell. Everything else about snow lives in SNOW below and in the systems that read it (tyre
-// solver, compaction, spray, the snow surface mesh).
+// The snow has a depth that varies (snowAt): 12 cm of fresh snow on the plain; on the road bare
+// asphalt with spots and patches of thin, packed snow; and along both road edges the plough banks
+// ("brøytekanter"), humps of loose snow up to about 80 cm above the snow beside them, deep enough
+// to nearly get stuck in. Beside the road lie a frozen lake (LAKE) and patches of spruce forest
+// (FOREST). The ground under the snow is flat but for a broad, slow swell and the lake's hollow.
+// Everything else about snow lives in SNOW below and in the systems that read it (tyre solver,
+// compaction, spray, the snow surface mesh).
 import { createNoise2D } from 'simplex-noise';
 import { mulberry32 } from './height.js';
 
@@ -27,6 +29,7 @@ export const SNOW = Object.freeze({
   rebound: 0.3, // share of the push kept as the tread lifts: packed snow does not spring back
   freshGrip: 0.36, // x the tyre's friction setting: rubber on fresh snow (with the lugs biting)
   packedGrip: 0.2, // x the tyre's friction setting: polished, packed snow in a rut or on the road
+  iceGrip: 0.09, // x the tyre's friction setting: rubber on bare lake ice
   slideGrip: 0.8, // once sliding on snow, this share of the grip is left (so slides carry on)
   asphaltGrip: 0.8, // x the tyre's friction setting: bare, cold asphalt
   drag: 1.0, // drag through deep, loose snow (plough banks), as a share of the tyre's load there
@@ -92,6 +95,37 @@ export const roadSnowDepth = (d, x, z) => {
   return ROAD.thin * smoothstep(t, t + 0.1, roadSpots(x, z));
 };
 
+// A frozen lake beside the road: flat, bare black ice a little below the plain, with spots and
+// streaks of wind-blown snow on it (more toward the shore), inside a wavy shoreline.
+export const LAKE = Object.freeze({
+  x: 55, // centre (m)
+  z: 64,
+  radius: 34, // mean radius (m); the shoreline swings about 25 % in and out
+  drop: 0.45, // m the ice lies below the plain
+  shore: 7, // m over which the shore slopes down to the ice
+  thin: 0.03, // m of snow in the spots on the ice
+});
+// Signed distance inside the shoreline (m): positive on the lake, negative on land.
+export function lakeInside(x, z) {
+  const dx = x - LAKE.x;
+  const dz = z - LAKE.z;
+  const a = Math.atan2(dz, dx);
+  const r = LAKE.radius * (1 + 0.12 * Math.sin(3 * a + 1) + 0.08 * Math.sin(5 * a + 2) + 0.05 * Math.sin(8 * a + 0.5));
+  return r - Math.hypot(dx, dz);
+}
+// Snow on the ice (m): bigger spots than on the road (the same noise, stretched), cut at a threshold
+// that drops toward the shore, where snow lies thicker. The shaders repeat this (lakeCover in
+// render/terrain-mesh.js).
+export const lakeSpotThreshold = (inside) => 0.7 - 0.3 * (1 - smoothstep(0, 10, inside));
+export const lakeSnowDepth = (inside, x, z) => {
+  const t = lakeSpotThreshold(inside);
+  return LAKE.thin * smoothstep(t, t + 0.08, roadSpots(x * 0.45 + 7, z * 0.45 - 3));
+};
+
+// Forest: patches of snow-laden spruce along the road, a few hundred metres apart. The density at a
+// point (0 none .. 1 dense forest); plants are placed by terrain/vegetation.js.
+export const FOREST = Object.freeze({ roadClear: 9, lakeClear: 9, spawnClear: 16 });
+
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
@@ -101,6 +135,7 @@ export function createSnowField(seed = 2024) {
   const swell = createNoise2D(mulberry32(seed));
   const drifts = createNoise2D(mulberry32(seed + 1));
   const lumps = createNoise2D(mulberry32(seed + 2));
+  const forest = createNoise2D(mulberry32(seed + 3));
   const W = ROAD.halfWidth;
 
   // The road's centre line z = g(x) - g(0), through the origin, and the distance to it (|f| / |grad
@@ -132,12 +167,21 @@ export function createSnowField(seed = 2024) {
       depth = Math.max(verge, fresh + bank);
       firm = depth === verge ? 1 : (ROAD.bankFirmness * bank) / (bank + fresh + 1e-6);
     }
+    // The lake: toward the shore the snow thins onto the ice, with wind-blown spots on the ice.
+    const lake = lakeInside(x, z);
+    let ice = 0;
+    if (lake > -1.5) {
+      const onIce = smoothstep(-1.5, 0.5, lake);
+      depth += (lakeSnowDepth(lake, x, z) - depth) * onIce;
+      firm += (1 - firm) * onIce;
+      ice = lake > 0 ? 1 : 0;
+    }
     // Deep, loose snow (a plough bank) drags at the tyres ploughing through it.
     const drag = SNOW.drag * smoothstep(SNOW.depth + 0.05, SNOW.depth + 0.35, depth) * (1 - firm);
-    return { depth, firm, packDepth: SNOW.packRatio * depth * (1 - firm), drag, dist: d };
+    return { depth, firm, packDepth: SNOW.packRatio * depth * (1 - firm), drag, dist: d, ice, lake };
   }
 
-  const ground = (x, z) => swell(x * 0.006, z * 0.006) * 0.35;
+  const ground = (x, z) => swell(x * 0.006, z * 0.006) * 0.35 - LAKE.drop * smoothstep(-LAKE.shore, 0, lakeInside(x, z));
   const heightAt = (x, z) => ground(x, z) + snowAt(x, z).depth;
   heightAt.world = 'snow';
   heightAt.snow = SNOW;
@@ -149,5 +193,11 @@ export function createSnowField(seed = 2024) {
   heightAt.roadHeading = (x) => -Math.atan(dg(x));
   // Bare asphalt: no ruts, no spray, nothing piles up on it (like the dry river's bare rock).
   heightAt.bareAt = (x, z) => snowAt(x, z).depth < BARE_DEPTH / 2;
+  heightAt.lakeInside = lakeInside;
+  // Spruce forest density (0..1): patches along the road, clear of the road, the lake and the start.
+  heightAt.forestAt = (x, z) => {
+    if (roadDistance(x, z) < FOREST.roadClear || lakeInside(x, z) > -FOREST.lakeClear || Math.hypot(x, z) < FOREST.spawnClear) return 0;
+    return smoothstep(0.0, 0.35, forest(x * 0.006, z * 0.006) + 0.25 * forest(x * 0.03 + 9, z * 0.03));
+  };
   return heightAt;
 }

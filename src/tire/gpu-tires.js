@@ -97,7 +97,7 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
           if (snowAt) {
             const sn = snowAt(ox + ix * cell, oz + iz * cell);
             const bare = 1 - sn.depth / BARE_DEPTH;
-            rock[iz * N + ix] = bare > 0 ? 1 + Math.min(1, bare) : sn.firm;
+            rock[iz * N + ix] = bare > 0 ? (sn.ice ? 2 : 1) + Math.min(1, bare) : sn.firm;
             pack[iz * N + ix] = sn.packDepth;
             drag[iz * N + ix] = sn.drag;
           } else rock[iz * N + ix] = rockAt?.(ox + ix * cell, oz + iz * cell) ? 1 : 0;
@@ -153,9 +153,9 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
 
 // Snow: the grid's second channel over cells [x0..x1] x [z0..z1] says what the tread stands on:
 // 0..1 is how packed the snow is, from fresh (0) to packed hard (1; a rut as deep as the snow there
-// packs, or firm snow such as the road's and the plough banks'), and 1..2 is snow worn down to
-// bare asphalt (2 = bare). From the firmness and pack depth kept per cell (g.rock, g.pack) and the
-// ruts. Snow piled up beside a rut stays as it was.
+// packs, or firm snow such as the road's), 1..2 is snow worn down to bare asphalt (2 = bare), and
+// 2..3 the same on the lake's ice (3 = bare ice). From the firmness and pack depth kept per cell
+// (g.rock, g.pack) and the ruts. Snow piled up beside a rut stays as it was.
 export function snowPacking(g, x0, z0, x1, z1) {
   const N = GROUND_N;
   const { base, heights, grid, rock, pack } = g;

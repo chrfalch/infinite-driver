@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { GroundDeformation, compactSoil } from '../src/terrain/deformation.js';
 import { createHeightField } from '../src/terrain/height.js';
-import { BARE_DEPTH, ROAD, SNOW } from '../src/terrain/snow.js';
+import { BARE_DEPTH, LAKE, ROAD, SNOW } from '../src/terrain/snow.js';
 import { DEFAULT_GPU_TIRE, effectiveGpuTire } from '../src/tire/config.js';
 import { GROUND_N } from '../src/tire/gpu-tire-solver.js';
 import { updateGpuGround } from '../src/tire/gpu-tires.js';
@@ -16,7 +16,7 @@ describe('snowfield', () => {
     let hi = -Infinity;
     for (let x = -500; x <= 500; x += 5) {
       for (let z = -500; z <= 500; z += 5) {
-        if (snowField.roadDistance(x, z) < 8) continue;
+        if (snowField.roadDistance(x, z) < 8 || snowField.lakeInside(x, z) > -2) continue;
         const h = snowField(x, z);
         lo = Math.min(lo, h);
         hi = Math.max(hi, h);
@@ -24,7 +24,7 @@ describe('snowfield', () => {
         expect(snowField.snowAt(x, z).firm).toBe(0);
       }
     }
-    expect(hi - lo).toBeLessThan(1);
+    expect(hi - lo).toBeLessThan(1.2); // the swell, and the slope down to the lake
     // The same world on every load (and in every worker).
     expect(createHeightField({ mode: 'snow' })(123.4, -56.7)).toBe(snowField(123.4, -56.7));
   });
@@ -62,6 +62,45 @@ describe('snowfield', () => {
     expect(share).toBeLessThan(0.9);
     // Traffic keeps the wheel tracks a little clearer.
     expect(bareInTracks / inTracks).toBeGreaterThan(share);
+  });
+
+  it('has a frozen lake beside the road: bare ice, a little below the plain, with spots of snow', () => {
+    let ice = 0;
+    let spots = 0;
+    for (let x = LAKE.x - 20; x <= LAKE.x + 20; x += 0.5) {
+      for (let z = LAKE.z - 20; z <= LAKE.z + 20; z += 0.5) {
+        if (snowField.lakeInside(x, z) < 1) continue;
+        const s = snowField.snowAt(x, z);
+        expect(s.ice).toBe(1);
+        expect(s.depth).toBeLessThanOrEqual(LAKE.thin);
+        if (s.depth < BARE_DEPTH) ice++;
+        else spots++;
+      }
+    }
+    expect(ice / (ice + spots)).toBeGreaterThan(0.5);
+    expect(spots).toBeGreaterThan(20);
+    expect(snowField(LAKE.x, LAKE.z)).toBeLessThan(snowField(LAKE.x, LAKE.z - 60) - 0.2);
+    // Well clear of the road and its banks.
+    for (let a = 0; a < Math.PI * 2; a += 0.05) {
+      let r = 0;
+      while (snowField.lakeInside(LAKE.x + Math.cos(a) * r, LAKE.z + Math.sin(a) * r) > 0) r += 0.5;
+      expect(snowField.roadDistance(LAKE.x + Math.cos(a) * r, LAKE.z + Math.sin(a) * r)).toBeGreaterThan(10);
+    }
+  });
+
+  it('has patches of forest, clear of the road, the lake and the start', () => {
+    let trees = 0;
+    let n = 0;
+    for (let x = -300; x <= 300; x += 4) {
+      for (let z = -300; z <= 300; z += 4) {
+        n++;
+        const f = snowField.forestAt(x, z);
+        if (f > 0.5) trees++;
+        if (snowField.roadDistance(x, z) < 9 || snowField.lakeInside(x, z) > -9 || Math.hypot(x, z) < 16) expect(f).toBe(0);
+      }
+    }
+    expect(trees / n).toBeGreaterThan(0.1);
+    expect(trees / n).toBeLessThan(0.6);
   });
 
   it('has firm plough banks along both road edges, standing above the fresh snow', () => {
@@ -131,6 +170,8 @@ describe('GPU tyres on snow', () => {
     expect(s.rockFriction).toBeCloseTo(DEFAULT_GPU_TIRE.friction * SNOW.packedGrip);
     expect(s.rockFriction).toBeLessThan(s.friction);
     expect(s.gravel).toBe(0);
+    expect(s.iceFriction).toBeLessThan(s.rockFriction);
+    expect(s.bareFriction).toBeGreaterThan(s.friction);
     // Soil worlds are unchanged.
     expect(effectiveGpuTire(DEFAULT_GPU_TIRE, false, { softness: 0.5, gravel: 1 }, null).snow).toBeUndefined();
   });
@@ -171,5 +212,12 @@ describe('GPU tyres on snow', () => {
     }
     expect(packed).toBeGreaterThan(50);
     expect(bare).toBeGreaterThan(50);
+
+    // On the lake: bare ice (3) and spots of packed snow (1).
+    updateGpuGround(solver, snowField, LAKE.x, LAKE.z, d, cell);
+    const lake = solver.groundCache;
+    let ice = 0;
+    for (let i = 0; i < GROUND_N * GROUND_N; i++) if (lake.grid[GROUND_N * GROUND_N + i] === 3) ice++;
+    expect(ice).toBeGreaterThan(GROUND_N * GROUND_N * 0.4);
   });
 });

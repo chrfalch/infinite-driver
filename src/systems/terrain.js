@@ -340,5 +340,6 @@ function buildRocksMesh(entity, field, rocksMeshData) {
   if (plants) {
     entity.get(View).object.add(plants);
     field.bushes = plants.userData.bushes ?? null;
+    field.spruces = plants.userData.spruces ?? null;
   }
 }
