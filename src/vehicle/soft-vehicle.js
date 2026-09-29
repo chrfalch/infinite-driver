@@ -476,16 +476,57 @@ export class JointedVehicle {
   }
 
   // Extra spin inertia per wheel from the engine's flywheel while the clutch is locked (see
-  // Drivetrain.coupledInertia), on the Rapier hub and in the GPU tyres' hub step alike. Capped at
-  // MAX_DRIVE_INERTIA: the full share in low first (about 250 kg·m²) on a hub jointed to a ~10 kg
-  // knuckle was more than Rapier's joint solver could hold steady, and the hub shook.
+  // Drivetrain.coupledInertia). Capped at MAX_DRIVE_INERTIA: the full share in low first (about
+  // 250 kg·m²) on a hub jointed to a ~10 kg knuckle was more than Rapier's joint solver could hold
+  // steady, and the hub shook.
+  // With GPU tyres the flywheel is not put on the Rapier hub: a body with 25 times the inertia about
+  // its axle as across it precesses far faster than the step (about 1200 rad/s at 50 rad/s of
+  // spin), Rapier's gyroscopic step then blows any wobble up, and the tyre folds inside out on its
+  // bead (a wheel spinning in a snow bank in low gear). The flywheel only resists the spin, so the
+  // hub gets its share of the spin torques instead (see spinShare) and the GPU hub step uses the
+  // whole inertia. Rapier's soft tyres pass their torque through joints, so they keep it on the hub.
   setDriveInertia(share) {
     const perWheel = Math.min(MAX_DRIVE_INERTIA, share);
     for (const w of this.wheels) {
       if (Math.abs(perWheel - (w.driveInertia ?? 0)) <= 0.02 * Math.max(1, perWheel)) continue;
       w.driveInertia = perWheel;
-      w.hub.setAdditionalMassProperties(1e-4, ORIGIN, { x: 0, y: 0, z: perWheel }, IDENTITY, true);
+      if (!this.gpu) w.hub.setAdditionalMassProperties(1e-4, ORIGIN, { x: 0, y: 0, z: perWheel }, IDENTITY, true);
     }
+  }
+
+  // Share of a spin torque that turns the Rapier hub; the rest turns the engine's flywheel (GPU tyres).
+  spinShare(w) {
+    if (!this.gpu) return 1;
+    return HUB_INERTIA_GPU.z / (HUB_INERTIA_GPU.z + (w.driveInertia ?? 0));
+  }
+
+  // The GPU tyre's force and torque on hub `w`. About the axle the hub takes its share of the
+  // torque (see spinShare); the flywheel's share of the brake reacts on the knuckle, as the
+  // caliper holds the whole wheel. The brake torque on the wheel and flywheel is worked out as the
+  // GPU hub step does: it stops the spin relative to the knuckle if it can, else it slips.
+  applyHubTyre(w, fx, fy, fz, tx, ty, tz) {
+    w.tyreLoad = fy; // N, upward: what the ground carries (the sound reads it)
+    w.hub.resetForces(true);
+    w.hub.addForce({ x: fx, y: fy, z: fz }, true);
+    const share = this.spinShare(w);
+    const a = w.spinAxis;
+    if (share < 1 && a) {
+      const along = tx * a.x + ty * a.y + tz * a.z;
+      const cut = along * (1 - share);
+      tx -= a.x * cut;
+      ty -= a.y * cut;
+      tz -= a.z * cut;
+      if (w.brakeTorque > 0) {
+        const I = HUB_INERTIA_GPU.z + w.driveInertia;
+        const dt = this.stepDt;
+        const sum = along + w.driveTorque;
+        const rel = w.relSpin + (dt * sum) / I;
+        const brake = Math.abs(rel) <= (dt * w.brakeTorque) / I ? -((w.relSpin * I) / dt + sum) : -Math.sign(rel) * w.brakeTorque;
+        const r = -(1 - share) * brake;
+        w.knuckle.addTorque({ x: a.x * r, y: a.y * r, z: a.z * r }, true);
+      }
+    }
+    w.hub.addTorque({ x: tx, y: ty, z: tz }, true);
   }
 
   setWheelEngineForce(i, force) {
@@ -548,6 +589,7 @@ export class JointedVehicle {
     const qc = this.body.rotation();
     const pc = this.body.translation();
     const qcInv = conjugate(qc);
+    this.stepDt = dt;
     // Chassis and axle torques are rebuilt every step (Rapier keeps added torques until reset).
     this.body.resetTorques(true);
     for (const axle of this.axles) axle.beam.resetTorques(true);
@@ -598,11 +640,17 @@ export class JointedVehicle {
 
       // Engine: forward drive rolls the wheel about -axle; its reaction goes into the knuckle (and
       // through it the chassis). Brakes are the axle joint's motor, capped at the brake torque.
+      // With GPU tyres the hub takes only its share of both (see spinShare).
       const radius = this.tire.outerRadius;
       const torque = -w.engineForce * radius;
-      w.axleJoint.setMotorMaxForce(((w.brakeImpulse ?? 0) / dt) * radius);
+      const share = this.spinShare(w);
+      w.spinAxis = spinAxis;
+      w.relSpin = spin;
+      w.driveTorque = torque;
+      w.brakeTorque = ((w.brakeImpulse ?? 0) / dt) * radius;
+      w.axleJoint.setMotorMaxForce(w.brakeTorque * share);
       const t = { x: spinAxis.x * torque, y: spinAxis.y * torque, z: spinAxis.z * torque };
-      w.hub.addTorque(t, true);
+      w.hub.addTorque({ x: t.x * share, y: t.y * share, z: t.z * share }, true);
       // The drive's reaction goes where the differential is: the axle beam (solid) or, with
       // independent suspension, the chassis that carries the differential.
       (w.ifs ? this.body : w.knuckle).addTorque({ x: -t.x, y: -t.y, z: -t.z }, true);
@@ -682,10 +730,7 @@ export class JointedVehicle {
     const o = step * MAX_TIRES * 8;
     this.wheels.forEach((w, t) => {
       const k = o + t * 8;
-      w.tyreLoad = f[k + 1]; // N, upward: what the ground carries (the sound reads it)
-      w.hub.resetForces(true);
-      w.hub.addForce({ x: f[k], y: f[k + 1], z: f[k + 2] }, true);
-      w.hub.addTorque({ x: f[k + 4], y: f[k + 5], z: f[k + 6] }, true);
+      this.applyHubTyre(w, f[k], f[k + 1], f[k + 2], f[k + 4], f[k + 5], f[k + 6]);
     });
   }
 
@@ -707,10 +752,8 @@ export class JointedVehicle {
       f = await this.gpu.solver.step(this.hubStates(), { readPositions });
     }
     this.wheels.forEach((w, t) => {
-      w.tyreLoad = f[t * 8 + 1];
-      w.hub.resetForces(true);
-      w.hub.addForce({ x: f[t * 8], y: f[t * 8 + 1], z: f[t * 8 + 2] }, true);
-      w.hub.addTorque({ x: f[t * 8 + 4], y: f[t * 8 + 5], z: f[t * 8 + 6] }, true);
+      const k = t * 8;
+      this.applyHubTyre(w, f[k], f[k + 1], f[k + 2], f[k + 4], f[k + 5], f[k + 6]);
     });
   }
 
