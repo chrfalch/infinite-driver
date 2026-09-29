@@ -46,6 +46,18 @@ export function isFollowCamera() {
   return follow.on;
 }
 
+// Arrow keys with C held (see systems/input.js): x turns the view around the car, y raises or
+// lowers it. In follow mode the new angle to the car is kept, as with a mouse drag.
+const ORBIT_RATE = Math.PI / 2; // rad/s
+const TILT_RATE = Math.PI / 4;
+export function orbitCamera({ x, y }, dt) {
+  if (!x && !y) return;
+  view.azimuth += x * ORBIT_RATE * dt;
+  follow.relative += x * ORBIT_RATE * dt;
+  view.elevation = Math.min(MAX_ELEVATION, Math.max(MIN_ELEVATION, view.elevation + y * TILT_RATE * dt));
+  updateOffset();
+}
+
 // Mouse wheel or trackpad pinch zooms in and out.
 export function attachZoom(target = window) {
   target.addEventListener(

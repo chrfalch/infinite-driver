@@ -32,7 +32,6 @@ export const SoftTireView = trait(() => ({ soft: null, gpu: null, index: 0, obje
 export const SteeringWheel = trait(() => ({ object: null }));
 export const AxleRig = trait(() => ({ rig: null }));
 export const RockField = trait(() => ({ rocks: [], colliders: [] }));
-export const HudLabel = trait(() => ({ text: null, format: null }));
 
 // A wheel belongs to a vehicle and knows its index in the Rapier controller.
 export const WheelOf = relation({ exclusive: true, store: { index: 0 } });

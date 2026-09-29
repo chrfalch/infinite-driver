@@ -33,6 +33,13 @@
         border-radius: 6px;
         box-shadow: 0 2px 12px rgba(60, 50, 30, 0.15);
       }
+      .lil-gui.tuning .keys { width: 100%; border-collapse: collapse; padding: 4px 8px 8px; color: var(--text-color); }
+      .lil-gui.tuning .keys td { padding: 3px 8px; vertical-align: top; }
+      .lil-gui.tuning .keys td:first-child { white-space: nowrap; width: 1%; }
+      .lil-gui.tuning .keys kbd {
+        font: 600 10px/1.4 system-ui, sans-serif; padding: 1px 5px; border-radius: 3px;
+        background: var(--widget-color); border: 1px solid rgba(74, 69, 56, 0.2);
+      }
       .touch-controls { display: none; position: fixed; inset: 0; pointer-events: none; z-index: 5; }
       .touch-controls.visible { display: block; }
       .touch-btn {

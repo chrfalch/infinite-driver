@@ -11,6 +11,8 @@ export const DEFAULT_CONTROLS = Object.freeze({
   performance: false,
   // Graphics quality: 'auto', 'high', or 'low'. See render/quality.js.
   graphics: 'auto',
+  // Physics and renderer stats on the dashboard (P toggles).
+  showPerf: false,
 });
 
 const load = () => loadSettings(STORAGE_KEY);

@@ -19,7 +19,6 @@ import { applyWheelSettings } from '../vehicle/physics.js';
 import { DRIVETRAIN, resetDrivetrain, saveDrivetrain } from '../vehicle/config.js';
 import { requestRebuild, requestRespawn } from '../vehicle/spawn.js';
 import { setGravelAmount } from '../render/terrain-mesh.js';
-import { toggleFollowCamera } from '../systems/camera.js';
 import { WORLDS, saveWorld, worldMode } from '../world.js';
 
 // [path, label, min, max, step, apply] — apply is 'live' (read every step), 'wheels' (pushed to
@@ -208,6 +207,8 @@ export function createTuningPanel(world, { heightAt }) {
       saveControls();
       requestRebuild(world);
     });
+  // P toggles it too (systems/input.js), so the checkbox follows the value.
+  controls.add(CONTROLS, 'showPerf').name('Show perf stats (P)').onChange(saveControls).listen();
 
   for (const [title, params] of GROUPS) {
     const folder = gui.addFolder(title);
@@ -294,6 +295,7 @@ export function createTuningPanel(world, { heightAt }) {
     )
     .name('Clear tracks and ruts');
 
+  addKeysFolder(gui);
 
   // Give the keyboard back to the car once a value is committed.
   gui.onFinishChange(() => {
@@ -302,7 +304,6 @@ export function createTuningPanel(world, { heightAt }) {
 
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyR' && !isTyping(e)) actions.respawn();
-    if (e.code === 'KeyC' && !isTyping(e)) toggleFollowCamera();
   });
   return gui;
 }
@@ -310,6 +311,37 @@ export function createTuningPanel(world, { heightAt }) {
 export function isTyping(e) {
   const tag = e.target?.tagName;
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
+}
+
+const KEYS = [
+  ['W / ↑', 'Accelerate (hold)'],
+  ['S / ↓', 'Brake, reverse'],
+  ['A D / ← →', 'Steer'],
+  ['Q E', 'Shift down / up'],
+  ['L', 'Low range (when slow)'],
+  ['Space', 'Handbrake'],
+  ['R', 'Respawn'],
+  ['C', 'Follow camera on / off (tap)'],
+  ['C + arrows', 'Turn and tilt the camera'],
+  ['P', 'Perf stats on / off'],
+  ['Drag', 'Turn the camera; double-click resets'],
+  ['Wheel / pinch', 'Zoom'],
+];
+
+// The key legend, as the last section of the panel.
+function addKeysFolder(gui) {
+  const folder = gui.addFolder('Keys');
+  const table = document.createElement('table');
+  table.className = 'keys';
+  for (const [key, action] of KEYS) {
+    const row = table.insertRow();
+    const k = document.createElement('kbd');
+    k.textContent = key;
+    row.insertCell().append(k);
+    row.insertCell().textContent = action;
+  }
+  folder.$children.append(table);
+  return folder;
 }
 
 const GPU_REBUILD_KEYS = ['segmentsAround', 'segmentsAcross', 'beadRings', 'rubberMass'];

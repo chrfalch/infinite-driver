@@ -1,7 +1,8 @@
-import { CONTROLS } from '../controls.js';
+import { CONTROLS, saveControls } from '../controls.js';
 import { Input, IsPlayer, Vehicle } from '../ecs/traits.js';
 import { DRIVETRAIN, saveDrivetrain } from '../vehicle/config.js';
 import { isTyping } from '../tuning/panel.js';
+import { toggleFollowCamera } from './camera.js';
 
 const keys = new Set();
 // Keys held through the on-screen touch buttons.
@@ -27,6 +28,11 @@ export function releaseVirtual(code) {
 
 const ACCELERATOR = ['KeyW', 'ArrowUp'];
 const BRAKE = ['KeyS', 'ArrowDown'];
+const ARROWS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+
+// Holding C turns the arrow keys into camera keys (WASD still drive). A tap of C that moved no
+// camera toggles the follow camera on release.
+const cameraHold = { held: false, used: false };
 
 export function attachKeyboard(target = window) {
   const down = (e) => {
@@ -34,11 +40,22 @@ export function attachKeyboard(target = window) {
     if (isTyping(e)) return;
     if (!e.repeat) taps.add(e.code);
     keys.add(e.code);
+    if (e.code === 'KeyC' && !e.repeat) Object.assign(cameraHold, { held: true, used: false });
+    if (cameraHold.held && ARROWS.includes(e.code)) cameraHold.used = true;
     hardwareKeyListeners.forEach((listener) => listener(e));
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
   };
-  const up = (e) => keys.delete(e.code);
-  const blur = () => keys.clear();
+  const up = (e) => {
+    keys.delete(e.code);
+    if (e.code === 'KeyC' && cameraHold.held) {
+      if (!cameraHold.used) toggleFollowCamera();
+      cameraHold.held = false;
+    }
+  };
+  const blur = () => {
+    keys.clear();
+    cameraHold.held = false;
+  };
   target.addEventListener('keydown', down);
   target.addEventListener('keyup', up);
   target.addEventListener('blur', blur);
@@ -49,7 +66,17 @@ export function attachKeyboard(target = window) {
   };
 }
 
-const pressed = (...codes) => codes.some((c) => keys.has(c) || virtualKeys.has(c));
+// While C is held the hardware arrow keys belong to the camera, not the car.
+const drives = (c) => (keys.has(c) && !(cameraHold.held && ARROWS.includes(c))) || virtualKeys.has(c);
+const pressed = (...codes) => codes.some(drives);
+
+// Camera orbit from the arrow keys while C is held: x turns around the car (+ = right arrow),
+// y tilts the view (+ = up arrow, a higher view). Both are -1, 0 or 1.
+export function readCameraKeys() {
+  if (!cameraHold.held) return { x: 0, y: 0 };
+  const axis = (plus, minus) => (keys.has(plus) ? 1 : 0) - (keys.has(minus) ? 1 : 0);
+  return { x: axis('ArrowRight', 'ArrowLeft'), y: axis('ArrowUp', 'ArrowDown') };
+}
 const tapped = (...codes) => codes.some((c) => taps.has(c));
 
 export function readInput(world) {
@@ -67,6 +94,10 @@ export function readInput(world) {
   // Positive steer turns left.
   input.steer = (pressed('KeyA', 'ArrowLeft') ? 1 : 0) - (pressed('KeyD', 'ArrowRight') ? 1 : 0);
   input.handbrake = pressed('Space');
+  if (tapped('KeyP')) {
+    CONTROLS.showPerf = !CONTROLS.showPerf;
+    saveControls();
+  }
 
   // Gearbox keys: Q / E shift down / up (and switch to manual), L toggles low range when slow.
   const car = world.queryFirst(IsPlayer, Vehicle);
