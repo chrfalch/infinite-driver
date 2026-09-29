@@ -177,13 +177,14 @@ export class GroundDeformation {
 // far the tread is below the (already deformed) surface. Each cell deepens toward a softness-
 // dependent limit, and a share of the displaced soil is pushed up beside the tyre as berms.
 // Snow (terrain/snow.js) packs by pressure instead: a cell under the tread packs down until it
-// bears the tread's pressure, from nothing for fresh snow to `snow.bearing` kPa for a rut
-// `snow.packDepth` deep (bearing grows with the square of the rut depth). A soft tyre presses on
-// the ground with about its air pressure (the patch grows with the load), so aired-down tyres
-// float higher on snow, as they do for real. A parked car sinks into its ruts, then stops.
-export function compactSoil(deformation, contacts, { softness, dt, right, bermOffset, maxRut = 0.22, snow = null, pressureKpa = 100 }) {
+// bears the tread's pressure, from nothing for fresh snow to `snow.bearing` kPa for a rut as deep as
+// the snow there packs (snowAt(x, z).packDepth; bearing grows with the square of the rut depth). A
+// soft tyre presses on the ground with about its air pressure (the patch grows with the load), so
+// aired-down tyres float higher on snow, as they do for real. A parked car sinks into its ruts,
+// then stops. Snow that is already packed (the road's, most of a plough bank) packs little more.
+export function compactSoil(deformation, contacts, { softness, dt, right, bermOffset, maxRut = 0.22, snow = null, snowAt = null, pressureKpa = 100 }) {
   if ((!snow && softness <= 0) || contacts.length === 0) return;
-  const limit = snow ? snow.packDepth : maxRut * softness;
+  const limit = maxRut * softness;
   const rate = Math.min(1, (snow ? snow.packRate : 6 * softness) * dt);
   const bermShare = snow ? snow.bermShare : 0.18;
   // Deepest press per cell, so many particles on one cell do not stack up.
@@ -206,8 +207,10 @@ export function compactSoil(deformation, contacts, { softness, dt, right, bermOf
     const current = -deformation.cellValue(c.ix, c.iz);
     let dig;
     if (snow) {
+      const packDepth = snowAt ? snowAt(c.x, c.z).packDepth : snow.packRatio * snow.depth;
+      if (packDepth <= 1e-3) continue;
       // Treads only just touching (the patch's edge) press less.
-      const target = limit * Math.min(1, Math.sqrt(pressureKpa / snow.bearing)) * Math.min(1, c.depth / 0.01);
+      const target = packDepth * Math.min(1, Math.sqrt(pressureKpa / snow.bearing)) * Math.min(1, c.depth / 0.01);
       dig = (target - current) * rate;
     } else dig = c.depth * rate * Math.max(0, 1 - current / limit);
     if (dig <= 1e-5) continue;

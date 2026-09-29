@@ -120,8 +120,8 @@ export function currentSnow() {
 export function effectiveGpuTire(gpu, performance, ground = GROUND, snow = snowCover) {
   // Loose soil grips less than firm ground.
   // Bare rock grips better than dusty ground (rubber on sandstone), and soil does not soften it.
-  // On snow the ground grid's second channel is how packed the snow is (0 fresh, 1 packed) instead
-  // of the rock flag: the solver blends from fresh to packed stiffness and grip by it.
+  // On snow the ground grid's second channel is the snow (0 fresh, 1 packed, 2 bare asphalt; see
+  // snowPacking in gpu-tires.js) instead of the rock flag: the solver blends stiffness and grip by it.
   const withSoil = snow
     ? {
         ...gpu,
@@ -131,6 +131,7 @@ export function effectiveGpuTire(gpu, performance, ground = GROUND, snow = snowC
         soilRebound: snow.rebound,
         friction: gpu.friction * snow.freshGrip,
         rockFriction: gpu.friction * snow.packedGrip,
+        bareFriction: gpu.friction * snow.asphaltGrip,
         maxSink: snow.maxSink,
         gravel: 0,
       }

@@ -47,6 +47,8 @@ export function updateTracks(world) {
   const car = world.queryFirst(IsPlayer, Vehicle);
   if (!car) return;
   const { heightAt, surfaceAt } = world.get(HeightField);
+  // Bare rock (dry river) and bare asphalt (snowfield) take no tracks and cannot be compacted.
+  const hardAt = heightAt.rockAt ?? heightAt.bareAt;
   const deformation = world.get(Deformation)?.map;
   const pressed = [];
   const { controller, body } = car.get(Vehicle);
@@ -97,7 +99,7 @@ export function updateTracks(world) {
       width = CAR.wheelWidth * 0.9;
     }
     // Bare rock takes no tracks and cannot be compacted.
-    const onRock = contact && heightAt.rockAt?.(contact.x, contact.z);
+    const onRock = contact && hardAt?.(contact.x, contact.z);
     trackState.contacts[i] = contact;
     if (i === 0) {
       if (contact && lastC0) sample('tracks.segM', Math.hypot(contact.x - lastC0.x, contact.z - lastC0.z));
@@ -116,7 +118,7 @@ export function updateTracks(world) {
     const strength = Math.min(1, 0.25 + contact.depth * 5 + softness * 0.5);
     if (GROUND.tracks && !snow) tracks.add(i, heightAt, contact, right, width, strength, maxGap);
   }
-  const soilPressed = heightAt.rockAt ? pressed.filter((p) => !heightAt.rockAt(p.x, p.z)) : pressed;
+  const soilPressed = hardAt ? pressed.filter((p) => !hardAt(p.x, p.z)) : pressed;
   if (deformation && soilPressed.length) {
     compactSoil(deformation, soilPressed, {
       softness,
@@ -124,6 +126,7 @@ export function updateTracks(world) {
       right,
       bermOffset: TIRE.width * 0.5 + 0.1,
       snow,
+      snowAt: heightAt.snowAt,
       pressureKpa: solver ? GPU_TIRE.pressureKpa : 100,
     });
   }

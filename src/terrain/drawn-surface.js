@@ -27,7 +27,10 @@ function onTriangles(f, step, x, z) {
   return h11 + (f(ix, iz + 1) - h11) * (1 - fx) + (f(ix + 1, iz) - h11) * (1 - fz);
 }
 
-export function drawnSurface(heightAt) {
+// On snow the ground near the car is drawn on the tyres' own 12.5 cm grid (render/snow-surface.js),
+// so there the drawn surface is the height function itself; `coarse` asks for the 1 m mesh anyway.
+export function drawnSurface(heightAt, coarse = false) {
+  if (heightAt.snowAt && !coarse) return heightAt;
   const ground = heightAt.coarse ?? heightAt;
   const sheet = heightAt.coarse && heightAt.sample ? (x, z) => heightAt.sample(x, z).h : null;
   const cache = new Map();

@@ -2,6 +2,7 @@ import { DEFAULT_TIRE, GPU_TIRE, TIRE } from './config.js';
 import { GpuTireSolver, GROUND_N, rockToGpu } from './gpu-tire-solver.js';
 import { torusMesh } from './soft-tire.js';
 import { drawnSurface } from '../terrain/drawn-surface.js';
+import { BARE_DEPTH } from '../terrain/snow.js';
 
 // The tyre mesh descriptions (left and mirrored right) for the current settings; the solver's
 // particles follow the same grid.
@@ -52,12 +53,17 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
       spare: new Float32Array(N * N),
       rock: new Float32Array(N * N),
       spareRock: new Float32Array(N * N),
+      // Snow: how deep each cell can still pack (the rock flags hold the snow's firmness, or 1 + how
+      // bare it is where worn to asphalt).
+      pack: new Float32Array(N * N),
+      sparePack: new Float32Array(N * N),
       grid,
       heights: grid.subarray(0, N * N),
     };
   }
   const { heights } = g;
   const rockAt = heightAt.rockAt;
+  const snowAt = heightAt.snowAt;
   // The tyres feel the ground as it is drawn (see terrain/drawn-surface.js).
   const surface = (heightAt.drawn ??= drawnSurface(heightAt));
   if (recentre) {
@@ -68,6 +74,7 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
     // Terrain heights: keep the overlap with the previous grid, sample the rest.
     const base = g.spare;
     const rock = g.spareRock;
+    const pack = g.sparePack;
     const reuse = compatible && g.cell === cell;
     const sx = reuse ? ix0 - g.ix0 : N;
     const sz = reuse ? iz0 - g.iz0 : N;
@@ -79,9 +86,15 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
         if (rowReuse && px >= 0 && px < N) {
           base[iz * N + ix] = g.base[pz * N + px];
           rock[iz * N + ix] = g.rock[pz * N + px];
+          pack[iz * N + ix] = g.pack[pz * N + px];
         } else {
           base[iz * N + ix] = surface(ox + ix * cell, oz + iz * cell);
-          rock[iz * N + ix] = rockAt?.(ox + ix * cell, oz + iz * cell) ? 1 : 0;
+          if (snowAt) {
+            const sn = snowAt(ox + ix * cell, oz + iz * cell);
+            const bare = 1 - sn.depth / BARE_DEPTH;
+            rock[iz * N + ix] = bare > 0 ? 1 + Math.min(1, bare) : sn.firm;
+            pack[iz * N + ix] = sn.packDepth;
+          } else rock[iz * N + ix] = rockAt?.(ox + ix * cell, oz + iz * cell) ? 1 : 0;
         }
       }
     }
@@ -89,6 +102,8 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
     g.base = base;
     g.spareRock = g.rock;
     g.rock = rock;
+    g.sparePack = g.pack;
+    g.pack = pack;
     g.grid.set(rock, N * N);
     g.ix0 = ix0;
     g.iz0 = iz0;
@@ -101,7 +116,7 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
       // The whole grid is fresh, so restart the deformation's change tracking.
       deformation.changedSince(version);
     }
-    if (heightAt.snow) snowPacking(g, heightAt.snow, 0, 0, N - 1, N - 1);
+    if (snowAt) snowPacking(g, 0, 0, N - 1, N - 1);
   } else {
     // Same grid, the ruts changed: refresh only the changed cells inside it.
     const r = deformation.changedSince(g.version);
@@ -120,7 +135,7 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
       heights.set(g.base.subarray(o, o + nx), o);
     }
     deformation.accumulate(g.ix0 + x0, g.iz0 + z0, nx, z1 - z0 + 1, heights, N, z0 * N + x0);
-    if (heightAt.snow) snowPacking(g, heightAt.snow, x0, z0, x1, z1);
+    if (snowAt) snowPacking(g, x0, z0, x1, z1);
   }
   g.version = version;
   solver.setGround(g.grid, g.ix0 * cell, g.iz0 * cell, cell);
@@ -128,15 +143,19 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
   solver.groundVersion = version;
 }
 
-// Snow: the grid's second channel over cells [x0..x1] x [z0..z1] is how far the snow there is
-// packed, 0 (fresh) to 1 (a rut SNOW.packDepth deep). Snow piled up beside a rut stays fresh.
-export function snowPacking(g, snow, x0, z0, x1, z1) {
+// Snow: the grid's second channel over cells [x0..x1] x [z0..z1] says what the tread stands on:
+// 0..1 is how packed the snow is, from fresh (0) to packed hard (1; a rut as deep as the snow there
+// packs, or firm snow such as the road's and the plough banks'), and 1..2 is snow worn down to
+// bare asphalt (2 = bare). From the firmness and pack depth kept per cell (g.rock, g.pack) and the
+// ruts. Snow piled up beside a rut stays as it was.
+export function snowPacking(g, x0, z0, x1, z1) {
   const N = GROUND_N;
-  const { base, heights, grid } = g;
+  const { base, heights, grid, rock, pack } = g;
   for (let iz = z0; iz <= z1; iz++) {
     for (let ix = x0; ix <= x1; ix++) {
       const i = iz * N + ix;
-      grid[N * N + i] = Math.min(1, Math.max(0, (base[i] - heights[i]) / snow.packDepth));
+      const firm = rock[i];
+      grid[N * N + i] = firm >= 1 || pack[i] <= 0 ? Math.max(1, firm) : firm + (1 - firm) * Math.min(1, Math.max(0, (base[i] - heights[i]) / pack[i]));
     }
   }
 }

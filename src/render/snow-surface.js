@@ -2,13 +2,13 @@
 // into the snow show as real grooves with the berms beside them. The terrain mesh is only a 1 m
 // grid, so on snow it is sunk out of sight under this patch (see setSnowPatch in terrain-mesh.js).
 //
-// The patch is a fixed grid of vertices; a texture holds each vertex's height (ground as drawn plus
+// The patch is a fixed grid of vertices; a texture holds each vertex's height (the snow surface plus
 // the deformation) and how packed the snow there is. It follows the car in whole metres, so its
-// edges stay on the terrain mesh's grid lines, and toward the edge the deformation fades out, so the
-// edge meets the terrain mesh exactly.
-import { BufferAttribute, BufferGeometry, DataTexture, FloatType, Mesh, MeshStandardNodeMaterial, NearestFilter, RGFormat } from 'three/webgpu';
+// edges stay on the terrain mesh's grid lines, and toward the edge it fades into the terrain mesh's
+// coarser surface and the deformation fades out, so the edge meets the terrain mesh exactly.
+import { BufferAttribute, BufferGeometry, DataTexture, FloatType, Mesh, MeshStandardNodeMaterial, NearestFilter, RedFormat, RGFormat } from 'three/webgpu';
 import { Fn, float, ivec2, mix, normalize, positionLocal, smoothstep, textureLoad, transformNormalToView, uniform, varying, vec2, vec3, vec4 } from 'three/tsl';
-import { freshSnowColor } from './terrain-mesh.js';
+import { snowCover, snowGroundColor } from './terrain-mesh.js';
 import { DEFORM_CELL } from '../terrain/deformation.js';
 import { drawnSurface } from '../terrain/drawn-surface.js';
 
@@ -61,9 +61,11 @@ function patchGeometry() {
   return geometry;
 }
 
-// Snow colours: fresh snow is bright and slightly blue in the shade; packed snow in a rut is a
-// little greyer and smoother (it shines more), and the wind leaves faint ripples on the fresh snow.
-function snowMaterial(texture, origin) {
+// Snow colours (as on the terrain mesh, see snowGroundColor): fresh snow is bright and slightly
+// blue; packed snow in a rut or on the road is greyer and smoother (it shines more), and where the
+// road's snow is worn through, the asphalt shows. `texture`: height and packing per vertex; `road`:
+// signed distance to the road's centre line per vertex (only rewritten when the patch moves).
+function snowMaterial(texture, road, origin) {
   const material = new MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
   // The vertex's cell (the geometry holds cell indices in x and z).
   const cell = ivec2(positionLocal.x, positionLocal.z);
@@ -76,32 +78,38 @@ function snowMaterial(texture, origin) {
     return normalize(vec3(sx.negate(), 1, sz.negate()));
   })();
   material.normalNode = transformNormalToView(normalize(varying(normal)));
-  const packed = varying(textureLoad(texture, cell).y);
-  const pack = smoothstep(0.05, 0.9, packed);
-  material.colorNode = vec4(mix(freshSnowColor, vec3(0.76, 0.81, 0.88), pack), 1);
-  material.roughnessNode = mix(float(0.95), float(0.6), pack);
+  const pack = smoothstep(0.05, 0.9, varying(textureLoad(texture, cell).y));
+  const side = varying(textureLoad(road, cell).x);
+  material.colorNode = vec4(snowGroundColor(side, pack), 1);
+  material.roughnessNode = mix(float(0.8), mix(float(0.95), float(0.6), pack), snowCover(side).cover);
   return material;
 }
 
 export class SnowSurface {
   constructor(scene, heightAt, deformation) {
     this.heightAt = heightAt;
-    this.surface = drawnSurface(heightAt);
+    this.coarse = drawnSurface(heightAt, true);
     this.deformation = deformation;
-    this.packDepth = heightAt.snow.packDepth;
+    this.snowAt = heightAt.snowAt;
     this.data = new Float32Array(N * N * 2);
     this.texture = new DataTexture(this.data, N, N, RGFormat, FloatType);
     this.texture.minFilter = NearestFilter;
     this.texture.magFilter = NearestFilter;
+    this.road = new DataTexture(new Float32Array(N * N), N, N, RedFormat, FloatType);
+    this.road.minFilter = NearestFilter;
+    this.road.magFilter = NearestFilter;
     this.origin = uniform(vec2(0, 0));
-    this.base = new Float32Array(N * N);
-    this.spare = new Float32Array(N * N);
+    // Per vertex, kept across moves: the snow surface's height, the terrain mesh's there (the patch
+    // blends into it at its edge, so the two meet without a crack), the snow's firmness and pack depth
+    // (see terrain/snow.js), and the distance to the road.
+    this.cells = { base: new Float32Array(N * N), coarse: new Float32Array(N * N), firm: new Float32Array(N * N), pack: new Float32Array(N * N), dist: this.road.image.data };
+    this.spare = { base: new Float32Array(N * N), coarse: new Float32Array(N * N), firm: new Float32Array(N * N), pack: new Float32Array(N * N), dist: new Float32Array(N * N) };
     this.def = new Float32Array(N * N);
     this.weights = edgeWeights();
     this.ix0 = null;
     this.iz0 = null;
     this.version = -1;
-    this.mesh = new Mesh(patchGeometry(), snowMaterial(this.texture, this.origin));
+    this.mesh = new Mesh(patchGeometry(), snowMaterial(this.texture, this.road, this.origin));
     this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
     this.mesh.name = 'snow surface';
@@ -125,7 +133,8 @@ export class SnowSurface {
       // Whole metres, so the edges lie on the terrain mesh's grid lines.
       const ix0 = Math.round(x - half) / CELL;
       const iz0 = Math.round(z - half) / CELL;
-      const base = this.spare;
+      const next = this.spare;
+      const prev = this.cells;
       const sx = this.ix0 === null ? N : ix0 - this.ix0;
       const sz = this.iz0 === null ? N : iz0 - this.iz0;
       for (let iz = 0; iz < N; iz++) {
@@ -133,11 +142,30 @@ export class SnowSurface {
         const rowReuse = pz >= 0 && pz < N;
         for (let ix = 0; ix < N; ix++) {
           const px = ix + sx;
-          base[iz * N + ix] = rowReuse && px >= 0 && px < N ? this.base[pz * N + px] : this.surface((ix0 + ix) * CELL, (iz0 + iz) * CELL);
+          const i = iz * N + ix;
+          if (rowReuse && px >= 0 && px < N) {
+            const j = pz * N + px;
+            next.base[i] = prev.base[j];
+            next.coarse[i] = prev.coarse[j];
+            next.firm[i] = prev.firm[j];
+            next.pack[i] = prev.pack[j];
+            next.dist[i] = prev.dist[j];
+          } else {
+            const wx = (ix0 + ix) * CELL;
+            const wz = (iz0 + iz) * CELL;
+            const s = this.snowAt(wx, wz);
+            next.base[i] = this.heightAt(wx, wz);
+            next.coarse[i] = this.coarse(wx, wz);
+            next.firm[i] = s.firm;
+            next.pack[i] = s.packDepth;
+            next.dist[i] = this.heightAt.roadSide(wx, wz);
+          }
         }
       }
-      this.spare = this.base;
-      this.base = base;
+      this.spare = prev;
+      this.cells = next;
+      this.road.image.data = next.dist;
+      this.road.needsUpdate = true;
       this.ix0 = ix0;
       this.iz0 = iz0;
       this.origin.value.set(ix0 * CELL, iz0 * CELL);
@@ -147,12 +175,15 @@ export class SnowSurface {
     const def = this.def;
     def.fill(0);
     this.deformation?.accumulate(this.ix0, this.iz0, N, N, def);
-    const { base, weights, data } = this;
-    const pack = 1 / this.packDepth;
+    const { weights, data } = this;
+    const { base, coarse, firm, pack } = this.cells;
     for (let i = 0; i < N * N; i++) {
-      const d = def[i] * weights[i];
-      data[i * 2] = base[i] + d;
-      data[i * 2 + 1] = d < 0 ? Math.min(1, -d * pack) : 0;
+      const w = weights[i];
+      const d = def[i] * w;
+      data[i * 2] = coarse[i] + (base[i] - coarse[i]) * w + d;
+      // How packed, as the tyres feel it (snowPacking in tire/gpu-tires.js).
+      const packed = pack[i] > 0 && d < 0 ? Math.min(1, -d / pack[i]) : 0;
+      data[i * 2 + 1] = firm[i] + (1 - firm[i]) * packed;
     }
     this.texture.needsUpdate = true;
   }
