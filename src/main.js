@@ -47,6 +47,8 @@ import { CAR } from './vehicle/config.js';
 import { updateGpuGround, updateGpuRocks } from './tire/gpu-tires.js';
 import { createTouchControls } from './ui/touch-controls.js';
 import { count, reportError, sample, startOverlay, timed } from './perf.js';
+import { AudioFeed, createFeedBuffer } from './audio/feed.js';
+import { createAudio } from './audio/audio.js';
 
 async function main() {
   const container = document.getElementById('app');
@@ -72,11 +74,13 @@ async function main() {
   // Physics runs in a worker (with its own GPU device) for the GPU tyres when the browser has
   // WebGPU in workers; ?physics=main keeps it on this thread. Other tyre modes stay here.
   const params = new URLSearchParams(location.search);
+  // The engine sound reads every physics step from here (audio/feed.js); ?sound=0 turns it off.
+  const audioFeed = new AudioFeed(createFeedBuffer());
   const useWorker = CAR.softTires && CAR.gpuTires && params.get('physics') !== 'main' && (await workerGpuSupported());
   let remote = null;
   let physicsWorld = null;
   if (useWorker) {
-    remote = createPhysicsClient({ terrain: mode, rocks: ROCK_COUNT, deformation, slowGpu: Number(params.get('slowgpu') ?? 0) });
+    remote = createPhysicsClient({ terrain: mode, rocks: ROCK_COUNT, deformation, slowGpu: Number(params.get('slowgpu') ?? 0), audioFeed });
     try {
       await remote.start();
     } catch (error) {
@@ -95,6 +99,9 @@ async function main() {
 
   world.add(Time, Input, TerrainStreaming);
   world.add(Physics({ rapier: RAPIER, world: physicsWorld, remote, accumulator: 0, step: 1 / 120, stepMs: 0, simTime: 0, displayTime: 0 }));
+  // Main-thread physics writes the audio feed itself; worker physics writes it in the worker.
+  if (!remote) world.get(Physics).audioFeed = audioFeed;
+  const audio = params.get('sound') === '0' ? null : createAudio({ feed: audioFeed });
   world.add(Render(render));
   const surfaceAt = (x, z) => heightAt(x, z) + deformation.at(x, z);
   world.add(HeightField({ heightAt, surfaceAt }));
@@ -225,6 +232,7 @@ async function main() {
         const canvas = render.renderer.domElement;
         gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible());
         const vehicle = player.get(Vehicle);
+        audio?.update(vehicle);
         gauges.update(vehicle, time.delta, { follow: isFollowCamera(), perf: CONTROLS.showPerf ? perfLines(vehicle) : null });
         { const v = player.get(Vehicle).body.linvel(); sample('speed.kmh', Math.hypot(v.x, v.z) * 3.6); }
       }
@@ -248,6 +256,8 @@ async function main() {
     },
     respawnAt: (x, z, yaw) => requestRespawnAt(world, heightAt, x, z, yaw),
     heightAt,
+    audio,
+    audioFeed,
     traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig, RockField },
   };
 }

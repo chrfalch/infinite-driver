@@ -16,6 +16,7 @@ import { Drivetrain } from '../vehicle/drivetrain.js';
 import { WHEELS, applyWheelSettings } from '../vehicle/physics.js';
 import { createSoftCarBody } from '../vehicle/soft-vehicle.js';
 import { createColliderStreamer } from './colliders.js';
+import { AudioFeed } from '../audio/feed.js';
 
 const STEP = 1 / 120;
 const SETTINGS = { CAR, TIRE, GPU_TIRE, GROUND, DRIVETRAIN, CONTROLS };
@@ -119,7 +120,7 @@ function snapshot(readback) {
     speed: vehicle.speed,
     steer: vehicle.steer,
     braking: vehicle.braking,
-    drivetrain: { rpm: d.rpm, gear: d.gear, pendingGear: d.pendingGear },
+    drivetrain: { rpm: d.rpm, gear: d.gear, pendingGear: d.pendingGear, throttle: d.throttle, fuel: d.fuel, exhaustBrake: d.exhaustBrake, clutch: d.clutch },
     positions,
     readbackHubs: solver?.readbackHubs ?? null,
   };
@@ -171,6 +172,8 @@ async function init(msg) {
   world.add(Deformation({ map: deformation }));
   physics = world.get(Physics);
   physics.slowGpu = msg.slowGpu ?? 0;
+  // Shared with the main thread's audio worklet: this thread writes the engine state every step.
+  physics.audioFeed = msg.audioFeed ? new AudioFeed(msg.audioFeed) : null;
   physics.onStep = () => {
     const b = car.get(Vehicle).body;
     const t = b.translation();

@@ -87,6 +87,8 @@ export async function stepPhysics(world, frameDelta = null) {
       physics.accumulator -= physics.step;
       physics.simTime += physics.step;
       steps++;
+      // The engine sound follows every step (see audio/feed.js).
+      if (physics.audioFeed && vehicles[0]) physics.audioFeed.writeStep(physics.simTime, vehicles[0]);
       recordPoses(world, physics.simTime);
       physics.onStep?.(physics.simTime);
     }
