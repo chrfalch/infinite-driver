@@ -4,14 +4,16 @@
 // short (idle, pull through 1st to 3rd, lift off), rev (revs in neutral), idle.
 // Preset changes are merged into the preset, e.g. '{"pipe":{"feedback":0},"bodyShare":0.12}';
 // '{"base":"Turbo-diesel I4"}' renders the four instead of the V8; '{"base":"Petrol V8 (recorded)"}'
-// renders the recordings (the bank in public/, decoded with ffmpeg).
+// renders the recordings (the bank in public/, decoded with ffmpeg); '{"foley":true}' adds the
+// recorded tyre, ground and car sounds (public/audio/foley) in place of the synths' parts.
 //
 // The drivetrain runs on a simple rolling car (as in test/drivetrain.test.js), writes the audio feed
 // every physics step, and the sound is read from the feed as the audio worklet does.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { SampleEngine } from '../src/audio/sample-engine.js';
-import { loadBank } from '../src/audio/sample-bank.js';
+import { loadBank, loadFoley } from '../src/audio/sample-bank.js';
+import { Foley } from '../src/audio/foley.js';
 import { AudioFeed, FeedReader, createFeedBuffer } from '../src/audio/feed.js';
 import { EngineSynth } from '../src/audio/engine-synth.js';
 import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from '../src/audio/engine-presets.js';
@@ -82,27 +84,31 @@ const merge = (base, changes) => {
   return out;
 };
 // "base" picks the preset to change (a name in ENGINE_PRESETS; the V8 by default).
-const { base = TURBO_DIESEL_V8.name, ...changes } = JSON.parse(process.argv[4] ?? '{}');
+const { base = TURBO_DIESEL_V8.name, foley: withFoley = false, ...changes } = JSON.parse(process.argv[4] ?? '{}');
 const preset = merge(ENGINE_PRESETS[base], changes);
 const synth = new EngineSynth(SR, preset);
 // A recorded engine plays its bank, decoded here as the browser would.
 let engine = synth;
-if (preset.samples) {
-  const fetchFile = async (url) => {
-    const bytes = readFileSync(new URL(`../public${url}`, import.meta.url));
-    return { ok: true, json: async () => JSON.parse(bytes), arrayBuffer: async () => bytes };
-  };
-  const decode = async (bytes) => {
-    const pcm = execFileSync('ffmpeg', ['-v', 'error', '-i', '-', '-ac', '1', '-ar', String(SR), '-f', 'f32le', '-'], { input: bytes, maxBuffer: 1 << 28 });
-    const data = new Float32Array(pcm.buffer, pcm.byteOffset, pcm.byteLength / 4).slice();
-    return { sampleRate: SR, length: data.length, numberOfChannels: 1, getChannelData: () => data };
-  };
-  engine = new SampleEngine(SR, await loadBank(preset.samples, decode, fetchFile));
-}
+const fetchFile = async (url) => {
+  const bytes = readFileSync(new URL(`../public${url}`, import.meta.url));
+  return { ok: true, json: async () => JSON.parse(bytes), arrayBuffer: async () => bytes };
+};
+const decode = async (bytes) => {
+  const pcm = execFileSync('ffmpeg', ['-v', 'error', '-i', '-', '-ac', '1', '-ar', String(SR), '-f', 'f32le', '-'], { input: bytes, maxBuffer: 1 << 28 });
+  const data = new Float32Array(pcm.buffer, pcm.byteOffset, pcm.byteLength / 4).slice();
+  return { sampleRate: SR, length: data.length, numberOfChannels: 1, getChannelData: () => data };
+};
+if (preset.samples) engine = new SampleEngine(SR, await loadBank(preset.samples, decode, fetchFile));
+const foley = withFoley ? new Foley(SR, await loadFoley('audio/foley', decode, fetchFile)) : null;
 const drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN, automatic: !s.neutral, low: false });
 const samples = new Float32Array(Math.ceil(s.seconds * SR));
 const ground = new GroundSynth(SR);
 const car = new CarSynth(SR);
+if (foley) {
+  const covers = foley.covers();
+  ground.muted = new Set(covers.ground);
+  car.muted = new Set(covers.car);
+}
 const right = new Float32Array(samples.length); // the WAV is mono: the left side
 // Wheels rolling with the car (the scenario adds sliding and rear wheelspin), as wheels.js reads them.
 const identity = { x: 0, y: 0, z: 0, w: 1 };
@@ -138,7 +144,11 @@ for (let i = 0; i < samples.length; i += BLOCK) {
     const shake = s.shake ? { heave: s.shake(simTime), twist: s.shake(simTime) * 2 } : undefined;
     feed.writeStep(simTime, { drivetrain: drive, speed: v, controller, steer: (s.steer?.(simTime) ?? 0) * 0.62, shake }, s.surface ? GROUNDS[s.surface(simTime)] : null);
     const thrown = (s.stones?.(simTime) ?? 0) * DT;
-    if (Math.random() < thrown) ground.event({ kind: 'throw', size: 0.025 + Math.random() * 0.045, speed: 2 + Math.random() * 6 });
+    if (Math.random() < thrown) {
+      const e = { kind: 'throw', size: 0.025 + Math.random() * 0.045, speed: 2 + Math.random() * 6 };
+      ground.event(e);
+      foley?.event(e);
+    }
   }
   const end = Math.min(samples.length, i + BLOCK);
   const values = reader.advance((end - i) / SR);
@@ -146,6 +156,7 @@ for (let i = 0; i < samples.length; i += BLOCK) {
   engine.render(samples, prev, next, i, end);
   ground.render(samples, right, prev, next, i, end);
   car.render(samples, right, prev, next, i, end);
+  foley?.render(samples, right, prev, next, i, end);
   for (let k = i; k < end; k++) samples[k] = softKnee(samples[k]);
   prev = next;
   if (i % (SR / 2) < BLOCK) log.push({ t: tAudio.toFixed(1), rpm: Math.round(next.rpm), gear: values.gear, fuel: next.fuel.toFixed(2), brake: next.exhaustBrake.toFixed(2), spool: synth.spool.toFixed(2), kmh: (values.speed * 3.6).toFixed(0) });

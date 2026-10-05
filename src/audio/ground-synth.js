@@ -216,7 +216,7 @@ export class GroundSynth {
     const sr = this.sr;
     const dt = 1 / sr;
     const L = this.effective;
-    for (const k in GROUND_LAYERS) L[k] = (p.layers?.[k] ?? 1) * this.layers[k];
+    for (const k in GROUND_LAYERS) L[k] = this.muted?.has(k) ? 0 : (p.layers?.[k] ?? 1) * this.layers[k]; // muted: played recorded (foley.js)
 
     // Per wheel, from the block's middle: levels of each part, and the tread tone.
     let gravelRate = 0;

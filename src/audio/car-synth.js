@@ -130,7 +130,7 @@ export class CarSynth {
     const dt = 1 / sr;
     const blockT = n * dt;
     const L = this.effective;
-    for (const k in CAR_LAYERS) L[k] = (p.layers?.[k] ?? 1) * this.layers[k];
+    for (const k in CAR_LAYERS) L[k] = this.muted?.has(k) ? 0 : (p.layers?.[k] ?? 1) * this.layers[k]; // muted: played recorded (foley.js)
     const level = this.level;
     const mid = (k) => ((a[k] ?? 0) + (b[k] ?? 0)) / 2;
     const rpm = mid('rpm');

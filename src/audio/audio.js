@@ -13,7 +13,10 @@ import { onSettingsSaved } from '../settings-store.js';
 import { AUDIO, AUDIO_KEY, audioMix, saveAudio } from './config.js';
 import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from './engine-presets.js';
 import { panGains } from './mix.js';
-import { bankTransfer, loadBank } from './sample-bank.js';
+import { bankTransfer, foleyTransfer, loadBank, loadFoley } from './sample-bank.js';
+
+// The recorded tyre, ground and car sounds (foley.js), in public/.
+const FOLEY_BANK = 'audio/foley';
 import { wheelMount } from '../vehicle/physics.js';
 
 // Where the car's parts sit (chassis-local metres: +x forward, +z right).
@@ -192,6 +195,14 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
     log('engine playing:', (audio.preset ?? currentPreset()).name, audio.manual ? '(per frame)' : '(shared feed)', 'context', ctx.state, ctx.sampleRate, 'Hz');
     fadeTo(level());
     loadRecordings(audio.preset ?? currentPreset());
+    // The recorded tyre, ground and car sounds; the synths play each part until then (or for good,
+    // if there is no bank).
+    loadFoley(FOLEY_BANK, (data) => ctx.decodeAudioData(data))
+      .then((bank) => {
+        node.port.postMessage({ type: 'foley', bank }, foleyTransfer(bank));
+        log('recorded ground and car sounds:', Object.keys(bank.loops).length, 'loops,', Object.keys(bank.oneshots).length, 'hits');
+      })
+      .catch((error) => console.warn('[sound] no recorded ground and car sounds, the synths play', error));
   }
 
   // A preset with recordings: load its bank and send it to the worklet (the synth plays meanwhile).

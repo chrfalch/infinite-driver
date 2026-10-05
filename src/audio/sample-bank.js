@@ -43,3 +43,24 @@ export async function loadBank(path, decode, fetchFn = fetch) {
 
 // The buffers to transfer with a bank.
 export const bankTransfer = (bank) => bank.loops.map((l) => l.data.buffer);
+
+// The recorded tyre, ground and car sounds (foley.js) from a folder with a manifest.json, made by
+// scripts/samples/foley-bank.mjs:
+//   { loops: { name: [{ file, gain }] }, oneshots: { name: [{ file, strength, gain }] } }
+// Each take: { data (mono), sampleRate, gain, strength }.
+export async function loadFoley(path, decode, fetchFn = fetch) {
+  const url = `${base()}${path}/`;
+  const res = await fetchFn(`${url}manifest.json`);
+  if (!res.ok) throw new Error(`${path}: manifest ${res.status}`);
+  const manifest = await res.json();
+  const take = async (entry) => {
+    const r = await fetchFn(url + entry.file);
+    if (!r.ok) throw new Error(`${entry.file}: ${r.status}`);
+    const decoded = await decode(await r.arrayBuffer());
+    return { data: mono(decoded), sampleRate: decoded.sampleRate, gain: entry.gain ?? 1, strength: entry.strength ?? 1 };
+  };
+  const group = async (groups = {}) => Object.fromEntries(await Promise.all(Object.entries(groups).map(async ([name, list]) => [name, await Promise.all(list.map(take))])));
+  return { loops: await group(manifest.loops), oneshots: await group(manifest.oneshots) };
+}
+
+export const foleyTransfer = (bank) => [...Object.values(bank.loops), ...Object.values(bank.oneshots)].flat().map((t) => t.data.buffer);

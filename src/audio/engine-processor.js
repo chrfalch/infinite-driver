@@ -9,6 +9,9 @@
 //        { type: 'feed' }             back to the feed
 //        { type: 'preset', preset }   a whole new engine preset (the engine lab's sliders)
 //        { type: 'bank', bank }       recordings for a preset with `samples` (sample-bank.js)
+//        { type: 'foley', bank }      recorded tyre, ground and car sounds (foley.js); each one
+//                                     recorded replaces its synth layer
+//        { type: 'foleyOn', on }      play the recordings (true) or only the synths
 //        { type: 'source', samples }  play the recordings (true, as the preset says) or the synth
 //        { type: 'layers', values }   levels of the sound's parts (EngineSynth LAYERS)
 //        { type: 'stones', events }   stones thrown and landing (GroundSynth.event)
@@ -24,6 +27,7 @@ import { TURBO_DIESEL_I4 } from './engine-presets.js';
 import { AudioFeed, FeedReader } from './feed.js';
 import { GroundSynth } from './ground-synth.js';
 import { CarSynth } from './car-synth.js';
+import { Foley } from './foley.js';
 import { CENTERED, softKnee } from './mix.js';
 
 const IDLE = { rpm: TURBO_DIESEL_I4.idleRpm, fuel: 0.13, exhaustBrake: 0, throttle: 0 };
@@ -40,12 +44,15 @@ class EngineProcessor extends AudioWorkletProcessor {
     if (mix) this.sampler.setMix(mix);
     this.recorded = !!preset?.samples;
     this.useSamples = true;
+    this.foleyOn = true;
     this.ground = new GroundSynth(sampleRate, undefined, { seed: (Math.random() * 2 ** 31) | 0 });
     if (options.processorOptions?.groundPreset) this.ground.setPreset(options.processorOptions.groundPreset);
     if (mix?.ground !== undefined) this.ground.level = mix.ground;
     this.car = new CarSynth(sampleRate, undefined, { seed: (Math.random() * 2 ** 31) | 0 });
     if (options.processorOptions?.carPreset) this.car.setPreset(options.processorOptions.carPreset);
     if (mix?.car !== undefined) this.car.level = mix.car;
+    this.foley = new Foley(sampleRate, null, { seed: (Math.random() * 2 ** 31) | 0 });
+    this.foley.level = { ground: mix?.ground ?? 1, car: mix?.car ?? 1 };
     this.reader = feedBuffer ? new FeedReader(new AudioFeed(feedBuffer)) : null;
     this.manual = null;
     this.prev = { ...IDLE };
@@ -58,10 +65,14 @@ class EngineProcessor extends AudioWorkletProcessor {
       if (m.type === 'mix') {
         this.synth.setMix(m.values);
         this.sampler.setMix(m.values);
-        if (m.values.ground !== undefined) this.ground.level = m.values.ground;
-        if (m.values.car !== undefined) this.car.level = m.values.car;
-      } else if (m.type === 'stones') for (const e of m.events) this.ground.event(e);
-      else if (m.type === 'groundPreset') this.ground.setPreset(m.preset);
+        if (m.values.ground !== undefined) this.ground.level = this.foley.level.ground = m.values.ground;
+        if (m.values.car !== undefined) this.car.level = this.foley.level.car = m.values.car;
+      } else if (m.type === 'stones') {
+        for (const e of m.events) {
+          this.ground.event(e);
+          if (this.foleyOn) this.foley.event(e);
+        }
+      } else if (m.type === 'groundPreset') this.ground.setPreset(m.preset);
       else if (m.type === 'groundLayers') this.ground.setLayers(m.values);
       else if (m.type === 'carPreset') this.car.setPreset(m.preset);
       else if (m.type === 'carLayers') this.car.setLayers(m.values);
@@ -70,11 +81,25 @@ class EngineProcessor extends AudioWorkletProcessor {
         this.synth.setPreset(m.preset);
         this.recorded = !!m.preset.samples;
       } else if (m.type === 'bank') this.sampler.setBank(m.bank);
+      else if (m.type === 'foley') {
+        this.foley.setBank(m.bank);
+        this.applyCovers();
+      } else if (m.type === 'foleyOn') {
+        this.foleyOn = m.on;
+        this.applyCovers();
+      }
       else if (m.type === 'source') this.useSamples = m.samples;
       else if (m.type === 'layers') this.synth.setLayers(m.values);
       else if (m.type === 'manual') this.manual = { ...IDLE, ...m.values };
       else if (m.type === 'feed') this.manual = null;
     };
+  }
+
+  // The synth layers the recordings replace are muted (while the recordings play).
+  applyCovers() {
+    const covers = this.foleyOn ? this.foley.covers() : { ground: [], car: [] };
+    this.ground.muted = new Set(covers.ground);
+    this.car.muted = new Set(covers.car);
   }
 
   process(_inputs, outputs) {
@@ -107,6 +132,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     }
     this.ground.render(left, R, this.prev, next, 0, n, this.pos);
     this.car.render(left, R, this.prev, next, 0, n, this.pos);
+    if (this.foleyOn) this.foley.render(left, R, this.prev, next, 0, n, this.pos);
     for (let i = 0; i < n; i++) {
       left[i] = softKnee(left[i]);
       R[i] = softKnee(R[i]);
