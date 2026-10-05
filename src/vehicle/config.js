@@ -49,7 +49,7 @@ export const DEFAULT_CAR = Object.freeze({
   // Crash damage (jointed car): hard hits bend the suspension and can take a wheel off. Higher
   // part strength takes harder hits (see soft-vehicle.js). A respawn repairs the car.
   damage: true,
-  partStrength: 1,
+  partStrength: 1.5,
   dragCoefficient: 0.75, // 0.5 * rho * Cd * A, boxy body
   rollingResistance: 0.018,
 });
