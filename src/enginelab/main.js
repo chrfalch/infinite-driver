@@ -113,6 +113,7 @@ levels.add(AUDIO, 'enabled').name('Sound on (M)').onChange(saveAudio).listen();
 levels.add(AUDIO, 'volume', 0, 1, 0.01).name('Volume').onChange(saveAudio);
 levels.add(AUDIO, 'engine', 0, 2, 0.05).name('Engine ×').onChange(saveAudio);
 levels.add(AUDIO, 'turbo', 0, 3, 0.05).name('Turbo whistle ×').onChange(saveAudio);
+levels.add(AUDIO, 'blowoff', 0, 3, 0.05).name('Turbo blow-off ×').onChange(saveAudio);
 levels.add(AUDIO, 'clatter', 0, 3, 0.05).name('Diesel clatter ×').onChange(saveAudio);
 levels.add(AUDIO, 'ground', 0, 3, 0.05).name('Tyres & ground ×').onChange(saveAudio);
 levels.add(AUDIO, 'car', 0, 3, 0.05).name('Driveline, body & wind ×').onChange(saveAudio);

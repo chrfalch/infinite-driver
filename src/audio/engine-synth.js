@@ -77,7 +77,7 @@ export class EngineSynth {
     this.preset = preset;
     this.random = rng(seed);
     // Level multipliers from the sound settings (see audio/config.js).
-    this.mix = { engine: 1, turbo: 1, clatter: 1 };
+    this.mix = { engine: 1, turbo: 1, blowoff: 1, clatter: 1 };
     this.layers = { ...LAYERS };
     this.effective = { ...LAYERS }; // preset level × runtime level, per block
 
@@ -232,12 +232,12 @@ export class EngineSynth {
     const L = this.effective;
     for (const k in LAYERS) L[k] = (p.layers?.[k] ?? 1) * this.layers[k];
     // Held at full boost, the wastegate bleeds a little.
-    const bleedAmp = wg ? wg.bleed * Math.max(0, (spool - 0.8) / 0.2) * fuelMid * mix.turbo * L.wastegate : 0;
+    const bleedAmp = wg ? wg.bleed * Math.max(0, (spool - 0.8) / 0.2) * fuelMid * mix.blowoff * L.wastegate : 0;
     this.lastThrottle = throttle;
     const whineAmp = t.whine * spool ** 1.5 * (0.4 + 0.6 * fuelMid) * mix.turbo * L.whistle;
     const hissAmp = t.hiss * spool * (0.2 + 0.8 * fuelMid) * mix.turbo * L.whoosh;
-    const flutterAmp = t.flutter * spool * mix.turbo * L.flutter;
-    const wastegateAmp = (this.wastegateLevel ?? 0) * mix.turbo * L.wastegate;
+    const flutterAmp = t.flutter * spool * mix.blowoff * L.flutter;
+    const wastegateAmp = (this.wastegateLevel ?? 0) * mix.blowoff * L.wastegate;
     const whineF = t.whineMin + (t.whineMax - t.whineMin) * spool;
     const gearAmp = p.gearWhine.level * Math.min(1, rpmMid / 3000) * L.gear;
     const silencerLayers = [L.silencer1, L.silencer2, L.silencer3];

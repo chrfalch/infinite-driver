@@ -16,7 +16,7 @@ import { SampleEngine } from '../src/audio/sample-engine.js';
 import { loadBank, loadFoley } from '../src/audio/sample-bank.js';
 import { Foley } from '../src/audio/foley.js';
 import { AudioFeed, FeedReader, createFeedBuffer } from '../src/audio/feed.js';
-import { EngineSynth } from '../src/audio/engine-synth.js';
+import { EngineSynth, LAYERS } from '../src/audio/engine-synth.js';
 import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from '../src/audio/engine-presets.js';
 import { GroundSynth } from '../src/audio/ground-synth.js';
 import { CarSynth } from '../src/audio/car-synth.js';
@@ -99,7 +99,14 @@ const decode = async (bytes) => {
   const data = new Float32Array(pcm.buffer, pcm.byteOffset, pcm.byteLength / 4).slice();
   return { sampleRate: SR, length: data.length, numberOfChannels: 1, getChannelData: () => data };
 };
-if (preset.samples) engine = new SampleEngine(SR, await loadBank(preset.samples, decode, fetchFile));
+// A recorded engine has the synth's turbo on top (as engine-processor.js).
+let turbo = null;
+if (preset.samples) {
+  engine = new SampleEngine(SR, await loadBank(preset.samples, decode, fetchFile));
+  turbo = new EngineSynth(SR, preset);
+  turbo.setLayers(Object.fromEntries(Object.keys(LAYERS).map((k) => [k, ['whistle', 'whoosh', 'flutter', 'wastegate'].includes(k) ? 1 : 0])));
+}
+const turboBuf = new Float32Array(BLOCK);
 // '{"engine":0}' leaves the engine out (to hear the rest).
 engine.setMix({ engine: engineLevel });
 const foley = withFoley ? new Foley(SR, await loadFoley('audio/foley', decode, fetchFile)) : null;
@@ -157,6 +164,10 @@ for (let i = 0; i < samples.length; i += BLOCK) {
   const values = reader.advance((end - i) / SR);
   const next = { ...values, ...s.engine?.(end / SR) };
   engine.render(samples, prev, next, i, end);
+  if (turbo) {
+    turbo.render(turboBuf, prev, next, 0, end - i);
+    for (let k = i; k < end; k++) samples[k] += turboBuf[k - i];
+  }
   ground.render(samples, right, prev, next, i, end);
   car.render(samples, right, prev, next, i, end);
   foley?.render(samples, right, prev, next, i, end);

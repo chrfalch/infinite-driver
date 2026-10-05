@@ -278,6 +278,7 @@ export function createTuningPanel(world, { heightAt }) {
   sound.add(AUDIO, 'volume', 0, 1, 0.01).name('Volume').onChange(saveAudio);
   sound.add(AUDIO, 'engine', 0, 2, 0.05).name('Engine ×').onChange(saveAudio);
   sound.add(AUDIO, 'turbo', 0, 3, 0.05).name('Turbo whistle ×').onChange(saveAudio);
+  sound.add(AUDIO, 'blowoff', 0, 3, 0.05).name('Turbo blow-off ×').onChange(saveAudio);
   sound.add(AUDIO, 'clatter', 0, 3, 0.05).name('Diesel clatter ×').onChange(saveAudio);
   sound.add(AUDIO, 'ground', 0, 3, 0.05).name('Tyres & ground ×').onChange(saveAudio);
   sound.add(AUDIO, 'car', 0, 3, 0.05).name('Driveline, body & wind ×').onChange(saveAudio);
