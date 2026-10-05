@@ -68,6 +68,85 @@ const tyreGroundAt = (x, z) => {
   return select(fx.add(fz).lessThanEqual(1), below, above);
 };
 
+// The dry river's rock sheet around the car, exactly as drawn (terrain/rock-sheet.js: its grid
+// points moved at random, so its facets read as broken rock). The ground grid above has 12.5 cm
+// triangles that cut a little off the sheet's sharp ridges (up to a few centimetres), and a ridge
+// then showed through the tread, so on the sheet the vertex shader also lifts drawn points above its
+// own triangles. Per grid point (x, z, h, whether the cell from there is drawn), SHEET_N² of them
+// from grid point (sheetOrigin.x, sheetOrigin.y).
+const SHEET_N = 65; // 16 m at 25 cm
+const sheetTexture = new DataTexture(new Float32Array(SHEET_N * SHEET_N * 4), SHEET_N, SHEET_N, RGBAFormat, FloatType);
+sheetTexture.minFilter = NearestFilter;
+sheetTexture.magFilter = NearestFilter;
+const sheetOrigin = uniform(vec2(0, 0));
+const sheetStep = uniform(0.25);
+const sheetOn = uniform(0);
+const sheetState = { ix0: null, iz0: null };
+
+// Keeps the sheet texture centred near (x, z) from the drawn surface's sheet grid (drawnSurface's
+// `sheet`), or turns it off (no sheet in this world).
+export function setTyreSheet(sheet, x, z) {
+  if (!sheet) {
+    sheetOn.value = 0;
+    return;
+  }
+  const half = (SHEET_N - 1) / 2;
+  const cx = Math.round(x / sheet.step);
+  const cz = Math.round(z / sheet.step);
+  // Move it when the car is 2 m off its centre (the tyres stay well inside).
+  if (sheetState.ix0 !== null && Math.abs(cx - (sheetState.ix0 + half)) * sheet.step < 2 && Math.abs(cz - (sheetState.iz0 + half)) * sheet.step < 2) return;
+  const ix0 = cx - half;
+  const iz0 = cz - half;
+  const data = sheetTexture.image.data;
+  for (let j = 0; j < SHEET_N; j++) {
+    for (let i = 0; i < SHEET_N; i++) {
+      const q = sheet.point(ix0 + i, iz0 + j);
+      data.set([q.x, q.z, q.h, sheet.drawn(ix0 + i, iz0 + j) ? 1 : 0], (j * SHEET_N + i) * 4);
+    }
+  }
+  sheetTexture.needsUpdate = true;
+  Object.assign(sheetState, { ix0, iz0 });
+  sheetOrigin.value.set(ix0, iz0);
+  sheetStep.value = sheet.step;
+  sheetOn.value = 1;
+}
+
+// The highest drawn sheet triangle over world (x, z), or a large negative number where there is
+// none. As drawnSurface finds it: the jitter is under half a step, so the triangles over a point
+// belong to its plain grid cell or a neighbour.
+const sheetTopAt = (x, z) => {
+  const ix = x.div(sheetStep).floor().sub(sheetOrigin.x);
+  const iz = z.div(sheetStep).floor().sub(sheetOrigin.y);
+  const P = [];
+  for (let j = 0; j < 4; j++) {
+    for (let i = 0; i < 4; i++) {
+      P.push(textureLoad(sheetTexture, ivec2(int(ix).add(i - 1), int(iz).add(j - 1)).clamp(ivec2(0, 0), ivec2(SHEET_N - 1, SHEET_N - 1))));
+    }
+  }
+  // Height on triangle (p, q, r) at (x, z) if inside, else -1e9 (barycentric, a hair of slack).
+  const onTriangle = (p, q, r, drawn) => {
+    const det = q.y.sub(r.y).mul(p.x.sub(r.x)).add(r.x.sub(q.x).mul(p.y.sub(r.y)));
+    const u = q.y.sub(r.y).mul(x.sub(r.x)).add(r.x.sub(q.x).mul(z.sub(r.y))).div(det);
+    const v = r.y.sub(p.y).mul(x.sub(r.x)).add(p.x.sub(r.x).mul(z.sub(r.y))).div(det);
+    const w = float(1).sub(u).sub(v);
+    const inside = u.min(v).min(w).greaterThanEqual(-1e-4).and(drawn.greaterThan(0.5));
+    return select(inside, u.mul(p.z).add(v.mul(q.z)).add(w.mul(r.z)), float(-1e9));
+  };
+  let top = float(-1e9);
+  for (let j = 0; j < 3; j++) {
+    for (let i = 0; i < 3; i++) {
+      const k = j * 4 + i;
+      const a = P[k];
+      const b = P[k + 1];
+      const c = P[k + 4];
+      const d = P[k + 5];
+      // Texels hold (x, z, h, drawn): use .x, .y, .z as x, z, h.
+      top = top.max(onTriangle(a, c, b, a.w)).max(onTriangle(b, c, d, a.w));
+    }
+  }
+  return select(sheetOn.greaterThan(0.5), top, float(-1e9));
+};
+
 // Rocks near a tyre, for the vertex shader: up to DRAW_ROCKS rocks, each a bounding sphere and
 // DRAW_FACES face planes (the same convex hulls the tyre solver collides with).
 const DRAW_ROCKS = 3;
@@ -357,10 +436,12 @@ function tyreMaterial(nu, nv, sign) {
         });
       });
     }
-    // Never below the ground (see groundTexture). The tyre mesh is in world space, moved by its
-    // matrix (the drawing offsets), so the lift is turned back into the mesh's frame.
+    // Never below the ground (see groundTexture) or the rock sheet's own triangles (see
+    // sheetTexture). The tyre mesh is in world space, moved by its matrix (the drawing offsets), so
+    // the lift is turned back into the mesh's frame.
     const world = modelWorldMatrix.mul(vec4(out, 1)).xyz;
-    const lift = tyreGroundAt(world.x, world.z).sub(world.y).max(0).mul(groundOn);
+    const bottom = tyreGroundAt(world.x, world.z).max(sheetTopAt(world.x, world.z));
+    const lift = bottom.sub(world.y).max(0).mul(groundOn);
     out.addAssign(modelWorldMatrixInverse.mul(vec4(0, lift, 0, 0)).xyz);
     return out;
   })();

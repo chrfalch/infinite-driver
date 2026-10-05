@@ -5,7 +5,7 @@ import { steeringGeometry } from '../render/car-mesh.js';
 import { brakeLightMaterial } from '../render/tube-chassis.js';
 import { DRIVETRAIN } from '../vehicle/config.js';
 import { updateGpuTireMesh, updateSoftTireMesh } from '../render/soft-tire-mesh.js';
-import { setTyreGround } from '../render/mt-tyre.js';
+import { setTyreGround, setTyreSheet } from '../render/mt-tyre.js';
 import { currentSnow } from '../tire/config.js';
 import { CAR } from '../vehicle/config.js';
 import { ifsPoseFromHub } from '../vehicle/frame-geometry.js';
@@ -179,11 +179,17 @@ export function syncBrakeLights(world) {
 
 export function syncSoftTires(world) {
   // The tyres are drawn no lower than the ground the GPU tyres feel (see setTyreGround).
-  const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle)?.controller.gpu?.solver;
+  const player = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle);
+  const solver = player?.controller.gpu?.solver;
   const g = solver?.groundCache;
   if (g && solver.groundRevision !== drawnGroundRevision) {
     drawnGroundRevision = solver.groundRevision;
     setTyreGround(g.heights, g.ix0 * g.cell, g.iz0 * g.cell, g.cell, !currentSnow());
+  }
+  // On the dry river, the rock sheet's own triangles too (the ground grid cuts its ridges).
+  if (g) {
+    const p = player.body.translation();
+    setTyreSheet(world.get(HeightField)?.heightAt?.drawn?.sheet, p.x, p.z);
   }
   world.query(SoftTireView).updateEach(([view]) => {
     if (view.gpu) {
