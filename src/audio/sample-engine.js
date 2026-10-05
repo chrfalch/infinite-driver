@@ -41,6 +41,10 @@ function sampleAt(data, pos, start, end) {
 }
 
 // Equal-power gains for the loops of one set at this rpm, into `gains` (by index into `set`).
+// Two loops close together (within STRETCH² of each other) are mixed all the way between them;
+// further apart, each plays alone up to STRETCH from its own rpm (a recording sped up or slowed
+// down much more than that sounds wrong) and the mix is a narrow band in the middle.
+const STRETCH = 1.3;
 export function rpmGains(set, rpm, gains) {
   gains.fill(0);
   const n = set.length;
@@ -50,7 +54,12 @@ export function rpmGains(set, rpm, gains) {
   else {
     let i = 0;
     while (set[i + 1].rpm < rpm) i++;
-    const x = (rpm - set[i].rpm) / (set[i + 1].rpm - set[i].rpm);
+    const a = set[i].rpm;
+    const b = set[i + 1].rpm;
+    const mid = Math.sqrt(a * b);
+    const lo = Math.max(a, Math.min(b / STRETCH, mid / 1.05));
+    const hi = Math.min(b, Math.max(a * STRETCH, mid * 1.05));
+    const x = Math.min(1, Math.max(0, Math.log(rpm / lo) / Math.log(hi / lo)));
     gains[i] = Math.cos((x * Math.PI) / 2);
     gains[i + 1] = Math.sin((x * Math.PI) / 2);
   }

@@ -63,13 +63,25 @@ describe('recorded engine', () => {
   });
 
   it('mixes the two loops either side of the rpm with equal power', () => {
-    const set = [{ rpm: 1000 }, { rpm: 2000 }, { rpm: 3000 }];
-    const g = rpmGains(set, 1500, new Float64Array(3));
+    const set = [{ rpm: 1000 }, { rpm: 1500 }, { rpm: 2000 }];
+    const g = rpmGains(set, Math.sqrt(1000 * 1500), new Float64Array(3));
     expect(g[0] ** 2 + g[1] ** 2).toBeCloseTo(1, 6);
     expect(g[0]).toBeCloseTo(g[1], 6);
     expect(g[2]).toBe(0);
     expect([...rpmGains(set, 500, new Float64Array(3))]).toEqual([1, 0, 0]);
     expect([...rpmGains(set, 9000, new Float64Array(3))]).toEqual([0, 0, 1]);
+  });
+
+  it('stretches no loop far across a wide gap between loops', () => {
+    const set = [{ rpm: 800 }, { rpm: 2800 }];
+    const g = new Float64Array(2);
+    // Idle sped up 1.25× still plays alone; and the top loop slowed to 1 / 1.25.
+    expect([...rpmGains(set, 1000, g)]).toEqual([1, 0]);
+    rpmGains(set, 2240, g);
+    expect(g[0]).toBeCloseTo(0, 9);
+    expect(g[1]).toBeCloseTo(1, 9);
+    rpmGains(set, Math.sqrt(800 * 2800), g);
+    expect(g[0]).toBeCloseTo(g[1], 6);
   });
 
   it('sounds at the firing tone of the rpm, between and on the loops', () => {

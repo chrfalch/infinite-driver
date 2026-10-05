@@ -1,0 +1,81 @@
+{
+  "name": "Petrol V8",
+  "out": "public/audio/engine-v8",
+  "sourceDir": "../../../../audio-src/engine",
+  "cylinders": 8,
+  "loopSeconds": 1.0,
+  "rpms": [
+    800,
+    1000,
+    1250,
+    1500,
+    1750,
+    2000,
+    2250,
+    2500,
+    2750,
+    3000,
+    3500,
+    4000,
+    4500,
+    5000,
+    5500,
+    6000,
+    6500
+  ],
+  "sources": [
+    {
+      "file": "youtube/yt_1CcjapXtd-E_Ford_Coyote_V8_Crate_Engine_Dyno_Test.48k.wav",
+      "load": "on",
+      "from": 19,
+      "to": 54,
+      "minRpm": 2500,
+      "prefer": 0.3
+    },
+    {
+      "file": "youtube/yt_G0AqoMCMhu0_327_SBC_dyno_run_during_engine_break-in_3000-7000rpm.48k.wav",
+      "load": "on",
+      "from": 16,
+      "to": 42,
+      "minRpm": 2500
+    },
+    {
+      "file": "freesound/fs711875_robin.kaf_Mercedes_Benz_G500_RPM_Runup_Slow_01_by_robin_kaf.48k.wav",
+      "load": "on",
+      "to": 16,
+      "minClarity": 0.3,
+      "maxRpm": 4800
+    },
+    {
+      "file": "freesound/fs711875_robin.kaf_Mercedes_Benz_G500_RPM_Runup_Slow_01_by_robin_kaf.48k.wav",
+      "load": "off",
+      "minClarity": 0.3,
+      "maxRpm": 4800
+    },
+    {
+      "file": "freesound/fs711876_robin.kaf_Mercedes_Benz_G500_RPM_Runup_Slow_02_by_robin_kaf.48k.wav",
+      "load": "off",
+      "minClarity": 0.3,
+      "maxRpm": 4800
+    },
+    {
+      "file": "freesound/fs240671_lonemonk_Chrysler_Start_and_Idle_Exhaust_perspective_by_lon.48k.wav",
+      "load": "off",
+      "from": 2,
+      "minRpm": 400,
+      "maxRpm": 2000,
+      "window": 2,
+      "minClarity": 0.1
+    },
+    {
+      "file": "freesound/fs240671_lonemonk_Chrysler_Start_and_Idle_Exhaust_perspective_by_lon.48k.wav",
+      "load": "on",
+      "from": 2,
+      "minRpm": 400,
+      "maxRpm": 2000,
+      "window": 2,
+      "minClarity": 0.1
+    }
+  ],
+  "gain": 1.3
+}

@@ -1,6 +1,8 @@
 // Maths for turning engine recordings into loops (engine-bank.mjs), kept apart for the tests.
 //
-//   trackPitch  the firing tone over time (YIN, kept continuous from frame to frame)
+//   trackOrders an engine's speed over time from its orders: the comb of harmonics of the cycle
+//               (two crank turns) that every four-stroke's spectrum is (best on real recordings)
+//   trackPitch  the firing tone over time (YIN, kept continuous from frame to frame; clean tones)
 //   flatten     a stretch of a rev, resampled so its pitch holds still: a steady-rpm recording
 //   makeLoop    a whole number of engine cycles, its seam blended so it loops without a click
 
@@ -134,4 +136,133 @@ export function rms(x) {
   let s = 0;
   for (let i = 0; i < x.length; i++) s += x[i] * x[i];
   return Math.sqrt(s / x.length);
+}
+
+// In-place radix-2 FFT (re, im of length 2^k).
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      [re[i], re[j]] = [re[j], re[i]];
+      [im[i], im[j]] = [im[j], im[i]];
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const a = (-2 * Math.PI) / len;
+    const wr = Math.cos(a);
+    const wi = Math.sin(a);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1;
+      let ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const ur = re[i + k];
+        const ui = im[i + k];
+        const vr = re[i + k + len / 2] * cr - im[i + k + len / 2] * ci;
+        const vi = re[i + k + len / 2] * ci + im[i + k + len / 2] * cr;
+        re[i + k] = ur + vr;
+        im[i + k] = ui + vi;
+        re[i + k + len / 2] = ur - vr;
+        im[i + k + len / 2] = ui - vi;
+        const t = cr * wr - ci * wi;
+        ci = cr * wi + ci * wr;
+        cr = t;
+      }
+    }
+  }
+}
+
+// An engine's speed over time from its orders: [{ t, f, clarity }] with f the firing tone (rpm / 60
+// × cylinders / 2), as trackPitch. A four-stroke's sound repeats every cycle (two turns), so its
+// spectrum is a comb of lines at multiples of rpm / 120: each frame scores every candidate speed by
+// the comb's lines against the gaps halfway between them (half the speed would land on lines and
+// gaps alike, double the speed on only every other line), then the best path through the frames is
+// found (Viterbi) with a cost for every change of speed, so it follows a rev and ignores a frame
+// of noise. A whine at a fixed pitch (a dyno's) sits on few lines of any comb and barely counts.
+export function trackOrders(x, sr, { minRpm = 500, maxRpm = 7500, cylinders = 8, hop = 0.02, window = 0.5, maxHz = 1500, step = 0.004, change = 25 } = {}) {
+  let size = 1;
+  while (size < window * sr) size <<= 1;
+  const pad = size * 4;
+  const bin = sr / pad;
+  const hopN = Math.round(hop * sr);
+  const win = new Float64Array(size).map((_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (size - 1)));
+  const cands = [];
+  for (let rpm = minRpm; rpm <= maxRpm; rpm *= 1 + step) cands.push(rpm);
+  const frames = [];
+  const re = new Float64Array(pad);
+  const im = new Float64Array(pad);
+  const mag = new Float64Array(pad / 2);
+  for (let at = 0; at + size <= x.length; at += hopN) {
+    re.fill(0);
+    im.fill(0);
+    for (let i = 0; i < size; i++) re[i] = x[at + i] * win[i];
+    fft(re, im);
+    // Log magnitude, so a few loud lines do not outweigh the comb.
+    for (let k = 0; k < pad / 2; k++) mag[k] = Math.log(1e-9 + Math.hypot(re[k], im[k]));
+    const lineAt = (hz) => {
+      const p = hz / bin;
+      const k = Math.round(p);
+      // The peak within a bin either side (the comb is not exact to a bin).
+      return Math.max(mag[k - 1] ?? -20, mag[k], mag[k + 1] ?? -20);
+    };
+    const scores = new Float64Array(cands.length);
+    for (let c = 0; c < cands.length; c++) {
+      const fc = cands[c] / 120;
+      let lines = 0;
+      let gaps = 0;
+      let count = 0;
+      for (let h = 1; h * fc < maxHz && h * fc < sr / 2 - 2 * fc; h++) {
+        lines += lineAt(h * fc);
+        gaps += lineAt((h + 0.5) * fc);
+        count++;
+      }
+      scores[c] = count ? (lines - gaps) / count : 0;
+    }
+    frames.push({ t: (at + size / 2) / sr, scores });
+  }
+  if (!frames.length) return [];
+  // Viterbi: the path that scores most, less `change` per unit of log speed changed.
+  const n = cands.length;
+  const reach = Math.ceil(Math.log(1 + 3 * hop) / Math.log(1 + step)); // at most ×(1 + 3 hop) per frame
+  let prev = Float64Array.from(frames[0].scores);
+  const back = [];
+  for (let i = 1; i < frames.length; i++) {
+    const cur = new Float64Array(n);
+    const from = new Int32Array(n);
+    for (let c = 0; c < n; c++) {
+      let best = -Infinity;
+      let arg = c;
+      for (let d = Math.max(0, c - reach); d <= Math.min(n - 1, c + reach); d++) {
+        const v = prev[d] - Math.abs(d - c) * Math.log(1 + step) * change;
+        if (v > best) {
+          best = v;
+          arg = d;
+        }
+      }
+      cur[c] = best + frames[i].scores[c];
+      from[c] = arg;
+    }
+    back.push(from);
+    prev = cur;
+  }
+  let c = 0;
+  for (let k = 1; k < n; k++) if (prev[k] > prev[c]) c = k;
+  const path = new Int32Array(frames.length);
+  path[frames.length - 1] = c;
+  for (let i = frames.length - 2; i >= 0; i--) path[i] = c = back[i][c];
+  return frames.map((fr, i) => {
+    const s = fr.scores;
+    let max = -Infinity;
+    let mean = 0;
+    for (let k = 0; k < n; k++) {
+      max = Math.max(max, s[k]);
+      mean += s[k] / n;
+    }
+    const k = path[i];
+    // Clarity: how far the chosen speed's comb stands above the average candidate's (0..1).
+    const clarity = Math.max(0, Math.min(1, (s[k] - mean) / 1.5));
+    return { t: fr.t, f: (cands[k] * cylinders) / 120, clarity, rpm: cands[k], best: max === s[k] };
+  });
 }
