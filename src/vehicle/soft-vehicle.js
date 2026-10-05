@@ -30,6 +30,16 @@ const BRAKE_GRIP = 2e5;
 // A hard landing from 2 m stretches the joints about 3 cm, a 3 m drop at 90 km/h up to 60 cm.
 const BEND_DRIFT = 0.08;
 const BREAK_DRIFT = 0.3;
+// A hit can also twist the upright about its kingpin: its steering arm is short (14 cm), so a few
+// centimetres of give at the tie rod end turn the wheel 30-40°, and a hard one turns it right
+// round (inside out). So the twist off where the steering puts the wheel (rad) bends or breaks
+// the corner too. Rough driving twists a wheel up to about 15°.
+const BEND_TWIST = (20 * Math.PI) / 180;
+const BREAK_TWIST = (40 * Math.PI) / 180;
+// How fast (s) the twist's zero follows slow changes: toe settings, bends, Ackermann at full lock.
+const TWIST_REST_TIME = 0.5;
+// A hit lasts at most this long (s); a corner still overloaded after it keeps its bent shape.
+const IMPACT_TIME = 0.4;
 // The largest bend (m): how far the upper ball joint's seat moves across the upright (camber,
 // about 9° at the full amount) and the tie rod end along it (toe, about 12° on the steering arm).
 const MAX_CAMBER_BEND = 0.05;
@@ -68,6 +78,7 @@ function pointVelocity(body, p) {
   const c = cross(w, sub(p, t));
   return { x: v.x + c.x, y: v.y + c.y, z: v.z + c.z };
 }
+const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 function multiply(a, b) {
   return {
     x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
@@ -505,38 +516,65 @@ export class JointedVehicle {
   // Crash damage for corner i, once per step before the solver (CAR.damage): an overload that
   // stretches the joints past the break limit takes the wheel off; a smaller one bends the upright
   // when the hit is over, by how close it came to breaking and the way the hub was pushed.
-  updateDamage(i) {
+  updateDamage(i, dt) {
     const w = this.wheels[i];
     if (w.detached) return this.updateLostWheel(w);
     const strength = Math.max(0.1, this.car.partStrength ?? 1);
     const drift = this.jointDrift(i);
-    if (drift > BREAK_DRIFT * strength) return this.detachWheel(i);
-    if (!w.ifs) return;
-    if (drift > BEND_DRIFT * strength) {
-      if (drift > (w.impact?.drift ?? 0)) {
+    const twist = this.wheelTwist(i);
+    if (drift > BREAK_DRIFT * strength || Math.abs(twist) > BREAK_TWIST * strength) return this.detachWheel(i);
+    const bendDrift = BEND_DRIFT * strength;
+    const bendTwist = BEND_TWIST * strength;
+    const hit = drift > bendDrift || Math.abs(twist) > bendTwist;
+    if (hit) {
+      const impact = (w.impact ??= { drift: 0, push: null, twist: 0, time: 0 });
+      impact.time += dt;
+      if (drift > impact.drift) {
         // The hub's push off its seat, in the upright's frame (it sits on the seat at rest).
         const k = w.knuckle;
-        const push = rotate(conjugate(k.rotation()), sub(w.hub.translation(), worldPoint(k, w.seat)));
-        w.impact = { drift, push };
+        impact.push = rotate(conjugate(k.rotation()), sub(w.hub.translation(), worldPoint(k, w.seat)));
+        impact.drift = drift;
       }
-    } else if (w.impact) {
-      const { drift: peak, push } = w.impact;
-      w.impact = null;
-      this.bendCorner(w, Math.min(1, (peak - BEND_DRIFT * strength) / ((BREAK_DRIFT - BEND_DRIFT) * strength)), push);
+      if (Math.abs(twist) > Math.abs(impact.twist)) impact.twist = twist;
+      // A wheel left twisted (held by stretched joints) has taken its bend: that is its shape now.
+      if (impact.time < IMPACT_TIME) return;
+      w.twistRest = wrapAngle(w.twistRest + twist);
+    } else {
+      // Between hits the twist's zero follows the wheel (see TWIST_REST_TIME).
+      w.twistRest = wrapAngle(w.twistRest + twist * Math.min(1, dt / TWIST_REST_TIME));
     }
+    if (!w.impact) return;
+    const { drift: peak, push, twist: peakTwist } = w.impact;
+    w.impact = null;
+    if (!w.ifs) return;
+    const fromDrift = (peak - bendDrift) / ((BREAK_DRIFT - BEND_DRIFT) * strength);
+    const fromTwist = (Math.abs(peakTwist) - bendTwist) / ((BREAK_TWIST - BEND_TWIST) * strength);
+    this.bendCorner(w, Math.min(1, Math.max(fromDrift, fromTwist)), push ?? { x: 0, y: 0, z: 0 }, Math.sign(peakTwist));
+  }
+
+  // How far wheel i is turned about the chassis' up axis off where its steering puts it (rad,
+  // signed), less its zero between hits. Measured from the upright's axle, so a wheel turned right
+  // round reads about π.
+  wheelTwist(i) {
+    const w = this.wheels[i];
+    const axle = rotate(multiply(conjugate(this.body.rotation()), w.knuckle.rotation()), AXLE);
+    const off = wrapAngle(Math.atan2(axle.x, axle.z) - (w.front ? w.steering : 0));
+    w.twistRest ??= off;
+    return wrapAngle(off - w.twistRest);
   }
 
   // Bends an independent corner's upright by `amount` (0..1 of the largest bend), the way the hub
   // was pushed: sideways tilts the wheel (camber), lengthwise turns it (toe); every bend does a
   // little of both. It moves the upper ball joint's and the tie rod end's seats on the upright, so
   // it stays until a respawn.
-  bendCorner(w, amount, push) {
+  bendCorner(w, amount, push, turn = 0) {
     const c = w.ifs;
     const len = Math.hypot(push.x, push.z);
     // No clear direction: tilt the top of the wheel out, as a blow from below does.
     const side = Math.sign(w.mount.z);
     const across = len > 0.01 ? push.z / len : -side;
-    const along = len > 0.01 ? push.x / len : 0;
+    // A twist sets the toe's direction; a push along the car does without one.
+    const along = turn ? turn : len > 0.01 ? push.x / len : 0;
     const clamp = (v, max) => Math.max(-max, Math.min(max, v));
     const share = (v, fallback) => (Math.sign(v) || fallback) * Math.max(0.4, Math.abs(v));
     w.bend ??= { camber: 0, toe: 0 };
@@ -744,7 +782,7 @@ export class JointedVehicle {
         w.ifs.lower.resetTorques(true);
       }
     }
-    if (car.damage) for (let i = 0; i < this.wheels.length; i++) this.updateDamage(i);
+    if (car.damage) for (let i = 0; i < this.wheels.length; i++) this.updateDamage(i, dt);
     for (const w of this.wheels) {
       // Suspension length from the wheel centre's position in the chassis frame.
       const s = (w.center ?? w.strut).translation();

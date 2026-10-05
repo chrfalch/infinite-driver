@@ -87,6 +87,48 @@ describe('crash damage', () => {
     expect(controller.wheelIsInContact(1)).toBe(false);
   }, 30000);
 
+  // Turns wheel i's upright by `deg` about the chassis' up axis (as a hit twisting it would).
+  const twistUpright = (controller, i, deg) => {
+    const k = controller.wheels[i].knuckle;
+    const a = (deg * Math.PI) / 360;
+    const yaw = { x: 0, y: Math.sin(a), z: 0, w: Math.cos(a) };
+    const q = k.rotation();
+    // Chassis-frame yaw for a level car: world yaw then the knuckle's own turn.
+    k.setRotation({
+      x: yaw.w * q.x + yaw.y * q.z, y: yaw.w * q.y + yaw.y * q.w, z: yaw.w * q.z - yaw.y * q.x, w: yaw.w * q.w - yaw.y * q.y,
+    }, true);
+  };
+
+  it('a wheel twisted right round comes off; a smaller twist bends its toe', () => {
+    const { controller, run } = setup();
+    run(2);
+    expect(Math.abs(controller.wheelTwist(2))).toBeLessThan(0.05);
+    twistUpright(controller, 2, 60);
+    run(DT);
+    expect(controller.wheelDetached(2)).toBe(true);
+
+    // 28°, held for a few steps: past the bend limit, short of the break.
+    for (let k = 0; k < 4; k++) {
+      twistUpright(controller, 3, 28 - ((controller.wheelTwist(3) * 180) / Math.PI));
+      run(DT);
+    }
+    run(1);
+    expect(controller.wheelDetached(3)).toBe(false);
+    expect(Math.abs(controller.wheels[3].bend?.toe ?? 0)).toBeGreaterThan(0.005);
+  }, 30000);
+
+  it('steering to full lock at speed does no damage', () => {
+    const { controller, run } = setup();
+    run(1);
+    run(3, { ...idle, throttle: 1 });
+    run(2, { ...idle, throttle: 1, steer: 1 });
+    run(2, { ...idle, throttle: 1, steer: -1 });
+    for (let i = 0; i < 4; i++) {
+      expect(controller.wheelDetached(i)).toBe(false);
+      expect(controller.wheels[i].bend).toBeUndefined();
+    }
+  }, 30000);
+
   it('solid axles lose wheels too', () => {
     const { controller, body, run } = setup({ car: { solidAxles: true } });
     run(2);
