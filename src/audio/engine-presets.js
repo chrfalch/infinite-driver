@@ -136,4 +136,12 @@ export const TURBO_DIESEL_V8 = Object.freeze({
   idleRpm: 700,
 });
 
-export const ENGINE_PRESETS = { 'Turbo-diesel I4': TURBO_DIESEL_I4, 'Turbo-diesel V8': TURBO_DIESEL_V8 };
+// A petrol V8 from recordings (sample-engine.js; the bank in public/audio/engine-v8, made by
+// scripts/samples/). Until the bank is loaded, or if it fails to, the procedural V8 plays.
+export const PETROL_V8 = Object.freeze({
+  ...TURBO_DIESEL_V8,
+  name: 'Petrol V8 (recorded)',
+  samples: 'audio/engine-v8',
+});
+
+export const ENGINE_PRESETS = { 'Petrol V8 (recorded)': PETROL_V8, 'Turbo-diesel I4': TURBO_DIESEL_I4, 'Turbo-diesel V8': TURBO_DIESEL_V8 };

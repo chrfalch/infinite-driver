@@ -8,6 +8,8 @@
 //                                     browser that cannot share memory with the audio thread)
 //        { type: 'feed' }             back to the feed
 //        { type: 'preset', preset }   a whole new engine preset (the engine lab's sliders)
+//        { type: 'bank', bank }       recordings for a preset with `samples` (sample-bank.js)
+//        { type: 'source', samples }  play the recordings (true, as the preset says) or the synth
 //        { type: 'layers', values }   levels of the sound's parts (EngineSynth LAYERS)
 //        { type: 'stones', events }   stones thrown and landing (GroundSynth.event)
 //        { type: 'groundPreset', preset }, { type: 'groundLayers', values }   as above, for the
@@ -17,6 +19,7 @@
 //        { type: 'listener', pos }    where each part is heard ({ l, r } gains; mix.js CENTERED)
 //   out: { type: 'status', feedSteps } once a second: how many steps the feed has seen
 import { EngineSynth } from './engine-synth.js';
+import { SampleEngine } from './sample-engine.js';
 import { TURBO_DIESEL_I4 } from './engine-presets.js';
 import { AudioFeed, FeedReader } from './feed.js';
 import { GroundSynth } from './ground-synth.js';
@@ -32,6 +35,11 @@ class EngineProcessor extends AudioWorkletProcessor {
     const { feedBuffer = null, mix = null, preset = null } = options.processorOptions ?? {};
     this.synth = new EngineSynth(sampleRate, preset ?? TURBO_DIESEL_I4, { seed: (Math.random() * 2 ** 31) | 0 });
     if (mix) this.synth.setMix(mix);
+    // A preset with recordings plays them once its bank arrives; the synth until then.
+    this.sampler = new SampleEngine(sampleRate);
+    if (mix) this.sampler.setMix(mix);
+    this.recorded = !!preset?.samples;
+    this.useSamples = true;
     this.ground = new GroundSynth(sampleRate, undefined, { seed: (Math.random() * 2 ** 31) | 0 });
     if (options.processorOptions?.groundPreset) this.ground.setPreset(options.processorOptions.groundPreset);
     if (mix?.ground !== undefined) this.ground.level = mix.ground;
@@ -49,6 +57,7 @@ class EngineProcessor extends AudioWorkletProcessor {
       const m = e.data;
       if (m.type === 'mix') {
         this.synth.setMix(m.values);
+        this.sampler.setMix(m.values);
         if (m.values.ground !== undefined) this.ground.level = m.values.ground;
         if (m.values.car !== undefined) this.car.level = m.values.car;
       } else if (m.type === 'stones') for (const e of m.events) this.ground.event(e);
@@ -57,7 +66,11 @@ class EngineProcessor extends AudioWorkletProcessor {
       else if (m.type === 'carPreset') this.car.setPreset(m.preset);
       else if (m.type === 'carLayers') this.car.setLayers(m.values);
       else if (m.type === 'listener') this.pos = m.pos;
-      else if (m.type === 'preset') this.synth.setPreset(m.preset);
+      else if (m.type === 'preset') {
+        this.synth.setPreset(m.preset);
+        this.recorded = !!m.preset.samples;
+      } else if (m.type === 'bank') this.sampler.setBank(m.bank);
+      else if (m.type === 'source') this.useSamples = m.samples;
       else if (m.type === 'layers') this.synth.setLayers(m.values);
       else if (m.type === 'manual') this.manual = { ...IDLE, ...m.values };
       else if (m.type === 'feed') this.manual = null;
@@ -84,7 +97,8 @@ class EngineProcessor extends AudioWorkletProcessor {
     // The engine (mono) where the exhaust is, then the tyres, ground and hits, each where it is.
     if (this.engineBuf.length !== n) this.engineBuf = new Float32Array(n);
     const engine = this.engineBuf;
-    this.synth.render(engine, this.prev, next);
+    const recorded = this.recorded && this.useSamples && this.sampler.ready;
+    (recorded ? this.sampler : this.synth).render(engine, this.prev, next);
     const R = right ?? (this.monoRight ??= new Float32Array(n));
     const at = this.pos.exhaust;
     for (let i = 0; i < n; i++) {
