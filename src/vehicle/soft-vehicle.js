@@ -38,6 +38,8 @@ const BEND_TWIST = (20 * Math.PI) / 180;
 const BREAK_TWIST = (40 * Math.PI) / 180;
 // How fast (s) the twist's zero follows slow changes: toe settings, bends, Ackermann at full lock.
 const TWIST_REST_TIME = 0.5;
+// Steps (1/120 s) a corner must stay past a break limit before it lets go.
+const BREAK_STEPS = 2;
 // A hit lasts at most this long (s); a corner still overloaded after it keeps its bent shape.
 const IMPACT_TIME = 0.4;
 // The largest bend (m): how far the upper ball joint's seat moves across the upright (camber,
@@ -522,7 +524,10 @@ export class JointedVehicle {
     const strength = Math.max(0.1, this.car.partStrength ?? 1);
     const drift = this.jointDrift(i);
     const twist = this.wheelTwist(i);
-    if (drift > BREAK_DRIFT * strength || Math.abs(twist) > BREAK_TWIST * strength) return this.detachWheel(i);
+    // Past the break limit for BREAK_STEPS steps in a row: a one-step spike breaks nothing.
+    const over = drift > BREAK_DRIFT * strength || Math.abs(twist) > BREAK_TWIST * strength;
+    w.overloadSteps = over ? (w.overloadSteps ?? 0) + 1 : 0;
+    if (w.overloadSteps >= BREAK_STEPS) return this.detachWheel(i);
     const bendDrift = BEND_DRIFT * strength;
     const bendTwist = BEND_TWIST * strength;
     const hit = drift > bendDrift || Math.abs(twist) > bendTwist;

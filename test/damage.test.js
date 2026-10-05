@@ -20,7 +20,8 @@ function setup({ y = softCarRideHeight(), linvel, car: extra = {} } = {}) {
   world.createCollider(
     RAPIER.ColliderDesc.cuboid(500, 1, 500).setTranslation(0, -1, 0).setFriction(1).setCollisionGroups(groups(GROUP.WORLD, 0xffff)),
   );
-  const car = { ...JSON.parse(JSON.stringify(DEFAULT_CAR)), gpuTires: false, damage: true, ...extra };
+  // Part strength 1: the limits as written in soft-vehicle.js (the game's default is stronger).
+  const car = { ...JSON.parse(JSON.stringify(DEFAULT_CAR)), gpuTires: false, damage: true, partStrength: 1, ...extra };
   const { body, controller } = createSoftCarBody(RAPIER, world, { x: 0, y, z: 0 }, car, undefined, { linvel });
   const state = { body, controller, steer: 0, drivetrain: new Drivetrain({ ...DEFAULT_DRIVETRAIN }) };
   const run = (seconds, input = idle) => {
@@ -104,6 +105,10 @@ describe('crash damage', () => {
     run(2);
     expect(Math.abs(controller.wheelTwist(2))).toBeLessThan(0.05);
     twistUpright(controller, 2, 60);
+    run(DT);
+    // A one-step spike breaks nothing; held for a second step, it does.
+    expect(controller.wheelDetached(2)).toBe(false);
+    twistUpright(controller, 2, 60 - (controller.wheelTwist(2) * 180) / Math.PI);
     run(DT);
     expect(controller.wheelDetached(2)).toBe(true);
 
