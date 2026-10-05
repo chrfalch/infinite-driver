@@ -243,8 +243,11 @@ export class JointedVehicle {
   }
 
   // Independent suspension: a steering rack across the nose box, sliding sideways on the chassis.
+  // The rack and tie rods are heavier than the real parts: with a 4 kg rack and 2 kg tie rods the
+  // joint solver could not hold the rack at its limits against tyres gripping the ground at a
+  // standstill, and the wheels turned only half way to full lock (about 23° of 45°).
   createRack() {
-    const rack = this.createLink(this.rackGeo.center, 4, 0.3);
+    const rack = this.createLink(this.rackGeo.center, 20, 1.5);
     const slide = this.joint(this.RAPIER.JointData.prismatic(this.rackGeo.center, ORIGIN, AXLE), this.body, rack);
     // The rack is held at the steering position by the joint's limits (a hard constraint): a
     // position motor is too soft against the tyres' aligning torque and the wheels steer late.
@@ -280,7 +283,7 @@ export class JointedVehicle {
     this.joint(RAPIER.JointData.spherical(ORIGIN, onUpright(G.lowerBall)), lower, upright);
     this.joint(RAPIER.JointData.spherical(ORIGIN, onUpright(G.upperBall)), upper, upright);
     const tieMid = midpoint(G.tieInner, G.tieOuter);
-    const tie = this.createLink(tieMid, 2, 0.08);
+    const tie = this.createLink(tieMid, 6, 0.5);
     const tieOnUpright = onUpright(G.tieOuter);
     this.joint(RAPIER.JointData.spherical(sub(G.tieOuter, tieMid), tieOnUpright), tie, upright);
     if (G.front) {
@@ -777,8 +780,8 @@ export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIR
   const { y: hy, z: hz } = car.halfExtents;
   // The jointed car's axles, hubs, knuckles, and tyres add mass; the chassis gets the rest so the
   // whole car weighs car.mass.
-  // Independent: per corner lower arm 8, upper 5, upright 10, tie rod 2, hub 22 kg, plus the rack.
-  const unsprung = car.solidAxles ? 292 : 192;
+  // Independent: per corner lower arm 8, upper 5, upright 10, tie rod 6, hub 22 kg, plus the 20 kg rack.
+  const unsprung = car.solidAxles ? 292 : 224;
   const m = Math.max(600, car.mass - unsprung);
   const inertia = {
     x: (m / 12) * (4 * hy * hy + 4 * hz * hz) * 1.6,
