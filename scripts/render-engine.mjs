@@ -5,7 +5,8 @@
 // Preset changes are merged into the preset, e.g. '{"pipe":{"feedback":0},"bodyShare":0.12}';
 // '{"base":"Turbo-diesel I4"}' renders the four instead of the V8; '{"base":"Petrol V8 (recorded)"}'
 // renders the recordings (the bank in public/, decoded with ffmpeg); '{"foley":true}' adds the
-// recorded tyre, ground and car sounds (public/audio/foley) in place of the synths' parts.
+// recorded tyre, ground and car sounds (public/audio/foley) in place of the synths' parts;
+// '{"engine":0}' leaves the engine out.
 //
 // The drivetrain runs on a simple rolling car (as in test/drivetrain.test.js), writes the audio feed
 // every physics step, and the sound is read from the feed as the audio worklet does.
@@ -84,7 +85,7 @@ const merge = (base, changes) => {
   return out;
 };
 // "base" picks the preset to change (a name in ENGINE_PRESETS; the V8 by default).
-const { base = TURBO_DIESEL_V8.name, foley: withFoley = false, ...changes } = JSON.parse(process.argv[4] ?? '{}');
+const { base = TURBO_DIESEL_V8.name, foley: withFoley = false, engine: engineLevel = 1, ...changes } = JSON.parse(process.argv[4] ?? '{}');
 const preset = merge(ENGINE_PRESETS[base], changes);
 const synth = new EngineSynth(SR, preset);
 // A recorded engine plays its bank, decoded here as the browser would.
@@ -99,6 +100,8 @@ const decode = async (bytes) => {
   return { sampleRate: SR, length: data.length, numberOfChannels: 1, getChannelData: () => data };
 };
 if (preset.samples) engine = new SampleEngine(SR, await loadBank(preset.samples, decode, fetchFile));
+// '{"engine":0}' leaves the engine out (to hear the rest).
+engine.setMix({ engine: engineLevel });
 const foley = withFoley ? new Foley(SR, await loadFoley('audio/foley', decode, fetchFile)) : null;
 const drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN, automatic: !s.neutral, low: false });
 const samples = new Float32Array(Math.ceil(s.seconds * SR));

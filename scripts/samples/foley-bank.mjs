@@ -3,33 +3,43 @@
 //
 // The spec (JSON):
 //   { out: 'public/audio/foley', sourceDir,
-//     loops: { name: [{ file, from, to, gain (dB), highpass (Hz) }] },
+//     loops: { name: [{ file, from, to, gain (dB), highpass (Hz) } | { parts: [{ file, from, to }], gain }] },
 //     oneshots: { name: [{ file, from, to, gain (dB) } | { file, from, to, detect: { count, gap (s) } }] } }
 // Loops: the stretch from..to, its end blended into its start over FADE s, set to LOOP_DB RMS (+
 // gain). One-shots: a hit from..to, or `count` hits found in from..to (the loudest onsets at
-// least `gap` apart); each cut from just before its onset until it has died away (40 dB below its
+// least `gap` apart); each cut from just before its onset until it has died away (30 dB below its
 // peak, at most MAX_HIT s), faded in and out. A name's takes keep their loudness relative to each
 // other: the loudest peaks at HIT_DB, and each take's strength is its peak against that one's
 // (foley.js plays the take nearest a hit's strength). Written as FLAC with manifest.json.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 
 const SR = 48000;
 const FADE = 0.25; // s, a loop's seam (noise-like sounds blend over a long one without a lump)
 const LOOP_DB = -20;
 const HIT_DB = -3;
-const MAX_HIT = 2.5; // s
+const MAX_HIT = 1.5; // s
 
 const specPath = resolve(process.argv[2] ?? 'scripts/samples/foley.json');
 const spec = JSON.parse(readFileSync(specPath, 'utf8'));
 const SOURCE_DIR = process.env.AUDIO_SRC ?? resolve(dirname(specPath), spec.sourceDir ?? '.');
 
+// A file named in full, or by the start of its name (its source id) in its folder: 'rolling/fs848759'.
+function resolveFile(file) {
+  const full = join(SOURCE_DIR, file);
+  if (existsSync(full)) return full;
+  const dir = dirname(full);
+  const match = readdirSync(dir).find((f) => f.startsWith(basename(file)) && f.endsWith('.48k.wav'));
+  if (!match) throw new Error(`no recording ${file}`);
+  return join(dir, match);
+}
+
 function decode(file, from, to, highpass) {
   const args = ['-v', 'error'];
   if (from) args.push('-ss', String(from));
   if (to) args.push('-to', String(to));
-  args.push('-i', join(SOURCE_DIR, file), '-ac', '1', '-ar', String(SR));
+  args.push('-i', resolveFile(file), '-ac', '1', '-ar', String(SR));
   if (highpass) args.push('-af', `highpass=f=${highpass}`);
   args.push('-f', 'f32le', '-');
   const buf = execFileSync('ffmpeg', args, { maxBuffer: 1 << 30 });
@@ -37,7 +47,7 @@ function decode(file, from, to, highpass) {
 }
 
 function encodeFlac(data, path) {
-  execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'f32le', '-ar', String(SR), '-ac', '1', '-i', '-', '-sample_fmt', 's32', '-c:a', 'flac', path], {
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'f32le', '-ar', String(SR), '-ac', '1', '-i', '-', '-sample_fmt', 's16', '-c:a', 'flac', path], {
     input: Buffer.from(data.buffer, data.byteOffset, data.byteLength),
   });
 }
@@ -86,7 +96,7 @@ function onsets(x, count, gap) {
   return picked.sort((a, b) => a - b).map((k) => Math.max(0, (k - 2) * w));
 }
 
-// A hit from `at`: until 40 dB under its peak (or the next onset, or MAX_HIT), faded in and out.
+// A hit from `at`: until 30 dB under its peak (or the next onset, or MAX_HIT), faded in and out.
 function cutHit(x, at, until = x.length) {
   const { env, w } = envelope(x.subarray(at, Math.min(until, at + MAX_HIT * SR)));
   let top = 0;
@@ -95,7 +105,7 @@ function cutHit(x, at, until = x.length) {
   let k = 0;
   while (k < env.length && env[k] < top) k++;
   for (; k < env.length; k++)
-    if (env[k] < top * 0.01) {
+    if (env[k] < top * 0.03) {
       end = k;
       break;
     }
@@ -112,14 +122,42 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 const manifest = { loops: {}, oneshots: {} };
 
+// Short stretches strung together (each to the same level, blended into the next over JOIN s):
+// one long take, so a short sound does not repeat every second.
+const JOIN = 0.15;
+function join_(parts) {
+  const xs = parts.map((p) => {
+    const x = decode(p.file, p.from, p.to, p.highpass ?? 30);
+    const g = 1 / (rms(x) || 1);
+    for (let k = 0; k < x.length; k++) x[k] *= g;
+    return x;
+  });
+  const f = Math.round(JOIN * SR);
+  let out = xs[0];
+  for (const x of xs.slice(1)) {
+    const next = new Float32Array(out.length + x.length - f);
+    next.set(out);
+    for (let i = 0; i < x.length; i++) {
+      const k = out.length - f + i;
+      if (i < f) {
+        const u = (i / f) * (Math.PI / 2);
+        next[k] = out[k] * Math.cos(u) + x[i] * Math.sin(u);
+      } else next[k] = x[i];
+    }
+    out = next;
+  }
+  return out;
+}
+
 for (const [name, takes] of Object.entries(spec.loops ?? {})) {
   manifest.loops[name] = takes.map((t, i) => {
-    const loop = loopOf(decode(t.file, t.from, t.to, t.highpass ?? 30));
-    const g = 10 ** ((LOOP_DB + (t.gain ?? 0)) / 20) / (rms(loop) || 1);
+    const loop = loopOf(t.parts ? join_(t.parts) : decode(t.file, t.from, t.to, t.highpass ?? 30));
+    // To its level, but never past -1 dBFS (a crackly stretch peaks far above its RMS).
+    const g = Math.min(10 ** ((LOOP_DB + (t.gain ?? 0)) / 20) / (rms(loop) || 1), 10 ** (-1 / 20) / (peak(loop) || 1));
     for (let k = 0; k < loop.length; k++) loop[k] *= g;
     const file = `${name}-${i}.flac`;
     encodeFlac(loop, join(out, file));
-    console.log(`loop ${file}: ${(loop.length / SR).toFixed(2)} s from ${t.file} ${t.from ?? 0}-${t.to ?? 'end'} s, peak ${(20 * Math.log10(peak(loop))).toFixed(1)} dBFS`);
+    console.log(`loop ${file}: ${(loop.length / SR).toFixed(2)} s from ${t.parts ? `${t.parts.length} parts` : `${t.file} ${t.from ?? 0}-${t.to ?? 'end'} s`}, peak ${(20 * Math.log10(peak(loop))).toFixed(1)} dBFS`);
     return { file, gain: 1 };
   });
 }

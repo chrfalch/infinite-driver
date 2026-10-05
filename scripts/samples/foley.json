@@ -1,0 +1,293 @@
+{
+  "out": "public/audio/foley",
+  "sourceDir": "../../../../audio-src/foley",
+  "loops": {
+    "roll-gravel": [
+      {
+        "file": "rolling/fs848759",
+        "from": 42,
+        "to": 50
+      }
+    ],
+    "roll-dirt": [
+      {
+        "file": "rolling/fs14371",
+        "from": 4,
+        "to": 12
+      }
+    ],
+    "roll-rock": [
+      {
+        "file": "rolling/fs817389",
+        "from": 6,
+        "to": 14,
+        "highpass": 120,
+        "gain": -4
+      }
+    ],
+    "roll-snow": [
+      {
+        "file": "rolling/yt_3wJ1yy8YISo",
+        "from": 1.5,
+        "to": 9.5
+      }
+    ],
+    "slide": [
+      {
+        "parts": [
+          {
+            "file": "slide/yt_k0EF-g3rt-U",
+            "from": 0.9,
+            "to": 6.9
+          },
+          {
+            "file": "slide/fs675282",
+            "from": 1.9,
+            "to": 4.8999999999999995
+          },
+          {
+            "file": "slide/fs675282",
+            "from": 8.6,
+            "to": 12.799999999999999
+          },
+          {
+            "file": "slide/fs675282",
+            "from": 15.6,
+            "to": 19.1
+          },
+          {
+            "file": "slide/fs675282",
+            "from": 22.099999999999998,
+            "to": 25.700000000000003
+          },
+          {
+            "file": "slide/fs675282",
+            "from": 28.7,
+            "to": 32.300000000000004
+          },
+          {
+            "file": "slide/fs675282",
+            "from": 35.199999999999996,
+            "to": 38.300000000000004
+          }
+        ]
+      }
+    ],
+    "squeal": [
+      {
+        "parts": [
+          {
+            "file": "slide/fs71741",
+            "from": 5.3,
+            "to": 7.2
+          },
+          {
+            "file": "slide/fs76804",
+            "from": 7.6,
+            "to": 9.4
+          },
+          {
+            "file": "slide/fs76806",
+            "from": 7.3,
+            "to": 9.2
+          },
+          {
+            "file": "slide/fs76805",
+            "from": 2.9,
+            "to": 3.9
+          },
+          {
+            "file": "slide/fs71740",
+            "from": 3.1,
+            "to": 5.5
+          }
+        ],
+        "gain": -4
+      }
+    ],
+    "spin": [
+      {
+        "parts": [
+          {
+            "file": "slide/yt_QC0LbB1zk7Q",
+            "from": 3.8,
+            "to": 5.5,
+            "highpass": 250
+          },
+          {
+            "file": "slide/yt_5PBDMvIi9NI",
+            "from": 4.5,
+            "to": 6.8,
+            "highpass": 250
+          },
+          {
+            "file": "slide/yt_uQ9PfSCo2YQ",
+            "from": 0.9,
+            "to": 2.5,
+            "highpass": 250
+          },
+          {
+            "file": "slide/yt_Opc7eD9peqI",
+            "from": 2.2,
+            "to": 3.4,
+            "highpass": 250
+          },
+          {
+            "file": "slide/yt_Opc7eD9peqI",
+            "from": 6.6,
+            "to": 7.9,
+            "highpass": 250
+          }
+        ]
+      }
+    ],
+    "scrape": [
+      {
+        "file": "scrape/yt_kU54-uzxhmM",
+        "from": 10,
+        "to": 18
+      }
+    ],
+    "rattle": [
+      {
+        "file": "rattle/yt_dK12bFB3wcY",
+        "from": 26,
+        "to": 36
+      }
+    ]
+  },
+  "oneshots": {
+    "bump": [
+      {
+        "file": "impacts/yt_EYfLDpzVVKQ",
+        "from": 0.8,
+        "to": 2.4
+      },
+      {
+        "file": "impacts/yt_EYfLDpzVVKQ",
+        "from": 5.5,
+        "to": 7.2
+      },
+      {
+        "file": "impacts/fs450766",
+        "from": 0,
+        "to": 30,
+        "detect": {
+          "count": 6,
+          "gap": 0.6
+        },
+        "gain": -4
+      }
+    ],
+    "landing": [
+      {
+        "file": "impacts/yt_tunf9wFymaU",
+        "from": 0,
+        "to": 2.5
+      },
+      {
+        "file": "impacts/yt_IgjgAgfzyV8",
+        "detect": {
+          "count": 1
+        }
+      },
+      {
+        "file": "impacts/yt_R3EM6V861Yc",
+        "detect": {
+          "count": 1
+        }
+      }
+    ],
+    "chassis-hit": [
+      {
+        "file": "impacts/yt_P4npLKWsp34",
+        "from": 11,
+        "to": 20,
+        "detect": {
+          "count": 3,
+          "gap": 1
+        }
+      },
+      {
+        "file": "impacts/yt_FpE4nltS6IQ",
+        "from": 1.5,
+        "to": 13,
+        "detect": {
+          "count": 4,
+          "gap": 1.5
+        }
+      },
+      {
+        "file": "impacts/fs798843",
+        "detect": {
+          "count": 5,
+          "gap": 0.8
+        },
+        "gain": -6
+      }
+    ],
+    "top-out": [
+      {
+        "file": "impacts/fs327531",
+        "detect": {
+          "count": 3,
+          "gap": 1
+        }
+      },
+      {
+        "file": "impacts/fs770772",
+        "from": 0,
+        "to": 7,
+        "detect": {
+          "count": 2,
+          "gap": 2
+        }
+      }
+    ],
+    "rim": [
+      {
+        "file": "impacts/fs489924"
+      },
+      {
+        "file": "stones/fs443391",
+        "detect": {
+          "count": 3,
+          "gap": 0.4
+        }
+      }
+    ],
+    "stone-hit": [
+      {
+        "file": "stones/fs169258",
+        "detect": {
+          "count": 8,
+          "gap": 0.08
+        }
+      }
+    ],
+    "creak": [
+      {
+        "file": "rattle/yt_YihSyr8FZPM",
+        "from": 0,
+        "to": 30,
+        "detect": {
+          "count": 6,
+          "gap": 2
+        }
+      },
+      {
+        "file": "rattle/yt_MV2S7-q-CeY",
+        "from": 0,
+        "to": 1.8
+      },
+      {
+        "file": "rattle/fs86234",
+        "detect": {
+          "count": 3,
+          "gap": 2
+        },
+        "gain": 12
+      }
+    ]
+  }
+}

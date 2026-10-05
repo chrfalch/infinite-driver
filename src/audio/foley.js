@@ -56,12 +56,12 @@ function loopAt(data, len, pos) {
 export const FOLEY = Object.freeze({
   loops: {
     'roll-gravel': { level: 0.5, speed: 12 },
-    'roll-dirt': { level: 0.45, speed: 12 },
-    'roll-sand': { level: 0.45, speed: 12 },
+    'roll-dirt': { level: 0.6, speed: 12 },
+    'roll-sand': { level: 0.6, speed: 12 },
     'roll-rock': { level: 0.4, speed: 12 },
     'roll-snow': { level: 0.4, speed: 10 },
     slide: { level: 0.5, from: 0.6, full: 4 }, // slip, m/s
-    squeal: { level: 0.25, from: 0.9, full: 3.5 },
+    squeal: { level: 0.4, from: 0.9, full: 3.5 },
     spin: { level: 0.5, from: 1.5, full: 8 },
     scrape: { level: 0.6, full: 4 }, // speed m/s
     rattle: { level: 0.4, from: 2, full: 14 }, // chassis heave, m/s²
