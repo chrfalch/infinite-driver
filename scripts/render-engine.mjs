@@ -34,6 +34,14 @@ const SCENARIOS = {
   short: { seconds: 9, neutral: false, throttle: (t) => (t >= 1.5 && t < 7 ? 1 : 0) },
   rev: { seconds: 10, neutral: true, throttle: (t) => (t % 2.5 > 0.8 && t % 2.5 < 1.4 ? 1 : 0) },
   idle: { seconds: 5, neutral: true, throttle: () => 0 },
+  // The engine alone, set directly: a slow pull from idle to 6500 rpm, then a slow coast back down
+  // (hears every loop and every crossfade of a recorded engine).
+  sweep: {
+    seconds: 26,
+    neutral: true,
+    throttle: () => 0,
+    engine: (t) => (t < 1 ? { rpm: 800, fuel: 0.13 } : t < 13 ? { rpm: 800 + ((t - 1) / 12) * 5700, fuel: 0.9 } : t < 25 ? { rpm: 6500 - ((t - 13) / 12) * 5700, fuel: 0 } : { rpm: 800, fuel: 0.13 }),
+  },
   // Driveline and body: pull away in low range, full lock in a circle, a shaken body, then high
   // range up to speed (wind).
   driveline: {
@@ -134,7 +142,7 @@ for (let i = 0; i < samples.length; i += BLOCK) {
   }
   const end = Math.min(samples.length, i + BLOCK);
   const values = reader.advance((end - i) / SR);
-  const next = { ...values };
+  const next = { ...values, ...s.engine?.(end / SR) };
   engine.render(samples, prev, next, i, end);
   ground.render(samples, right, prev, next, i, end);
   car.render(samples, right, prev, next, i, end);

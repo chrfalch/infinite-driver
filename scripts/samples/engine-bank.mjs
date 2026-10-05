@@ -16,7 +16,8 @@
 // rpmScale corrects a recording whose speed the order tracker gets wrong by a factor (it should
 // not). --report prints each source's track as rpm over time.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { flatten, makeLoop, rms, trackOrders } from './pitch.mjs';
 
@@ -42,6 +43,22 @@ function encodeFlac(data, path) {
   execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'f32le', '-ar', String(SR), '-ac', '1', '-i', '-', '-sample_fmt', 's32', '-c:a', 'flac', path], {
     input: Buffer.from(data.buffer, data.byteOffset, data.byteLength),
   });
+}
+
+// A loop through sox's equalisers (a loop stays a loop: filtered twice over and the second pass
+// kept, so the filters' start-up does not land at the seam).
+function offLoad(loop) {
+  const twice = new Float32Array(loop.length * 2);
+  twice.set(loop);
+  twice.set(loop, loop.length);
+  // Through files: sox stops reading a pipe from node after its first 64 kB.
+  const dir = mkdtempSync(join(tmpdir(), 'off-load-'));
+  const raw = ['-t', 'raw', '-e', 'floating-point', '-b', '32', '-r', String(SR), '-c', '1'];
+  writeFileSync(join(dir, 'in.raw'), Buffer.from(twice.buffer));
+  execFileSync('sox', [...raw, join(dir, 'in.raw'), ...raw, join(dir, 'out.raw'), 'equalizer', '350', '1.2q', '-4', 'equalizer', '2000', '1q', '-5', 'equalizer', '9000', '1q', '-6']);
+  const buf = readFileSync(join(dir, 'out.raw'));
+  rmSync(dir, { recursive: true });
+  return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4).slice(loop.length, loop.length * 2);
 }
 
 const cyl = spec.cylinders ?? 8;
@@ -103,9 +120,24 @@ const levels = { on: -20, off: -24, rise: 6, ...spec.levels };
 const top = Math.max(...spec.rpms);
 const bottom = Math.min(...spec.rpms);
 const PEAK = 10 ** (-1 / 20);
+const made = { on: new Map(), off: new Map() };
 for (const load of ['on', 'off']) {
   for (const rpm of spec.rpms) {
     const pick = bestStretch(rpm, load, seconds + fade + 0.05);
+    if (!pick && load === 'off' && made.on.has(rpm)) {
+      // No coasting recording at this rpm: the pulling loop made to sound off load, as Caviezel
+      // suggests (Boom Library's engine primer): quieter, the low mids and the bark at 2 kHz and the
+      // fizz at 10 kHz cut.
+      const derived = offLoad(made.on.get(rpm));
+      const file = `off-${rpm}.flac`;
+      const db = levels.off + (levels.rise * (rpm - bottom)) / (top - bottom);
+      const g = 10 ** (db / 20) / (rms(derived) || 1);
+      for (let i = 0; i < derived.length; i++) derived[i] *= g;
+      encodeFlac(derived, join(out, file));
+      loops.push({ file, rpm, load, loopStart: 0, loopEnd: derived.length / SR, gain: 1 });
+      console.log(`off ${rpm} rpm: from the on-load loop (no coasting recording)`);
+      continue;
+    }
     if (!pick) {
       console.log(`${load} ${rpm} rpm: no clean stretch`);
       continue;
@@ -120,6 +152,7 @@ for (const load of ['on', 'off']) {
     for (let i = 0; i < loop.length; i++) peak = Math.max(peak, Math.abs(loop[i]));
     gain = Math.min(gain, PEAK / (peak || 1));
     for (let i = 0; i < loop.length; i++) loop[i] *= gain;
+    made[load].set(rpm, loop);
     const file = `${load}-${rpm}.flac`;
     encodeFlac(loop, join(out, file));
     loops.push({ file, rpm, load, loopStart: 0, loopEnd: loop.length / SR, gain: 1 });
