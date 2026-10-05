@@ -1,6 +1,6 @@
 // The snow surface near the car, on the deformation grid (12.5 cm), so the ruts the tyres pack
 // into the snow show as real grooves with the berms beside them. The terrain mesh is only a 1 m
-// grid, so on snow it is sunk out of sight under this patch (see setSnowPatch in terrain-mesh.js).
+// grid, so on snow it is sunk out of sight under this patch (see setGroundPatch in terrain-mesh.js).
 //
 // The patch is a fixed grid of vertices; a texture holds each vertex's height (the snow surface plus
 // the deformation) and how packed the snow there is. It follows the car in whole metres, so its
@@ -30,22 +30,23 @@ function edgeWeights() {
   return w;
 }
 
-function patchGeometry() {
-  const positions = new Float32Array(N * N * 3);
-  for (let iz = 0; iz < N; iz++) {
-    for (let ix = 0; ix < N; ix++) {
-      const i = iz * N + ix;
+// A square grid of n x n vertices holding their cell indices in x and z (the shader places them).
+export function patchGeometry(n = N) {
+  const positions = new Float32Array(n * n * 3);
+  for (let iz = 0; iz < n; iz++) {
+    for (let ix = 0; ix < n; ix++) {
+      const i = iz * n + ix;
       positions[i * 3] = ix;
       positions[i * 3 + 2] = iz;
     }
   }
-  const indices = new Uint32Array((N - 1) * (N - 1) * 6);
+  const indices = new Uint32Array((n - 1) * (n - 1) * 6);
   let k = 0;
-  for (let iz = 0; iz < N - 1; iz++) {
-    for (let ix = 0; ix < N - 1; ix++) {
-      const a = ix + iz * N;
+  for (let iz = 0; iz < n - 1; iz++) {
+    for (let ix = 0; ix < n - 1; ix++) {
+      const a = ix + iz * n;
       const b = a + 1;
-      const c = a + N;
+      const c = a + n;
       const d = c + 1;
       indices[k++] = a;
       indices[k++] = c;

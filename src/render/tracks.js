@@ -94,8 +94,10 @@ export class TireTracks {
     this.mesh = new Mesh(geometry, createMaterial(this.heads, segments));
     this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
-    // Drawn after the terrain (it does not write depth, so the ground must already be there).
-    this.mesh.renderOrder = 2;
+    // Drawn right after the ground (it does not write depth, so the ground must already be there)
+    // and before everything else: a tyre sunk in a rut, below the track's surface, then still draws
+    // over the track instead of the track over the tyre. The ground is at renderOrder -1.
+    this.mesh.renderOrder = -0.5;
     this.mesh.name = 'tyre tracks';
     scene.add(this.mesh);
     this.state = Array.from({ length: wheels }, () => ({ last: null, head: 0, count: 0, stripe: 0, total: 0 }));

@@ -37,8 +37,9 @@ import { GROUND, setSnowCover } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
 import { worldMode } from './world.js';
-import { setSnowPatch, setTerrainWorld } from './render/terrain-mesh.js';
+import { setGroundPatch, setTerrainWorld } from './render/terrain-mesh.js';
 import { SnowSurface } from './render/snow-surface.js';
+import { GroundSurface } from './render/ground-surface.js';
 import { applyPendingCarAction, footprint, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
 import { updateInstanceBatchers } from './render/instance-batcher.js';
@@ -85,8 +86,9 @@ async function main() {
   // The tyres, compaction and spray treat the ground as snow in the snowfield.
   setSnowCover(heightAt.snow);
   const deformation = new GroundDeformation();
-  const snowSurface = heightAt.snow ? new SnowSurface(render.scene, heightAt, deformation) : null;
-  if (snowSurface) snowSurface.onMove = setSnowPatch;
+  // The ground near the car, drawn with its ruts: snow on the snowfield, soil elsewhere.
+  const groundSurface = heightAt.snow ? new SnowSurface(render.scene, heightAt, deformation) : new GroundSurface(render.scene, heightAt, deformation);
+  groundSurface.onMove = setGroundPatch;
 
   // Physics runs in a worker (with its own GPU device) for the GPU tyres when the browser has
   // WebGPU in workers; ?physics=main keeps it on this thread. Other tyre modes stay here.
@@ -242,7 +244,7 @@ async function main() {
       timed('sys.syncBrakeLights', () => syncBrakeLights(world));
       timed('sys.updateTracks', () => updateTracks(world));
       timed('sys.updateSoil', () => updateSoil(world));
-      if (snowSurface) timed('sys.snowSurface', () => updateSnowSurface(world, snowSurface));
+      timed('sys.groundSurface', () => updateGroundSurface(world, groundSurface));
       timed('sys.updateBushes', () => updateBushes(world));
       orbitCamera(readCameraKeys(), time.delta);
       timed('sys.followCamera', () => followCamera(world));
@@ -281,12 +283,12 @@ async function main() {
   };
 }
 
-// The snow surface follows the car and picks up the new ruts.
-function updateSnowSurface(world, snowSurface) {
+// The ground surface follows the car and picks up the new ruts.
+function updateGroundSurface(world, groundSurface) {
   const car = world.queryFirst(IsPlayer, Vehicle);
   if (!car) return;
   const p = car.get(Vehicle).body.translation();
-  snowSurface.update(p.x, p.z);
+  groundSurface.update(p.x, p.z);
 }
 
 // Worker physics: the draw side keeps its own copy of the tyre solver's ground grid (for the
