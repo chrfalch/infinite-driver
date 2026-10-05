@@ -1,16 +1,31 @@
+import { loadCameraView, restoreCameraView, saveCameraView } from '../camera-store.js';
 import { CameraTarget, HeightField, Render, Time, Transform, Vehicle } from '../ecs/traits.js';
 import { createBackdrop } from '../render/backdrop.js';
 import { VIEW_HEIGHT } from '../render/scene.js';
 
 // True isometric by default: the camera looks down the (-1, -1, -1) diagonal (azimuth 45°,
 // elevation 35.3°). ?az=<degrees> starts the view turned around the car. Dragging with the mouse
-// (or twisting two fingers) orbits; double-click resets.
+// (or twisting two fingers) orbits; double-click resets. The last view (angle, tilt, zoom, follow
+// mode) is saved and restored on the next visit; ?az and ?zoom override it.
+const params = new URLSearchParams(globalThis.location?.search ?? '');
 const DISTANCE = 60 * Math.sqrt(3);
-const ISO_AZIMUTH = ((Number(new URLSearchParams(globalThis.location?.search ?? '').get('az')) || 45) * Math.PI) / 180;
+const ISO_AZIMUTH = ((Number(params.get('az')) || 45) * Math.PI) / 180;
 const ISO_ELEVATION = Math.atan(1 / Math.SQRT2);
 const MIN_ELEVATION = (12 * Math.PI) / 180;
 const MAX_ELEVATION = (88 * Math.PI) / 180;
-const view = { azimuth: ISO_AZIMUTH, elevation: ISO_ELEVATION };
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 4;
+// Short (phone) screens start closer so the car is not tiny.
+const defaultZoom = globalThis.innerHeight < 500 ? 1.7 : 1;
+const saved = restoreCameraView(
+  loadCameraView(),
+  { azimuth: ISO_AZIMUTH, elevation: ISO_ELEVATION, zoom: defaultZoom, follow: false, followRelative: 0 },
+  { minElevation: MIN_ELEVATION, maxElevation: MAX_ELEVATION, minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM },
+);
+// ?az asks for a fixed angle, so it also starts with follow mode off.
+if (params.has('az')) Object.assign(saved, { azimuth: ISO_AZIMUTH, follow: false });
+if (Number(params.get('zoom'))) saved.zoom = Number(params.get('zoom'));
+const view = { azimuth: saved.azimuth, elevation: saved.elevation };
 const offset = { x: 0, y: 0, z: 0 };
 // Below this elevation the view switches to perspective, with a horizon, sky and backdrop.
 const PERSPECTIVE_BELOW = (30 * Math.PI) / 180;
@@ -23,27 +38,37 @@ function updateOffset() {
   offset.z = h * Math.sin(view.azimuth);
 }
 updateOffset();
-const params = new URLSearchParams(location.search);
-// Short (phone) screens start closer so the car is not tiny.
-const defaultZoom = globalThis.innerHeight < 500 ? 1.7 : 1;
 // ?look=<dx>,<dz> shifts the view target (world metres), for close-up screenshots.
 const LOOK = (params.get('look') ?? '0,0').split(',').map(Number);
-const state = { x: 0, y: 0, z: 0, zoom: 1, userZoom: Number(params.get('zoom')) || defaultZoom, ready: false };
+const state = { x: 0, y: 0, z: 0, zoom: 1, userZoom: saved.zoom, ready: false };
 
 // Follow ("helicopter") mode, toggled with C: the camera keeps the angle it had to the car when the
 // mode was switched on and swings round behind the car's turns with a little lag, like a chase
 // helicopter. Dragging still changes the angle (and the new angle is kept).
-const follow = { on: false, relative: 0, heading: null };
+const follow = { on: saved.follow, relative: saved.followRelative, heading: null };
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 let carAzimuth = 0; // the car's forward direction in the camera's azimuth convention
 export function toggleFollowCamera() {
   follow.on = !follow.on;
   follow.relative = wrap(view.azimuth - carAzimuth);
   follow.heading = carAzimuth;
+  rememberView();
   return follow.on;
 }
 export function isFollowCamera() {
   return follow.on;
+}
+
+// Saves the view a moment after it stops changing (drags and key orbits change it every frame).
+let saveTimer = null;
+function storeView() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  saveCameraView({ azimuth: view.azimuth, elevation: view.elevation, zoom: state.userZoom, follow: follow.on, followRelative: follow.relative });
+}
+function rememberView() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(storeView, 300);
 }
 
 // Arrow keys with C held (see systems/input.js): x turns the view around the car, y raises or
@@ -56,6 +81,7 @@ export function orbitCamera({ x, y }, dt) {
   follow.relative += x * ORBIT_RATE * dt;
   view.elevation = Math.min(MAX_ELEVATION, Math.max(MIN_ELEVATION, view.elevation + y * TILT_RATE * dt));
   updateOffset();
+  rememberView();
 }
 
 // Mouse wheel or trackpad pinch zooms in and out.
@@ -64,7 +90,8 @@ export function attachZoom(target = window) {
     'wheel',
     (e) => {
       e.preventDefault();
-      state.userZoom = Math.min(4, Math.max(0.4, state.userZoom * Math.exp(-e.deltaY * 0.0015)));
+      state.userZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, state.userZoom * Math.exp(-e.deltaY * 0.0015)));
+      rememberView();
     },
     { passive: false },
   );
@@ -84,9 +111,10 @@ export function attachZoom(target = window) {
     (e) => {
       if (!pinch || e.touches.length !== 2) return;
       e.preventDefault();
-      state.userZoom = Math.min(4, Math.max(0.4, pinch.zoom * (spread(e.touches) / pinch.distance)));
+      state.userZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pinch.zoom * (spread(e.touches) / pinch.distance)));
       view.azimuth = pinch.azimuth + (twist(e.touches) - pinch.angle);
       updateOffset();
+      rememberView();
     },
     { passive: false },
   );
@@ -104,6 +132,7 @@ export function attachZoom(target = window) {
     view.elevation = Math.min(MAX_ELEVATION, Math.max(MIN_ELEVATION, view.elevation + (e.clientY - drag.y) * 0.005));
     drag = { x: e.clientX, y: e.clientY };
     updateOffset();
+    rememberView();
   });
   const endDrag = (e) => {
     drag = null;
@@ -117,7 +146,10 @@ export function attachZoom(target = window) {
     view.azimuth = ISO_AZIMUTH;
     view.elevation = ISO_ELEVATION;
     updateOffset();
+    rememberView();
   });
+  // Closing or reloading the page inside the save delay still keeps the last change.
+  globalThis.addEventListener?.('pagehide', () => saveTimer && storeView());
   target.addEventListener('touchend', (e) => {
     if (e.touches.length < 2) pinch = null;
   });
@@ -141,6 +173,7 @@ export function followCamera(world) {
   const fz = 2 * (q.x * q.z - q.w * q.y);
   if (Math.hypot(fx, fz) > 0.2) carAzimuth = Math.atan2(fz, fx);
   if (follow.on) {
+    follow.heading ??= carAzimuth; // follow mode restored from the saved view
     // The heading the camera tracks lags the car (about 0.6 s), so turns swing the view smoothly.
     follow.heading += wrap(carAzimuth - follow.heading) * (1 - Math.exp(-delta / 0.6));
     view.azimuth = follow.heading + follow.relative;
