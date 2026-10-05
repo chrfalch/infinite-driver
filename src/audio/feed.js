@@ -58,7 +58,7 @@ export class AudioFeed {
     r[5] = d.clutch ?? 0;
     r[6] = vehicle.speed ?? 0;
     r[7] = d.gear ?? 0;
-    this.surfaces ??= Array.from({ length: WHEELS }, () => ({ rock: 0, gravel: 0 }));
+    this.surfaces ??= Array.from({ length: WHEELS }, () => ({ rock: 0, gravel: 0, sand: 0, snow: 0 }));
     this.steps = (this.steps ?? 0) + 1;
     this.body ??= {};
     writeBody(vehicle, r, ENGINE_FIELDS.length, this.body);

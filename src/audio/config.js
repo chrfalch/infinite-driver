@@ -5,11 +5,12 @@ export const AUDIO_KEY = 'drift.audio.v1';
 
 export const DEFAULT_AUDIO = Object.freeze({
   enabled: true,
-  engineType: 'Turbo-diesel V8', // a name in ENGINE_PRESETS (audio/engine-presets.js)
+  engineType: 'Petrol V8 (recorded)', // a name in ENGINE_PRESETS (audio/engine-presets.js)
   volume: 0.8, // master
   // Levels in the engine sound, 1 = as tuned.
   engine: 1,
-  turbo: 1,
+  turbo: 1, // whistle and whoosh
+  blowoff: 1, // flutter and wastegate on lift-off
   clatter: 1,
   ground: 1, // tyres, ground and stones
   car: 1, // driveline, steering, body and wind
@@ -29,4 +30,4 @@ export function resetAudio() {
   saveAudio();
 }
 
-export const audioMix = () => ({ engine: AUDIO.engine, turbo: AUDIO.turbo, clatter: AUDIO.clatter, ground: AUDIO.ground, car: AUDIO.car });
+export const audioMix = () => ({ engine: AUDIO.engine, turbo: AUDIO.turbo, blowoff: AUDIO.blowoff, clatter: AUDIO.clatter, ground: AUDIO.ground, car: AUDIO.car });

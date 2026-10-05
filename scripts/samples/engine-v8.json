@@ -1,0 +1,221 @@
+{
+  "name": "Petrol V8",
+  "out": "public/audio/engine-v8",
+  "sourceDir": "../../../../audio-src/engine",
+  "cylinders": 8,
+  "loopSeconds": 1.0,
+  "rpms": [
+    800,
+    1250,
+    1500,
+    1750,
+    2000,
+    2250,
+    2500,
+    2750,
+    3000,
+    3500,
+    4000,
+    4500,
+    5000,
+    5500,
+    6000,
+    6500
+  ],
+  "sources": [
+    {
+      "file": "youtube/yt_1CcjapXtd-E_Ford_Coyote_V8_Crate_Engine_Dyno_Test.48k.wav",
+      "load": "on",
+      "from": 19,
+      "to": 54,
+      "minRpm": 2500,
+      "prefer": 0.3
+    },
+    {
+      "file": "youtube/yt_G0AqoMCMhu0_327_SBC_dyno_run_during_engine_break-in_3000-7000rpm.48k.wav",
+      "load": "on",
+      "from": 16,
+      "to": 42,
+      "minRpm": 2500
+    },
+    {
+      "file": "freesound/fs240671_lonemonk_Chrysler_Start_and_Idle_Exhaust_perspective_by_lon.48k.wav",
+      "load": "off",
+      "from": 2,
+      "minRpm": 400,
+      "maxRpm": 2000,
+      "window": 2,
+      "minClarity": 0.1
+    },
+    {
+      "file": "freesound/fs240671_lonemonk_Chrysler_Start_and_Idle_Exhaust_perspective_by_lon.48k.wav",
+      "load": "on",
+      "from": 2,
+      "minRpm": 400,
+      "maxRpm": 2000,
+      "window": 2,
+      "minClarity": 0.1
+    },
+    {
+      "file": "youtube2/yt_qlZlhBevJAM_2013_Mustang_GT_exhaust_video_-_GoPro_external_mic.48k.wav",
+      "load": "on",
+      "from": 97.3,
+      "to": 106.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_qlZlhBevJAM_2013_Mustang_GT_exhaust_video_-_GoPro_external_mic.48k.wav",
+      "load": "on",
+      "from": 121.3,
+      "to": 139.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_qlZlhBevJAM_2013_Mustang_GT_exhaust_video_-_GoPro_external_mic.48k.wav",
+      "load": "on",
+      "from": 17.3,
+      "to": 90,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_qlZlhBevJAM_2013_Mustang_GT_exhaust_video_-_GoPro_external_mic.48k.wav",
+      "load": "off",
+      "from": 90.5,
+      "to": 98.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_n6QRmzeBIZQ_2018_Mustang_GT_Stock_Exhaust_Sound._Rear_bumper_mounted_cam.48k.wav",
+      "load": "off",
+      "from": 79.3,
+      "to": 90.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.2,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_n6QRmzeBIZQ_2018_Mustang_GT_Stock_Exhaust_Sound._Rear_bumper_mounted_cam.48k.wav",
+      "load": "off",
+      "from": 144.3,
+      "to": 155.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.2,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_n6QRmzeBIZQ_2018_Mustang_GT_Stock_Exhaust_Sound._Rear_bumper_mounted_cam.48k.wav",
+      "load": "on",
+      "from": 51.3,
+      "to": 79.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_n6QRmzeBIZQ_2018_Mustang_GT_Stock_Exhaust_Sound._Rear_bumper_mounted_cam.48k.wav",
+      "load": "on",
+      "from": 15.3,
+      "to": 21.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_5NRVVgqFa9U_cruise_and_decel.48k.wav",
+      "load": "on",
+      "from": 36.3,
+      "to": 74.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_5NRVVgqFa9U_cruise_and_decel.48k.wav",
+      "load": "on",
+      "from": 130.3,
+      "to": 144.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_5NRVVgqFa9U_cruise_and_decel.48k.wav",
+      "load": "off",
+      "from": 8.3,
+      "to": 19.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_UIlPhj6ow6U_Pure_Sound_of_My_LOUD_2013_Mustang_GT_5.0_Exhaust_section125-350.48k.wav",
+      "load": "on",
+      "from": 118.3,
+      "to": 140.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_UIlPhj6ow6U_Pure_Sound_of_My_LOUD_2013_Mustang_GT_5.0_Exhaust_section125-350.48k.wav",
+      "load": "on",
+      "from": 14.3,
+      "to": 25.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_UIlPhj6ow6U_Pure_Sound_of_My_LOUD_2013_Mustang_GT_5.0_Exhaust_section125-350.48k.wav",
+      "load": "off",
+      "from": 195.3,
+      "to": 216.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_kjN3CwR14ow_2023_Mustang_GT_pure_driving_sound_w_active_exhaust_exhaust_.48k.wav",
+      "load": "on",
+      "from": 18.3,
+      "to": 24.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    },
+    {
+      "file": "youtube2/yt_kjN3CwR14ow_2023_Mustang_GT_pure_driving_sound_w_active_exhaust_exhaust_.48k.wav",
+      "load": "on",
+      "from": 178.3,
+      "to": 185.3,
+      "minRpm": 800,
+      "maxRpm": 3200,
+      "minClarity": 0.3,
+      "prefer": 0.2
+    }
+  ],
+  "gain": 1.3
+}

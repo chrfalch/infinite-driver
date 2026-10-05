@@ -8,7 +8,7 @@
 //   bump    the suspension reaching its bump stop, in m/s of closing speed
 //   topOut  the suspension reaching full droop, in m/s
 //   rim     the rim striking (the tyre squashed flat), in static loads
-export const WHEEL_FIELDS = ['contact', 'ground', 'roll', 'slipLong', 'slipLat', 'load', 'rock', 'gravel', 'impact', 'bump', 'topOut', 'rim'];
+export const WHEEL_FIELDS = ['contact', 'ground', 'roll', 'slipLong', 'slipLat', 'load', 'rock', 'gravel', 'impact', 'bump', 'topOut', 'rim', 'sand', 'snow'];
 // The chassis and the driveline:
 //   chassisForce  contact force now, in the car's weights (scrapes); chassisHits counting up
 //   steer         the front wheels' angle over the full lock (-1..1)
@@ -34,19 +34,23 @@ const smoothstep = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 
-// The ground under a point as weights: { rock, gravel } (the rest is soil or sand).
+// The ground under a point as weights: { rock, gravel, sand, snow } (the rest is dirt).
 //   dry river: the rock sheet, else a sandy bed with pebbles;
-//   canyon: the gravel road, bare rock where the rock formations rise, else soil with gravel;
-//   snowfield: soft and quiet, no stones (a sound of its own for snow, asphalt and ice is still to do);
-//   test worlds: soil with some gravel.
-export function surfaceAt(heightAt, x, z, out = { rock: 0, gravel: 0 }) {
+//   canyon: the gravel road, bare rock where the rock formations rise, else dirt with gravel;
+//   snowfield: snow, no stones;
+//   test worlds: dirt with some gravel.
+export function surfaceAt(heightAt, x, z, out = { rock: 0, gravel: 0, sand: 0, snow: 0 }) {
+  out.sand = 0;
+  out.snow = 0;
   if (heightAt?.snowAt) {
     out.rock = 0;
     out.gravel = 0;
+    out.snow = 1;
   } else if (heightAt?.rockAt) {
     const rock = heightAt.rockAt(x, z) ? 1 : 0;
     out.rock = rock;
     out.gravel = (1 - rock) * 0.5;
+    out.sand = (1 - rock) * 0.5;
   } else if (heightAt?.world === 'canyon' && heightAt.sample) {
     const s = heightAt.sample(x, z);
     out.rock = smoothstep(0.3, 1.5, s.rock ?? 0) * (1 - s.road);
@@ -176,5 +180,7 @@ export function writeWheels(vehicle, out, offset, heightAt, surfaces, lookSurfac
     out[o + 9] = s.bump ?? 0;
     out[o + 10] = s.topOut ?? 0;
     out[o + 11] = s.rim ?? 0;
+    out[o + 12] = s.sand ?? 0;
+    out[o + 13] = s.snow ?? 0;
   }
 }

@@ -19,7 +19,7 @@ const DT = 1 / 120;
 const R = 0.46;
 const MASS = 1800;
 
-const LAB = { mode: 'drive', rpm: 850, fuel: 0.13, exhaustBrake: 0, throttle: false, coastStop: 1, surface: 'gravel road', slide: 0, wheelspin: 0, stoneHits: 0, scrape: false, steer: 0, low: false, locks: 0, heave: 0, twist: 0 };
+const LAB = { mode: 'drive', recorded: true, foley: true, rpm: 850, fuel: 0.13, exhaustBrake: 0, throttle: false, coastStop: 1, surface: 'gravel road', slide: 0, wheelspin: 0, stoneHits: 0, scrape: false, steer: 0, low: false, locks: 0, heave: 0, twist: 0 };
 const labShake = { heave: 0, twist: 0 };
 
 // The ground under the lab's car (as the worlds' height fields answer surfaceAt in wheels.js).
@@ -79,6 +79,9 @@ gui.add(AUDIO, 'engineType', Object.keys(ENGINE_PRESETS)).name('Engine (reloads)
   saveAudio();
   location.reload();
 });
+// A recorded engine: its recordings, or the synth it falls back on (to compare them).
+if (BASE.samples) gui.add(LAB, 'recorded').name('Play the recordings').onChange((v) => audio.node?.port.postMessage({ type: 'source', samples: v }));
+gui.add(LAB, 'foley').name('Recorded tyres, ground, body').onChange((v) => audio.node?.port.postMessage({ type: 'foleyOn', on: v }));
 gui.add(LAB, 'coastStop', 0, 1, 0.05).name('Exhaust brake (drive, rev)').onChange(reset);
 const manual = gui.addFolder('Manual');
 const manualValues = () => ({ rpm: LAB.rpm, fuel: LAB.fuel, exhaustBrake: LAB.exhaustBrake, throttle: LAB.throttle ? 1 : 0 });
@@ -110,6 +113,7 @@ levels.add(AUDIO, 'enabled').name('Sound on (M)').onChange(saveAudio).listen();
 levels.add(AUDIO, 'volume', 0, 1, 0.01).name('Volume').onChange(saveAudio);
 levels.add(AUDIO, 'engine', 0, 2, 0.05).name('Engine ×').onChange(saveAudio);
 levels.add(AUDIO, 'turbo', 0, 3, 0.05).name('Turbo whistle ×').onChange(saveAudio);
+levels.add(AUDIO, 'blowoff', 0, 3, 0.05).name('Turbo blow-off ×').onChange(saveAudio);
 levels.add(AUDIO, 'clatter', 0, 3, 0.05).name('Diesel clatter ×').onChange(saveAudio);
 levels.add(AUDIO, 'ground', 0, 3, 0.05).name('Tyres & ground ×').onChange(saveAudio);
 levels.add(AUDIO, 'car', 0, 3, 0.05).name('Driveline, body & wind ×').onChange(saveAudio);

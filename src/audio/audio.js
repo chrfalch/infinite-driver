@@ -13,6 +13,10 @@ import { onSettingsSaved } from '../settings-store.js';
 import { AUDIO, AUDIO_KEY, audioMix, saveAudio } from './config.js';
 import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from './engine-presets.js';
 import { panGains } from './mix.js';
+import { bankTransfer, foleyTransfer, loadBank, loadFoley } from './sample-bank.js';
+
+// The recorded tyre, ground and car sounds (foley.js), in public/.
+const FOLEY_BANK = 'audio/foley';
 import { wheelMount } from '../vehicle/physics.js';
 
 // Where the car's parts sit (chassis-local metres: +x forward, +z right).
@@ -190,6 +194,34 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
     audio.state = 'running';
     log('engine playing:', (audio.preset ?? currentPreset()).name, audio.manual ? '(per frame)' : '(shared feed)', 'context', ctx.state, ctx.sampleRate, 'Hz');
     fadeTo(level());
+    loadRecordings(audio.preset ?? currentPreset());
+    // The recorded tyre, ground and car sounds; the synths play each part until then (or for good,
+    // if there is no bank).
+    loadFoley(FOLEY_BANK, (data) => ctx.decodeAudioData(data))
+      .then((bank) => {
+        node.port.postMessage({ type: 'foley', bank }, foleyTransfer(bank));
+        log('recorded ground and car sounds:', Object.keys(bank.loops).length, 'loops,', Object.keys(bank.oneshots).length, 'hits');
+      })
+      .catch((error) => console.warn('[sound] no recorded ground and car sounds, the synths play', error));
+  }
+
+  // A preset with recordings: load its bank and send it to the worklet (the synth plays meanwhile).
+  const banks = new Map();
+  function loadRecordings(preset) {
+    if (!preset?.samples || !node) return;
+    const path = preset.samples;
+    if (banks.has(path)) return;
+    banks.set(path, true);
+    log('loading recordings', path);
+    loadBank(path, (data) => ctx.decodeAudioData(data))
+      .then((bank) => {
+        node.port.postMessage({ type: 'bank', bank }, bankTransfer(bank));
+        log('recordings playing:', bank.name, bank.loops.length, 'loops');
+      })
+      .catch((error) => {
+        banks.delete(path);
+        console.warn('[sound] recordings failed to load, the synth plays instead', error);
+      });
   }
 
   // Called inside a user gesture.
@@ -251,7 +283,10 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
   const apply = () => {
     if (!ctx) return;
     node?.port.postMessage({ type: 'mix', values: audioMix() });
-    if (AUDIO.engineType !== engineType && !audio.preset) node?.port.postMessage({ type: 'preset', preset: currentPreset() });
+    if (AUDIO.engineType !== engineType && !audio.preset) {
+      node?.port.postMessage({ type: 'preset', preset: currentPreset() });
+      loadRecordings(currentPreset());
+    }
     engineType = AUDIO.engineType;
     fadeTo(level());
     if (AUDIO.enabled && ctx.state !== 'running' && !document.hidden) ctx.resume().catch(() => {});

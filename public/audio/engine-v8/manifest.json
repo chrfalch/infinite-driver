@@ -1,0 +1,262 @@
+{
+  "name": "Petrol V8",
+  "gain": 1.3,
+  "loops": [
+    {
+      "file": "on-800.flac",
+      "rpm": 800,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 0.975,
+      "gain": 1
+    },
+    {
+      "file": "on-1250.flac",
+      "rpm": 1250,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 0.96,
+      "gain": 1
+    },
+    {
+      "file": "on-1500.flac",
+      "rpm": 1500,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 1,
+      "gain": 1
+    },
+    {
+      "file": "on-1750.flac",
+      "rpm": 1750,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 0.9942916666666667,
+      "gain": 1
+    },
+    {
+      "file": "on-2000.flac",
+      "rpm": 2000,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 0.99,
+      "gain": 1
+    },
+    {
+      "file": "on-2250.flac",
+      "rpm": 2250,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 0.9866666666666667,
+      "gain": 1
+    },
+    {
+      "file": "on-2500.flac",
+      "rpm": 2500,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 0.984,
+      "gain": 1
+    },
+    {
+      "file": "on-2750.flac",
+      "rpm": 2750,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 0.9818125,
+      "gain": 1
+    },
+    {
+      "file": "on-3000.flac",
+      "rpm": 3000,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 1,
+      "gain": 1
+    },
+    {
+      "file": "on-3500.flac",
+      "rpm": 3500,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 0.9942916666666667,
+      "gain": 1
+    },
+    {
+      "file": "on-4000.flac",
+      "rpm": 4000,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 0.99,
+      "gain": 1
+    },
+    {
+      "file": "on-4500.flac",
+      "rpm": 4500,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 1,
+      "gain": 1
+    },
+    {
+      "file": "on-5000.flac",
+      "rpm": 5000,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 0.996,
+      "gain": 1
+    },
+    {
+      "file": "on-5500.flac",
+      "rpm": 5500,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 0.9927291666666667,
+      "gain": 1
+    },
+    {
+      "file": "on-6000.flac",
+      "rpm": 6000,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 1,
+      "gain": 1
+    },
+    {
+      "file": "on-6500.flac",
+      "rpm": 6500,
+      "load": "on",
+      "loopStart": 0,
+      "loopEnd": 0.9969166666666667,
+      "gain": 1
+    },
+    {
+      "file": "off-800.flac",
+      "rpm": 800,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 0.975,
+      "gain": 1
+    },
+    {
+      "file": "off-1250.flac",
+      "rpm": 1250,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 0.96,
+      "gain": 1
+    },
+    {
+      "file": "off-1500.flac",
+      "rpm": 1500,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 1,
+      "gain": 1
+    },
+    {
+      "file": "off-1750.flac",
+      "rpm": 1750,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 0.9942916666666667,
+      "gain": 1
+    },
+    {
+      "file": "off-2000.flac",
+      "rpm": 2000,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 0.99,
+      "gain": 1
+    },
+    {
+      "file": "off-2250.flac",
+      "rpm": 2250,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 0.9866666666666667,
+      "gain": 1
+    },
+    {
+      "file": "off-2500.flac",
+      "rpm": 2500,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 0.984,
+      "gain": 1
+    },
+    {
+      "file": "off-2750.flac",
+      "rpm": 2750,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 0.9818125,
+      "gain": 1
+    },
+    {
+      "file": "off-3000.flac",
+      "rpm": 3000,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 1,
+      "gain": 1
+    },
+    {
+      "file": "off-3500.flac",
+      "rpm": 3500,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 0.9942916666666667,
+      "gain": 1
+    },
+    {
+      "file": "off-4000.flac",
+      "rpm": 4000,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 0.99,
+      "gain": 1
+    },
+    {
+      "file": "off-4500.flac",
+      "rpm": 4500,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 1,
+      "gain": 1
+    },
+    {
+      "file": "off-5000.flac",
+      "rpm": 5000,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 0.996,
+      "gain": 1
+    },
+    {
+      "file": "off-5500.flac",
+      "rpm": 5500,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 0.9927291666666667,
+      "gain": 1
+    },
+    {
+      "file": "off-6000.flac",
+      "rpm": 6000,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 1,
+      "gain": 1
+    },
+    {
+      "file": "off-6500.flac",
+      "rpm": 6500,
+      "load": "off",
+      "loopStart": 0,
+      "loopEnd": 0.9969166666666667,
+      "gain": 1
+    }
+  ]
+}

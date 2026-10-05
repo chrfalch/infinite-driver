@@ -2,12 +2,17 @@
 // physics steps in the shared audio feed (feed.js). Loaded by audio/audio.js.
 //
 // Messages on the port:
-//   in:  { type: 'mix', values }      level settings (engine, turbo, clatter)
+//   in:  { type: 'mix', values }      level settings (engine, turbo, blowoff, clatter)
 //        { type: 'manual', values }   drive the engine from these values instead of the feed
 //                                     ({ rpm, fuel, exhaustBrake, throttle }; the engine lab, or a
 //                                     browser that cannot share memory with the audio thread)
 //        { type: 'feed' }             back to the feed
 //        { type: 'preset', preset }   a whole new engine preset (the engine lab's sliders)
+//        { type: 'bank', bank }       recordings for a preset with `samples` (sample-bank.js)
+//        { type: 'foley', bank }      recorded tyre, ground and car sounds (foley.js); each one
+//                                     recorded replaces its synth layer
+//        { type: 'foleyOn', on }      play the recordings (true) or only the synths
+//        { type: 'source', samples }  play the recordings (true, as the preset says) or the synth
 //        { type: 'layers', values }   levels of the sound's parts (EngineSynth LAYERS)
 //        { type: 'stones', events }   stones thrown and landing (GroundSynth.event)
 //        { type: 'groundPreset', preset }, { type: 'groundLayers', values }   as above, for the
@@ -16,13 +21,16 @@
 //                                     steering and body (car-synth.js)
 //        { type: 'listener', pos }    where each part is heard ({ l, r } gains; mix.js CENTERED)
 //   out: { type: 'status', feedSteps } once a second: how many steps the feed has seen
-import { EngineSynth } from './engine-synth.js';
+import { EngineSynth, LAYERS } from './engine-synth.js';
+import { SampleEngine } from './sample-engine.js';
 import { TURBO_DIESEL_I4 } from './engine-presets.js';
 import { AudioFeed, FeedReader } from './feed.js';
 import { GroundSynth } from './ground-synth.js';
 import { CarSynth } from './car-synth.js';
+import { Foley } from './foley.js';
 import { CENTERED, softKnee } from './mix.js';
 
+const TURBO_ONLY = Object.fromEntries(Object.keys(LAYERS).map((k) => [k, ['whistle', 'whoosh', 'flutter', 'wastegate'].includes(k) ? 1 : 0]));
 const IDLE = { rpm: TURBO_DIESEL_I4.idleRpm, fuel: 0.13, exhaustBrake: 0, throttle: 0 };
 const MANUAL_SMOOTHING = 0.05; // s
 
@@ -32,12 +40,26 @@ class EngineProcessor extends AudioWorkletProcessor {
     const { feedBuffer = null, mix = null, preset = null } = options.processorOptions ?? {};
     this.synth = new EngineSynth(sampleRate, preset ?? TURBO_DIESEL_I4, { seed: (Math.random() * 2 ** 31) | 0 });
     if (mix) this.synth.setMix(mix);
+    // A preset with recordings plays them once its bank arrives; the synth until then.
+    this.sampler = new SampleEngine(sampleRate);
+    if (mix) this.sampler.setMix(mix);
+    this.recorded = !!preset?.samples;
+    // The recordings have no turbo: the synth's turbo alone (whistle, whoosh, flutter, wastegate)
+    // plays on top of them, following the same engine. Its levels: the turbo and blow-off settings.
+    this.turbo = new EngineSynth(sampleRate, preset ?? TURBO_DIESEL_I4, { seed: (Math.random() * 2 ** 31) | 0 });
+    this.turbo.setLayers(TURBO_ONLY);
+    if (mix) this.turbo.setMix(mix);
+    this.turboBuf = new Float32Array(128);
+    this.useSamples = true;
+    this.foleyOn = true;
     this.ground = new GroundSynth(sampleRate, undefined, { seed: (Math.random() * 2 ** 31) | 0 });
     if (options.processorOptions?.groundPreset) this.ground.setPreset(options.processorOptions.groundPreset);
     if (mix?.ground !== undefined) this.ground.level = mix.ground;
     this.car = new CarSynth(sampleRate, undefined, { seed: (Math.random() * 2 ** 31) | 0 });
     if (options.processorOptions?.carPreset) this.car.setPreset(options.processorOptions.carPreset);
     if (mix?.car !== undefined) this.car.level = mix.car;
+    this.foley = new Foley(sampleRate, null, { seed: (Math.random() * 2 ** 31) | 0 });
+    this.foley.level = { ground: mix?.ground ?? 1, car: mix?.car ?? 1 };
     this.reader = feedBuffer ? new FeedReader(new AudioFeed(feedBuffer)) : null;
     this.manual = null;
     this.prev = { ...IDLE };
@@ -49,19 +71,44 @@ class EngineProcessor extends AudioWorkletProcessor {
       const m = e.data;
       if (m.type === 'mix') {
         this.synth.setMix(m.values);
-        if (m.values.ground !== undefined) this.ground.level = m.values.ground;
-        if (m.values.car !== undefined) this.car.level = m.values.car;
-      } else if (m.type === 'stones') for (const e of m.events) this.ground.event(e);
-      else if (m.type === 'groundPreset') this.ground.setPreset(m.preset);
+        this.sampler.setMix(m.values);
+        this.turbo.setMix(m.values);
+        if (m.values.ground !== undefined) this.ground.level = this.foley.level.ground = m.values.ground;
+        if (m.values.car !== undefined) this.car.level = this.foley.level.car = m.values.car;
+      } else if (m.type === 'stones') {
+        for (const e of m.events) {
+          this.ground.event(e);
+          if (this.foleyOn) this.foley.event(e);
+        }
+      } else if (m.type === 'groundPreset') this.ground.setPreset(m.preset);
       else if (m.type === 'groundLayers') this.ground.setLayers(m.values);
       else if (m.type === 'carPreset') this.car.setPreset(m.preset);
       else if (m.type === 'carLayers') this.car.setLayers(m.values);
       else if (m.type === 'listener') this.pos = m.pos;
-      else if (m.type === 'preset') this.synth.setPreset(m.preset);
+      else if (m.type === 'preset') {
+        this.synth.setPreset(m.preset);
+        this.turbo.setPreset(m.preset);
+        this.recorded = !!m.preset.samples;
+      } else if (m.type === 'bank') this.sampler.setBank(m.bank);
+      else if (m.type === 'foley') {
+        this.foley.setBank(m.bank);
+        this.applyCovers();
+      } else if (m.type === 'foleyOn') {
+        this.foleyOn = m.on;
+        this.applyCovers();
+      }
+      else if (m.type === 'source') this.useSamples = m.samples;
       else if (m.type === 'layers') this.synth.setLayers(m.values);
       else if (m.type === 'manual') this.manual = { ...IDLE, ...m.values };
       else if (m.type === 'feed') this.manual = null;
     };
+  }
+
+  // The synth layers the recordings replace are muted (while the recordings play).
+  applyCovers() {
+    const covers = this.foleyOn ? this.foley.covers() : { ground: [], car: [] };
+    this.ground.muted = new Set(covers.ground);
+    this.car.muted = new Set(covers.car);
   }
 
   process(_inputs, outputs) {
@@ -84,7 +131,13 @@ class EngineProcessor extends AudioWorkletProcessor {
     // The engine (mono) where the exhaust is, then the tyres, ground and hits, each where it is.
     if (this.engineBuf.length !== n) this.engineBuf = new Float32Array(n);
     const engine = this.engineBuf;
-    this.synth.render(engine, this.prev, next);
+    const recorded = this.recorded && this.useSamples && this.sampler.ready;
+    (recorded ? this.sampler : this.synth).render(engine, this.prev, next);
+    if (recorded) {
+      if (this.turboBuf.length !== n) this.turboBuf = new Float32Array(n);
+      this.turbo.render(this.turboBuf, this.prev, next);
+      for (let i = 0; i < n; i++) engine[i] += this.turboBuf[i];
+    }
     const R = right ?? (this.monoRight ??= new Float32Array(n));
     const at = this.pos.exhaust;
     for (let i = 0; i < n; i++) {
@@ -93,6 +146,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     }
     this.ground.render(left, R, this.prev, next, 0, n, this.pos);
     this.car.render(left, R, this.prev, next, 0, n, this.pos);
+    if (this.foleyOn) this.foley.render(left, R, this.prev, next, 0, n, this.pos);
     for (let i = 0; i < n; i++) {
       left[i] = softKnee(left[i]);
       R[i] = softKnee(R[i]);

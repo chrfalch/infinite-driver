@@ -1,0 +1,324 @@
+{
+  "loops": {
+    "roll-gravel": [
+      {
+        "file": "roll-gravel-0.flac",
+        "gain": 1
+      }
+    ],
+    "roll-dirt": [
+      {
+        "file": "roll-dirt-0.flac",
+        "gain": 1
+      }
+    ],
+    "roll-rock": [
+      {
+        "file": "roll-rock-0.flac",
+        "gain": 1
+      }
+    ],
+    "roll-snow": [
+      {
+        "file": "roll-snow-0.flac",
+        "gain": 1
+      }
+    ],
+    "slide": [
+      {
+        "file": "slide-0.flac",
+        "gain": 1
+      }
+    ],
+    "squeal": [
+      {
+        "file": "squeal-0.flac",
+        "gain": 1
+      }
+    ],
+    "spin": [
+      {
+        "file": "spin-0.flac",
+        "gain": 1
+      }
+    ],
+    "scrape": [
+      {
+        "file": "scrape-0.flac",
+        "gain": 1
+      }
+    ],
+    "rattle": [
+      {
+        "file": "rattle-0.flac",
+        "gain": 1
+      }
+    ]
+  },
+  "oneshots": {
+    "bump": [
+      {
+        "file": "bump-0.flac",
+        "strength": 1,
+        "gain": 1
+      },
+      {
+        "file": "bump-1.flac",
+        "strength": 0.94,
+        "gain": 1
+      },
+      {
+        "file": "bump-2.flac",
+        "strength": 0.34,
+        "gain": 1
+      },
+      {
+        "file": "bump-3.flac",
+        "strength": 0.33,
+        "gain": 1
+      },
+      {
+        "file": "bump-4.flac",
+        "strength": 0.28,
+        "gain": 1
+      },
+      {
+        "file": "bump-5.flac",
+        "strength": 0.32,
+        "gain": 1
+      },
+      {
+        "file": "bump-6.flac",
+        "strength": 0.28,
+        "gain": 1
+      },
+      {
+        "file": "bump-7.flac",
+        "strength": 0.32,
+        "gain": 1
+      }
+    ],
+    "landing": [
+      {
+        "file": "landing-0.flac",
+        "strength": 0.9,
+        "gain": 1
+      },
+      {
+        "file": "landing-1.flac",
+        "strength": 0.9,
+        "gain": 1
+      },
+      {
+        "file": "landing-2.flac",
+        "strength": 1,
+        "gain": 1
+      }
+    ],
+    "chassis-hit": [
+      {
+        "file": "chassis-hit-0.flac",
+        "strength": 0.67,
+        "gain": 1
+      },
+      {
+        "file": "chassis-hit-1.flac",
+        "strength": 0.2,
+        "gain": 1
+      },
+      {
+        "file": "chassis-hit-2.flac",
+        "strength": 0.36,
+        "gain": 1
+      },
+      {
+        "file": "chassis-hit-3.flac",
+        "strength": 0.77,
+        "gain": 1
+      },
+      {
+        "file": "chassis-hit-4.flac",
+        "strength": 0.36,
+        "gain": 1
+      },
+      {
+        "file": "chassis-hit-5.flac",
+        "strength": 0.35,
+        "gain": 1
+      },
+      {
+        "file": "chassis-hit-6.flac",
+        "strength": 1,
+        "gain": 1
+      },
+      {
+        "file": "chassis-hit-7.flac",
+        "strength": 0.43,
+        "gain": 1
+      },
+      {
+        "file": "chassis-hit-8.flac",
+        "strength": 0.47,
+        "gain": 1
+      },
+      {
+        "file": "chassis-hit-9.flac",
+        "strength": 0.43,
+        "gain": 1
+      },
+      {
+        "file": "chassis-hit-10.flac",
+        "strength": 0.6,
+        "gain": 1
+      },
+      {
+        "file": "chassis-hit-11.flac",
+        "strength": 0.48,
+        "gain": 1
+      }
+    ],
+    "top-out": [
+      {
+        "file": "top-out-0.flac",
+        "strength": 1,
+        "gain": 1
+      },
+      {
+        "file": "top-out-1.flac",
+        "strength": 1,
+        "gain": 1
+      },
+      {
+        "file": "top-out-2.flac",
+        "strength": 1,
+        "gain": 1
+      },
+      {
+        "file": "top-out-3.flac",
+        "strength": 0.53,
+        "gain": 1
+      },
+      {
+        "file": "top-out-4.flac",
+        "strength": 0.58,
+        "gain": 1
+      }
+    ],
+    "rim": [
+      {
+        "file": "rim-0.flac",
+        "strength": 1,
+        "gain": 1
+      },
+      {
+        "file": "rim-1.flac",
+        "strength": 0.77,
+        "gain": 1
+      },
+      {
+        "file": "rim-2.flac",
+        "strength": 0.67,
+        "gain": 1
+      },
+      {
+        "file": "rim-3.flac",
+        "strength": 0.81,
+        "gain": 1
+      }
+    ],
+    "stone-hit": [
+      {
+        "file": "stone-hit-0.flac",
+        "strength": 0.84,
+        "gain": 1
+      },
+      {
+        "file": "stone-hit-1.flac",
+        "strength": 0.65,
+        "gain": 1
+      },
+      {
+        "file": "stone-hit-2.flac",
+        "strength": 0.94,
+        "gain": 1
+      },
+      {
+        "file": "stone-hit-3.flac",
+        "strength": 0.87,
+        "gain": 1
+      },
+      {
+        "file": "stone-hit-4.flac",
+        "strength": 1,
+        "gain": 1
+      },
+      {
+        "file": "stone-hit-5.flac",
+        "strength": 0.3,
+        "gain": 1
+      },
+      {
+        "file": "stone-hit-6.flac",
+        "strength": 0.19,
+        "gain": 1
+      },
+      {
+        "file": "stone-hit-7.flac",
+        "strength": 0.27,
+        "gain": 1
+      }
+    ],
+    "creak": [
+      {
+        "file": "creak-0.flac",
+        "strength": 0.2,
+        "gain": 1
+      },
+      {
+        "file": "creak-1.flac",
+        "strength": 0.29,
+        "gain": 1
+      },
+      {
+        "file": "creak-2.flac",
+        "strength": 0.25,
+        "gain": 1
+      },
+      {
+        "file": "creak-3.flac",
+        "strength": 0.2,
+        "gain": 1
+      },
+      {
+        "file": "creak-4.flac",
+        "strength": 0.41,
+        "gain": 1
+      },
+      {
+        "file": "creak-5.flac",
+        "strength": 0.3,
+        "gain": 1
+      },
+      {
+        "file": "creak-6.flac",
+        "strength": 1,
+        "gain": 1
+      },
+      {
+        "file": "creak-7.flac",
+        "strength": 0.57,
+        "gain": 1
+      },
+      {
+        "file": "creak-8.flac",
+        "strength": 0.45,
+        "gain": 1
+      },
+      {
+        "file": "creak-9.flac",
+        "strength": 0.22,
+        "gain": 1
+      }
+    ]
+  }
+}
