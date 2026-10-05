@@ -5,6 +5,8 @@ import { steeringGeometry } from '../render/car-mesh.js';
 import { brakeLightMaterial } from '../render/tube-chassis.js';
 import { DRIVETRAIN } from '../vehicle/config.js';
 import { updateGpuTireMesh, updateSoftTireMesh } from '../render/soft-tire-mesh.js';
+import { setTyreGround } from '../render/mt-tyre.js';
+import { currentSnow } from '../tire/config.js';
 import { CAR } from '../vehicle/config.js';
 import { ifsPoseFromHub } from '../vehicle/frame-geometry.js';
 import { gpuGroundHeight } from '../tire/gpu-tires.js';
@@ -168,6 +170,13 @@ export function syncBrakeLights(world) {
 }
 
 export function syncSoftTires(world) {
+  // The tyres are drawn no lower than the ground the GPU tyres feel (see setTyreGround).
+  const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle)?.controller.gpu?.solver;
+  const g = solver?.groundCache;
+  if (g && solver.groundRevision !== drawnGroundRevision) {
+    drawnGroundRevision = solver.groundRevision;
+    setTyreGround(g.heights, g.ix0 * g.cell, g.iz0 * g.cell, g.cell, !currentSnow());
+  }
   world.query(SoftTireView).updateEach(([view]) => {
     if (view.gpu) {
       // Worker physics: nothing to draw until the first tyre particles arrive.
@@ -185,6 +194,8 @@ export function syncSoftTires(world) {
     else updateSoftTireMesh(view.object, view.soft);
   });
 }
+
+let drawnGroundRevision = null;
 
 // Axles and propshafts follow the hub positions set by syncWheels.
 export function syncAxles(world) {

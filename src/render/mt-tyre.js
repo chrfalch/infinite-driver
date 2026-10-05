@@ -20,8 +20,53 @@ import {
   MeshStandardNodeMaterial,
   NearestFilter,
   RGBAFormat,
+  RedFormat,
 } from 'three/webgpu';
-import { Fn, If, Loop, attribute, cross, float, int, ivec2, normalize, textureLoad, uniform, vec3, vec4 } from 'three/tsl';
+import { Fn, If, Loop, attribute, cross, float, int, ivec2, modelWorldMatrix, modelWorldMatrixInverse, normalize, select, textureLoad, uniform, vec2, vec3, vec4 } from 'three/tsl';
+import { GROUND_N } from '../tire/gpu-tire-solver.js';
+
+// The ground under the car as the tyres feel it, without the gravel (the GPU tyre solver's grid:
+// the drawn terrain plus the ruts; see updateGpuGround), shared by every tyre. The tyre solver lets
+// the tread a little into the ground (its contact spring gives, most under a heavy load on rock;
+// the tread dips between gravel stones that are only painted on; the grid's 12.5 cm triangles cut a
+// little off the rock sheet's facets), and the tyre is drawn moved with the chassis' drawing
+// offset, which is not quite where the ground is. So the vertex shader lifts any drawn point that
+// is below this ground back onto it: the tread flattens on the ground instead of sinking into it.
+// Off on snow, where a tyre sinking into fresh snow is drawn so.
+const groundTexture = new DataTexture(new Float32Array(GROUND_N * GROUND_N), GROUND_N, GROUND_N, RedFormat, FloatType);
+groundTexture.minFilter = NearestFilter;
+groundTexture.magFilter = NearestFilter;
+const groundOrigin = uniform(vec2(0, 0));
+const groundCell = uniform(0.125);
+const groundOn = uniform(0);
+
+// Copies the solver's ground grid (GROUND_N² heights from (x0, z0), `cell` apart) for drawing.
+export function setTyreGround(heights, x0, z0, cell, on = true) {
+  groundTexture.image.data.set(heights.subarray(0, GROUND_N * GROUND_N));
+  groundTexture.needsUpdate = true;
+  groundOrigin.value.set(x0, z0);
+  groundCell.value = cell;
+  groundOn.value = on ? 1 : 0;
+}
+
+// The grid's height at world (x, z), on its triangles (as the solver reads it).
+const tyreGroundAt = (x, z) => {
+  const last = GROUND_N - 1.001;
+  const gx = x.sub(groundOrigin.x).div(groundCell).clamp(0, last);
+  const gz = z.sub(groundOrigin.y).div(groundCell).clamp(0, last);
+  const ix = gx.floor();
+  const iz = gz.floor();
+  const fx = gx.sub(ix);
+  const fz = gz.sub(iz);
+  const at = (dx, dz) => textureLoad(groundTexture, ivec2(int(ix).add(dx), int(iz).add(dz))).x;
+  const h00 = at(0, 0);
+  const h10 = at(1, 0);
+  const h01 = at(0, 1);
+  const h11 = at(1, 1);
+  const below = h00.add(h10.sub(h00).mul(fx)).add(h01.sub(h00).mul(fz));
+  const above = h11.add(h01.sub(h11).mul(fx.oneMinus())).add(h10.sub(h11).mul(fz.oneMinus()));
+  return select(fx.add(fz).lessThanEqual(1), below, above);
+};
 
 // Rocks near a tyre, for the vertex shader: up to DRAW_ROCKS rocks, each a bounding sphere and
 // DRAW_FACES face planes (the same convex hulls the tyre solver collides with).
@@ -312,6 +357,11 @@ function tyreMaterial(nu, nv, sign) {
         });
       });
     }
+    // Never below the ground (see groundTexture). The tyre mesh is in world space, moved by its
+    // matrix (the drawing offsets), so the lift is turned back into the mesh's frame.
+    const world = modelWorldMatrix.mul(vec4(out, 1)).xyz;
+    const lift = tyreGroundAt(world.x, world.z).sub(world.y).max(0).mul(groundOn);
+    out.addAssign(modelWorldMatrixInverse.mul(vec4(0, lift, 0, 0)).xyz);
     return out;
   })();
   material.colorNode = vec4(attribute('color', 'vec3'), float(1));
