@@ -130,7 +130,7 @@ export function drawnSurface(heightAt, coarse = false) {
     for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (sheetCell((mx + i) * per, (mz + j) * per)) return true;
     return false;
   };
-  return (x, z) => {
+  const surface = (x, z) => {
     const h = onTriangles(groundCorner, GROUND_STEP, x, z);
     // The sheet covers the metre cells whose centre is within its reach (as rock-sheet.js samples
     // it) and is drawn over the ground there. Its jittered triangles reach a little past those
@@ -139,4 +139,9 @@ export function drawnSurface(heightAt, coarse = false) {
     const top = onJitteredTriangles(sheetHeight, sheetPoint, ROCK_SHEET_STEP, x, z, sheetCell);
     return Number.isNaN(top) ? h : Math.max(h, top);
   };
+  // The sheet's own grid, for drawing code that needs its exact triangles (render/mt-tyre.js):
+  // point(ix, iz) = { x, z, h } where its mesh puts grid point (ix, iz), and whether the cell from
+  // there is drawn.
+  if (sheet) surface.sheet = { step: ROCK_SHEET_STEP, point: sheetPoint, drawn: sheetCell };
+  return surface;
 }
