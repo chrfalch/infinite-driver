@@ -53,3 +53,17 @@ describe('jointed car on soft tyres', () => {
     expect(1 - 2 * (r.x * r.x + r.z * r.z)).toBeGreaterThan(0.95);
   }, 30000);
 });
+
+describe('GPU tyre batch hub states', () => {
+  it('brakes a hub against the chassis turn about the axle, not the trembling knuckle', () => {
+    const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+    world.timestep = DT;
+    const { body, controller } = createSoftCarBody(RAPIER, world, { x: 0, y: softCarRideHeight(), z: 0 });
+    // The chassis pitches slowly; every knuckle swings fast about its axle, as a parked car's do.
+    body.setAngvel({ x: 0, y: 0, z: 0.2 }, true);
+    for (const w of controller.wheels) w.knuckle.setAngvel({ x: 0, y: 0, z: 5 }, true);
+    for (const s of controller.hubBatchStates(DT)) {
+      expect(s.knuckleSpin).toBeCloseTo(0.2 * s.spinAxis.z, 6);
+    }
+  });
+});

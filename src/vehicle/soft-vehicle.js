@@ -703,12 +703,16 @@ export class JointedVehicle {
   // Hub states plus what the GPU needs to move each hub between the steps of one multi-step
   // dispatch: the spin axis and inertia, this step's drive torque and brake limit (held for the
   // batch), and the knuckle's spin rate (the brake stops the hub relative to it).
+  // The knuckle's spin rate is the chassis' turn about the axle, not the knuckle's own: the light
+  // upright (or axle beam) trembles about the axle at rest, a few steps per swing, and the GPU held a
+  // braked hub at that rate for the whole batch. The stuck tread then wound up against the hub, its
+  // torque swung past the hold brake within each batch, and the parked wheels shook.
   hubBatchStates(dt) {
     const radius = this.tire.outerRadius;
+    const wk = this.body.angvel();
     return this.hubStates().map((state, i) => {
       const w = this.wheels[i];
       const axis = rotate(w.knuckle.rotation(), AXLE);
-      const wk = w.knuckle.angvel();
       return {
         ...state,
         spinAxis: axis,
