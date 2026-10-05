@@ -183,7 +183,8 @@ export function createWheelRig(index, { softTire = null } = {}) {
   const spin = mergeByMaterial(softTire ? createBeadlockWheel(softTire.rimRadius, softTire.width * 0.85, side) : createTyre(side));
   steer.add(spin);
   // Knuckle stays with the steering but not the spin.
-  steer.add(box(0.14, 0.26, 0.08, frame, 0, 0, -side * (rimInnerFace() + 0.02)));
+  const knuckle = box(0.14, 0.26, 0.08, frame, 0, 0, -side * (rimInnerFace() + 0.02));
+  steer.add(knuckle);
   hub.add(steer);
   root.add(hub);
 
@@ -241,6 +242,9 @@ export function createWheelRig(index, { softTire = null } = {}) {
     hub,
     steer,
     spin,
+    knuckle,
+    // Where the axle or half-shaft ends: the hub, or its seat on the car once the wheel is lost.
+    axleEnd: hub.position,
     shock,
     damperBodyPivot,
     shaftPivot,

@@ -273,7 +273,7 @@ async function main() {
     get car() {
       return world.queryFirst(IsPlayer, Vehicle);
     },
-    respawnAt: (x, z, yaw) => requestRespawnAt(world, heightAt, x, z, yaw),
+    respawnAt: (x, z, yaw, options) => requestRespawnAt(world, heightAt, x, z, yaw, options),
     heightAt,
     audio,
     audioFeed,

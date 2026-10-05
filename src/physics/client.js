@@ -89,6 +89,12 @@ class RemoteController {
   wheelIsInContact(i) {
     return this.wheel(i)?.contact ?? false;
   }
+  wheelDetached(i) {
+    return this.wheel(i)?.detached ?? false;
+  }
+  wheelSeat(i) {
+    return this.wheel(i)?.seat ?? this.wheelHubPose(i).position;
+  }
   rollingRadius() {
     return this.tire.outerRadius * 0.925;
   }

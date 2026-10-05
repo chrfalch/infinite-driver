@@ -229,6 +229,12 @@ export function createTuningPanel(world, { heightAt }) {
     folder.close();
   }
 
+  // Damage: read live every step; a respawn repairs the car.
+  const damage = gui.addFolder('Damage');
+  damage.add(CAR, 'damage').name('Crash damage (R repairs)').onChange(saveCar);
+  damage.add(CAR, 'partStrength', 0.5, 4, 0.05).name('Part strength ×').onChange(saveCar);
+  damage.close();
+
   // Tyres: pressure, grip and mass apply live; size, mass and mesh rebuild the car.
   addTireFolder(gui, world, scheduleRebuild);
 

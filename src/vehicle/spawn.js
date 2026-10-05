@@ -270,15 +270,16 @@ export function findSpawnSpot(world, heightAt, x0, z0, yaw0) {
   return { x: x0, z: z0, yaw: yaw0 };
 }
 
-// Puts the car on its wheels at (x, z), facing `yaw` (radians about +y; 0 faces +x).
-export function respawnCarAt(world, heightAt, x, z, yaw = 0) {
+// Puts the car on its wheels at (x, z), facing `yaw` (radians about +y; 0 faces +x). Tests can
+// start it `lift` m higher and moving forward at `speed` m/s.
+export function respawnCarAt(world, heightAt, x, z, yaw = 0, { speed = 0, lift = 0 } = {}) {
   const car = world.queryFirst(IsPlayer, Vehicle);
   // Drop from just above the highest ground under the car, so no wheel starts inside a slope.
   const ground = footprint(heightAt, x, z, yaw).max;
   const pose = {
-    position: { x, y: ground + startHeight(), z },
+    position: { x, y: ground + startHeight() + lift, z },
     rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
-    linvel: ZERO,
+    linvel: speed ? { x: Math.cos(yaw) * speed, y: 0, z: -Math.sin(yaw) * speed } : ZERO,
     angvel: ZERO,
   };
   // The same car again: keep its meshes and replace only the physics. New meshes and materials
@@ -334,8 +335,8 @@ export function requestRespawn(world, heightAt) {
 }
 
 // Test and debug hook: respawn at a given place and heading (see window.__game in main.js).
-export function requestRespawnAt(world, heightAt, x, z, yaw) {
-  pendingAction = { type: 'respawnAt', world, heightAt, x, z, yaw };
+export function requestRespawnAt(world, heightAt, x, z, yaw, options) {
+  pendingAction = { type: 'respawnAt', world, heightAt, x, z, yaw, options };
 }
 
 export function applyPendingCarAction() {
@@ -343,5 +344,5 @@ export function applyPendingCarAction() {
   pendingAction = null;
   if (action?.type === 'rebuild') rebuildCar(action.world);
   if (action?.type === 'respawn') respawnCar(action.world, action.heightAt);
-  if (action?.type === 'respawnAt') respawnCarAt(action.world, action.heightAt, action.x, action.z, action.yaw);
+  if (action?.type === 'respawnAt') respawnCarAt(action.world, action.heightAt, action.x, action.z, action.yaw, action.options);
 }
