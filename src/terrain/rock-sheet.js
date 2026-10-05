@@ -9,11 +9,22 @@ import { ROCK_REACH } from './riverbed.js';
 export const ROCK_SHEET_STEP = 0.25; // m, drawn mesh
 export const ROCK_COLLIDER_STEP = 0.5; // m, physics collider
 
+// How far the drawn sheet's grid points are moved at random, as a share of its step (see sampleSheet).
+export const ROCK_SHEET_JITTER = 0.7;
+
 // A hash of a world grid point in [0, 1), for jittering it.
 function hash(ix, iz, k) {
   let h = Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(k, 982451653);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+// Where world grid point (ix, iz) of a `step` grid lies once jittered by `jitter` (a share of a step),
+// as sampleSheet places it: written into out = { x, z }.
+export function jitteredPoint(ix, iz, step, jitter, out) {
+  out.x = (ix + jitter * (hash(ix, iz, 1) - 0.5)) * step;
+  out.z = (iz + jitter * (hash(ix, iz, 2) - 0.5)) * step;
+  return out;
 }
 
 // Samples the sheet on a `step` grid over the chunk, only in the 1 m cells that the sheet reaches.
@@ -32,13 +43,13 @@ function sampleSheet(heightAt, cx, cz, step, rows = [0, CHUNK_SIZE], jitter = 0)
   const x0 = cx * CHUNK_SIZE;
   const z0 = cz * CHUNK_SIZE;
   const cells = [];
+  const point = { x: 0, z: 0 };
   const at = (gx, gz) => {
     const i = gx + gz * n;
     if (Number.isNaN(heights[i])) {
-      const wx = cx * CHUNK_SIZE * per + gx;
-      const wz = cz * CHUNK_SIZE * per + gz;
-      px[i] = x0 + (gx + jitter * (hash(wx, wz, 1) - 0.5)) * step;
-      pz[i] = z0 + (gz + jitter * (hash(wx, wz, 2) - 0.5)) * step;
+      jitteredPoint(cx * CHUNK_SIZE * per + gx, cz * CHUNK_SIZE * per + gz, step, jitter, point);
+      px[i] = point.x;
+      pz[i] = point.z;
       const s = heightAt.sample(px[i], pz[i]);
       heights[i] = s.h;
       ids[i] = s.rockZone > 0 ? s.stoneId : -1;
@@ -101,7 +112,7 @@ function toneFor(id, out) {
 export function rockSheetData(heightAt, cx, cz) {
   if (!heightAt.rockAt) return null;
   const step = ROCK_SHEET_STEP;
-  const { heights, ids, px, pz, cells, n } = sampleSheet(heightAt, cx, cz, step, undefined, 0.7);
+  const { heights, ids, px, pz, cells, n } = sampleSheet(heightAt, cx, cz, step, undefined, ROCK_SHEET_JITTER);
   if (!cells.length) return null;
   // Grid points in use, numbered in order.
   const index = new Int32Array(n * n).fill(-1);

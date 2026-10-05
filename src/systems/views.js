@@ -1,12 +1,15 @@
-import { Vector3 } from 'three/webgpu';
-import { AxleRig, IsPlayer, SoftTireView, SteeringWheel, Time, Transform, Vehicle, View, WheelOf, WheelRig } from '../ecs/traits.js';
+import { Quaternion, Vector3 } from 'three/webgpu';
+import { AxleRig, HeightField, IsPlayer, SoftTireView, SteeringWheel, Time, Transform, Vehicle, View, WheelOf, WheelRig } from '../ecs/traits.js';
 import { updateAxleRig } from '../render/axles.js';
 import { steeringGeometry } from '../render/car-mesh.js';
 import { brakeLightMaterial } from '../render/tube-chassis.js';
 import { DRIVETRAIN } from '../vehicle/config.js';
 import { updateGpuTireMesh, updateSoftTireMesh } from '../render/soft-tire-mesh.js';
+import { setTyreGround } from '../render/mt-tyre.js';
+import { currentSnow } from '../tire/config.js';
 import { CAR } from '../vehicle/config.js';
 import { ifsPoseFromHub } from '../vehicle/frame-geometry.js';
+import { gpuGroundHeight } from '../tire/gpu-tires.js';
 
 export function syncViews(world) {
   world.query(Transform, View).updateEach(([transform, view]) => {
@@ -33,6 +36,44 @@ function span(object, from, to, axis) {
   return length;
 }
 
+// The chassis is drawn at an interpolated pose a little behind the newest physics step (see
+// syncBodies), and the wheels and GPU tyres are drawn from the newest hub poses and tyre shapes,
+// moved with the chassis' drawing offset. That offset moves them up or down with the chassis' own
+// bounce and roll, and along the ground to where the ground is higher or lower, so a tyre that
+// touches the ground in physics was drawn sunk into it (or above it) by up to a few centimetres.
+// This is the world-space height that puts wheel `index` back on the ground where it is drawn: the
+// mean, over its tread particles touching the ground, of how much higher the ground is where the
+// particle is drawn than where it is, less how much the offset lifted it. With nothing touching
+// (in the air) it is 0, and the wheel moves with the chassis.
+const CONTACT = 0.03; // m: particles this close to the ground count as touching it
+const MAX_LIFT = 0.1; // m
+export function wheelLift(world, vehicle, index) {
+  const offset = vehicle.drawOffset;
+  const solver = vehicle.controller.gpu?.solver;
+  const field = world.get(HeightField);
+  if (!offset || !solver?.positions?.length || !field?.surfaceAt) return 0;
+  const groundAt = (x, z) => gpuGroundHeight(solver, x, z) ?? field.surfaceAt(x, z);
+  const p = solver.positions;
+  const e = offset.elements;
+  let sum = 0;
+  let n = 0;
+  for (let k = index * solver.perTire, end = k + solver.perTire; k < end; k++) {
+    const o = k * 4;
+    if (p[o + 3] > CONTACT) continue; // clearance to the ground or a rock (see clearance in the solver)
+    const x = p[o];
+    const y = p[o + 1];
+    const z = p[o + 2];
+    const dx = e[0] * x + e[4] * y + e[8] * z + e[12];
+    const dy = e[1] * x + e[5] * y + e[9] * z + e[13];
+    const dz = e[2] * x + e[6] * y + e[10] * z + e[14];
+    sum += groundAt(dx, dz) - groundAt(x, z) - (dy - y);
+    n++;
+  }
+  return n ? Math.max(-MAX_LIFT, Math.min(MAX_LIFT, sum / n)) : 0;
+}
+const chassisInv = new Quaternion();
+const localLift = new Vector3();
+
 // Wheels, arms, and shocks are children of the car view, placed from the suspension state.
 export function syncWheels(world) {
   world.query(WheelOf('*'), WheelRig).forEach((entity) => {
@@ -43,11 +84,17 @@ export function syncWheels(world) {
     const { mount, side } = rig;
 
     let hubY;
+    // The wheel's height correction (see wheelLift), in the chassis frame.
+    const vehicle = car.get(Vehicle);
+    vehicle.wheelLift ??= [0, 0, 0, 0];
+    const lift = (vehicle.wheelLift[index] = wheelLift(world, vehicle, index));
+    const q = car.get(Transform).quaternion;
+    localLift.set(0, lift, 0).applyQuaternion(chassisInv.set(q.x, q.y, q.z, q.w).invert());
     if (controller.wheelHubPose) {
       // Jointed car: copy the physics hub's pose so the rim stays inside its soft tyre.
       const { position: p, steer: s, spin: r } = controller.wheelHubPose(index);
-      hubY = p.y;
-      rig.hub.position.set(p.x, p.y, p.z);
+      hubY = p.y + localLift.y;
+      rig.hub.position.set(p.x, p.y, p.z).add(localLift);
       rig.steer.quaternion.set(s.x, s.y, s.z, s.w);
       rig.spin.quaternion.set(r.x, r.y, r.z, r.w);
       // A lost wheel flies off without its knuckle; the shaft still ends at the knuckle's seat.
@@ -79,18 +126,20 @@ export function syncWheels(world) {
       // Double A-arms from the physics links (or, for the raycast car, moved with the hub).
       const pose = controller.suspensionPose?.(index) ?? ifsPoseFromHub(index, rig.hub.position);
       const f = rig.ifs;
+      // The wheel's end of the suspension moves with the wheel's height correction.
       const V = (p, out) => out.set(p.x, p.y, p.z);
-      const bj = V(pose.lowerBall, new Vector3());
-      const ub = V(pose.upperBall, new Vector3());
+      const W = (p, out) => V(p, out).add(localLift);
+      const bj = W(pose.lowerBall, new Vector3());
+      const ub = W(pose.upperBall, new Vector3());
       span(f.lower[0], V(pose.lowerInner[0], a), bj, Y);
       span(f.lower[1], V(pose.lowerInner[1], a), bj, Y);
       span(f.upper[0], V(pose.upperInner[0], a), ub, Y);
       span(f.upper[1], V(pose.upperInner[1], a), ub, Y);
       // A lift spindle reaches below the lower ball joint: the upright carries on down the kingpin
       // line to the wheel centre's height.
-      const drop = bj.y - pose.spindle.y - 0.03;
+      const drop = bj.y - (pose.spindle.y + localLift.y) - 0.03;
       span(f.upright, drop > 0 ? b.subVectors(bj, ub).multiplyScalar(drop / Math.max(1e-3, ub.y - bj.y)).add(bj) : bj, ub, Y);
-      const to = V(pose.tieOuter, new Vector3());
+      const to = W(pose.tieOuter, new Vector3());
       // Steering arm from the middle of the upright out to the tie rod end.
       span(f.steeringArm, a.lerpVectors(bj, ub, 0.5), to, Y);
       span(f.tieRod, V(pose.tieInner, b), to, Y);
@@ -98,7 +147,7 @@ export function syncWheels(world) {
       f.joints[1].position.copy(ub);
       f.joints[2].position.copy(to);
       V(pose.tieInner, f.joints[3].position);
-      V(pose.shockBottom, a);
+      W(pose.shockBottom, a);
       rig.shockTop.set(pose.shockTop.x, pose.shockTop.y, pose.shockTop.z);
     }
     dir.subVectors(rig.shockTop, a);
@@ -129,6 +178,13 @@ export function syncBrakeLights(world) {
 }
 
 export function syncSoftTires(world) {
+  // The tyres are drawn no lower than the ground the GPU tyres feel (see setTyreGround).
+  const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle)?.controller.gpu?.solver;
+  const g = solver?.groundCache;
+  if (g && solver.groundRevision !== drawnGroundRevision) {
+    drawnGroundRevision = solver.groundRevision;
+    setTyreGround(g.heights, g.ix0 * g.cell, g.iz0 * g.cell, g.cell, !currentSnow());
+  }
   world.query(SoftTireView).updateEach(([view]) => {
     if (view.gpu) {
       // Worker physics: nothing to draw until the first tyre particles arrive.
@@ -137,12 +193,17 @@ export function syncSoftTires(world) {
       const vehicle = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle);
       const hub = vehicle?.controller.wheels?.[view.index]?.hub;
       updateGpuTireMesh(view.object, view.gpu, view.index, hub);
-      // Follow the chassis' interpolated pose (see syncBodies), so the tyre stays on its rim.
+      // Follow the chassis' interpolated pose (see syncBodies), so the tyre stays on its rim, with
+      // the rim's height correction (see wheelLift).
       if (vehicle?.drawOffset) view.object.matrix.premultiply(vehicle.drawOffset);
+      const lift = vehicle?.wheelLift?.[view.index] ?? 0;
+      if (lift) view.object.matrix.elements[13] += lift;
     }
     else updateSoftTireMesh(view.object, view.soft);
   });
 }
+
+let drawnGroundRevision = null;
 
 // Axles and propshafts follow the hub positions set by syncWheels.
 export function syncAxles(world) {

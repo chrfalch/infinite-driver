@@ -149,6 +149,8 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
   solver.setGround(g.grid, g.ix0 * cell, g.iz0 * cell, cell);
   solver.groundReady = true;
   solver.groundVersion = version;
+  // Counts every change of the grid, for the tyre drawing's copy (see setTyreGround).
+  solver.groundRevision = (solver.groundRevision ?? 0) + 1;
 }
 
 // Snow: the grid's second channel over cells [x0..x1] x [z0..z1] says what the tread stands on:

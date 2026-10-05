@@ -14,31 +14,6 @@ export function setGravelAmount(value) {
   gravelAmount.value = value;
 }
 export const terrainMaterial = new MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
-// 'gravel' (0..1 per vertex) keeps the stones off steep rock faces. 'roadDist' (m from the road
-// centre line) paints the road and its two worn ruts per pixel, so edges stay crisp on the 1 m mesh.
-const roadDist = attribute('roadDist', 'float');
-const roadMask = smoothstep(4.3, 2.9, roadDist);
-const rut = roadDist.sub(1.05);
-const rutWear = exp(rut.mul(rut).div(-0.13));
-// Gravel road: grey-beige crushed stone, compacted darker in the two ruts, looser and lighter on
-// the crown and the edges. Two layers of texture so it reads as gravel at every zoom: a pebble
-// speckle (18 cm cells of random light/dark stones, for the middle distance) and soft patches
-// of fresher and older gravel (a few metres across).
-const hashCell = (cell) => fract(sin(dot(cell, vec2(12.9898, 78.233))).mul(43758.5453));
-const pebbleCell = positionWorld.xz.div(0.18).floor();
-const pebble = hashCell(pebbleCell);
-const pebbleTone = mix(vec3(0.8, 0.8, 0.82), vec3(1.16, 1.12, 1.06), pebble);
-const pebbleScale = fwidth(positionWorld.x).div(0.18); // cells per pixel
-// Shown in the middle distance: gone when a cell is under ~2 px (shimmer) and when it is over
-// ~25 px (up close the round gravel stones take over and square cells would show).
-const pebbleFade = smoothstep(0.6, 0.25, pebbleScale).mul(smoothstep(0.02, 0.06, pebbleScale));
-const patches = sin(positionWorld.x.mul(0.43).add(sin(positionWorld.z.mul(0.31)).mul(2.1))).mul(sin(positionWorld.z.mul(0.37).add(positionWorld.x.mul(0.11)))).mul(0.07).add(1);
-const crown = smoothstep(0.9, 0.0, roadDist).mul(rutWear.oneMinus());
-const edge = smoothstep(2.2, 3.4, roadDist);
-const gravelBase = mix(vec3(0.63, 0.59, 0.52), vec3(0.72, 0.68, 0.6), crown.add(edge).clamp(0, 1));
-const roadColor = mix(gravelBase, vec3(0.5, 0.45, 0.39), rutWear.mul(0.75))
-  .mul(mix(vec3(1), pebbleTone, pebbleFade.mul(rutWear.mul(0.5).oneMinus())))
-  .mul(patches);
 // Steep faces: horizontal sandstone strata from the world height, per pixel ('steep' per vertex),
 // so the bands stay level across the tall triangles of a cliff.
 const layer = positionWorld.y.div(2.1).add(sin(positionWorld.x.mul(0.07).add(positionWorld.z.mul(0.05))).mul(0.45));
@@ -50,7 +25,6 @@ const sandstone = uniform(0);
 const strata = mix(redStrata, yellowStrata, sandstone);
 const seam = smoothstep(0.86, 0.97, fract(layer)).mul(0.25);
 const rock = strata.mul(seam.oneMinus());
-const ground = mix(attribute('color', 'vec3'), rock, attribute('steep', 'float'));
 // Fresh snow, per pixel: bright, faintly blue, with wind ripples and a fine sparkle of grains. The
 // snow surface near the car (render/snow-surface.js) uses the same, so the two meet unseen.
 const snowHash = (p) => fract(sin(dot(p, vec2(12.9898, 78.233))).mul(43758.5453));
@@ -130,21 +104,61 @@ export function snowGroundRoughness(side, packed, inside) {
   return mix(land, mix(float(0.08), float(0.8), lakeCover(inside)), step(0, inside));
 }
 const snowWorld = uniform(0);
-// Far from the car (the terrain mesh): on snow the 'gravel' attribute holds how packed the snow is
-// (as the snow surface shades it), so the two match where they meet.
-const lakeDist = attribute('lake', 'float');
-const snowFar = snowGroundColor(roadDist, attribute('gravel', 'float'), lakeDist);
-terrainMaterial.roughnessNode = mix(float(0.95), snowGroundRoughness(roadDist, attribute('gravel', 'float'), lakeDist), snowWorld);
-terrainMaterial.colorNode = vec4(
-  mix(
-    mix(ground, roadColor, roadMask).mul(
-      mix(vec3(1), gravelShade(), gravelAmount.clamp(0, 1).sqrt().mul(attribute('gravel', 'float'))),
+
+// The ground's colour and roughness from its per-vertex inputs: `color`, `steep` (rock strata
+// share), `gravel` (0..1, stones; on snow how packed the snow is, as the snow surface shades it, so
+// the two match where they meet), `roadDist` (m from the road centre line; signed on snow) and
+// `lake` (snowfield: m inside the lake's shoreline). The terrain mesh feeds them from its vertex
+// attributes; the ground patch near the car (render/ground-surface.js) from the same values
+// interpolated in its vertex shader.
+export function groundShading({ color, steep, gravel, roadDist, lake }) {
+  // 'gravel' (0..1 per vertex) keeps the stones off steep rock faces. 'roadDist' (m from the road
+  // centre line) paints the road and its two worn ruts per pixel, so edges stay crisp on the 1 m mesh.
+  const roadMask = smoothstep(4.3, 2.9, roadDist);
+  const rut = roadDist.sub(1.05);
+  const rutWear = exp(rut.mul(rut).div(-0.13));
+  // Gravel road: grey-beige crushed stone, compacted darker in the two ruts, looser and lighter on
+  // the crown and the edges. Two layers of texture so it reads as gravel at every zoom: a pebble
+  // speckle (18 cm cells of random light/dark stones, for the middle distance) and soft patches
+  // of fresher and older gravel (a few metres across).
+  const hashCell = (cell) => fract(sin(dot(cell, vec2(12.9898, 78.233))).mul(43758.5453));
+  const pebbleCell = positionWorld.xz.div(0.18).floor();
+  const pebble = hashCell(pebbleCell);
+  const pebbleTone = mix(vec3(0.8, 0.8, 0.82), vec3(1.16, 1.12, 1.06), pebble);
+  const pebbleScale = fwidth(positionWorld.x).div(0.18); // cells per pixel
+  // Shown in the middle distance: gone when a cell is under ~2 px (shimmer) and when it is over
+  // ~25 px (up close the round gravel stones take over and square cells would show).
+  const pebbleFade = smoothstep(0.6, 0.25, pebbleScale).mul(smoothstep(0.02, 0.06, pebbleScale));
+  const patches = sin(positionWorld.x.mul(0.43).add(sin(positionWorld.z.mul(0.31)).mul(2.1))).mul(sin(positionWorld.z.mul(0.37).add(positionWorld.x.mul(0.11)))).mul(0.07).add(1);
+  const crown = smoothstep(0.9, 0.0, roadDist).mul(rutWear.oneMinus());
+  const edge = smoothstep(2.2, 3.4, roadDist);
+  const gravelBase = mix(vec3(0.63, 0.59, 0.52), vec3(0.72, 0.68, 0.6), crown.add(edge).clamp(0, 1));
+  const roadColor = mix(gravelBase, vec3(0.5, 0.45, 0.39), rutWear.mul(0.75))
+    .mul(mix(vec3(1), pebbleTone, pebbleFade.mul(rutWear.mul(0.5).oneMinus())))
+    .mul(patches);
+  const ground = mix(color, rock, steep);
+  const snowFar = snowGroundColor(roadDist, gravel, lake);
+  return {
+    color: vec4(
+      mix(
+        mix(ground, roadColor, roadMask).mul(mix(vec3(1), gravelShade(), gravelAmount.clamp(0, 1).sqrt().mul(gravel))),
+        snowFar,
+        snowWorld,
+      ),
+      1,
     ),
-    snowFar,
-    snowWorld,
-  ),
-  1,
-);
+    roughness: mix(float(0.95), snowGroundRoughness(roadDist, gravel, lake), snowWorld),
+  };
+}
+const terrainShading = groundShading({
+  color: attribute('color', 'vec3'),
+  steep: attribute('steep', 'float'),
+  gravel: attribute('gravel', 'float'),
+  roadDist: attribute('roadDist', 'float'),
+  lake: attribute('lake', 'float'),
+});
+terrainMaterial.colorNode = terrainShading.color;
+terrainMaterial.roughnessNode = terrainShading.roughness;
 
 // The world's rock colours for the shader (steep faces): red sandstone, or yellow for the river.
 export function setTerrainWorld(world) {
@@ -152,17 +166,18 @@ export function setTerrainWorld(world) {
   snowWorld.value = world === 'snow' ? 1 : 0;
 }
 
-// On snow the fine snow surface (render/snow-surface.js) draws the ground near the car, with its
-// ruts. The terrain mesh inside that square sinks out of sight under it; the vertices on its edge
-// stay, so the two meet there.
-const snowPatch = uniform(vec4(0, 0, -1, -1)); // x0, z0, x1, z1 (m); empty by default
-const insidePatch = step(snowPatch.x.add(0.5), positionLocal.x)
-  .mul(step(positionLocal.x, snowPatch.z.sub(0.5)))
-  .mul(step(snowPatch.y.add(0.5), positionLocal.z))
-  .mul(step(positionLocal.z, snowPatch.w.sub(0.5)));
+// Near the car a fine patch draws the ground with its ruts: the snow surface on snow
+// (render/snow-surface.js), elsewhere the ground surface (render/ground-surface.js). The terrain
+// mesh inside that square sinks out of sight under it; the vertices on its edge stay, so the two
+// meet there.
+const groundPatch = uniform(vec4(0, 0, -1, -1)); // x0, z0, x1, z1 (m); empty by default
+const insidePatch = step(groundPatch.x.add(0.5), positionLocal.x)
+  .mul(step(positionLocal.x, groundPatch.z.sub(0.5)))
+  .mul(step(groundPatch.y.add(0.5), positionLocal.z))
+  .mul(step(positionLocal.z, groundPatch.w.sub(0.5)));
 terrainMaterial.positionNode = positionLocal.sub(vec3(0, insidePatch.mul(0.8), 0));
-export function setSnowPatch({ x0, z0, x1, z1 }) {
-  snowPatch.value.set(x0, z0, x1, z1);
+export function setGroundPatch({ x0, z0, x1, z1 }) {
+  groundPatch.value.set(x0, z0, x1, z1);
 }
 
 const DIRT = new Color('#c2ab82');
@@ -272,32 +287,37 @@ export function createChunkMesh(heightAt, heights, cx, cz, size = CHUNK_SIZE, re
 
 // The ground mesh's vertex data for a chunk (plain arrays, so a worker can build it).
 export function chunkMeshData(heightAt, heights, cx, cz, size = CHUNK_SIZE, res = CHUNK_RES) {
-  const n = res + 1;
-  const step = size / res;
-  const x0 = cx * size;
-  const z0 = cz * size;
-  const positions = new Float32Array(n * n * 3);
-  const normals = new Float32Array(n * n * 3);
-  const colors = new Float32Array(n * n * 3);
-  const gravel = new Float32Array(n * n);
-  const roadDist = new Float32Array(n * n).fill(99);
-  const steep = new Float32Array(n * n);
-  const lake = new Float32Array(n * n).fill(-99); // snowfield: m inside the lake's shoreline
+  return groundMeshData(heightAt, heights, cx * size, cz * size, size / res, res);
+}
+
+// Vertex data of the ground mesh on a (resX + 1) x (resZ + 1) grid of `step` from (x0, z0), with
+// `heights` in grid order. The ground patch near the car (render/ground-surface.js) takes its 1 m
+// corners from here too, so it matches the terrain mesh exactly.
+export function groundMeshData(heightAt, heights, x0, z0, step, resX, resZ = resX) {
+  const nx = resX + 1;
+  const nz = resZ + 1;
+  const positions = new Float32Array(nx * nz * 3);
+  const normals = new Float32Array(nx * nz * 3);
+  const colors = new Float32Array(nx * nz * 3);
+  const gravel = new Float32Array(nx * nz);
+  const roadDist = new Float32Array(nx * nz).fill(99);
+  const steep = new Float32Array(nx * nz);
+  const lake = new Float32Array(nx * nz).fill(-99); // snowfield: m inside the lake's shoreline
   // Heights on the grid plus a one-sample border, so normals come from the grid (central
   // differences) and still match the neighbouring chunks.
-  const m = n + 2;
-  const grid = new Float32Array(m * m);
-  for (let iz = -1; iz <= n; iz++) {
-    for (let ix = -1; ix <= n; ix++) {
-      const inside = ix >= 0 && ix < n && iz >= 0 && iz < n;
-      grid[ix + 1 + (iz + 1) * m] = inside ? heights[ix + iz * n] : (heightAt.coarse ?? heightAt)(x0 + ix * step, z0 + iz * step);
+  const m = nx + 2;
+  const grid = new Float32Array(m * (nz + 2));
+  for (let iz = -1; iz <= nz; iz++) {
+    for (let ix = -1; ix <= nx; ix++) {
+      const inside = ix >= 0 && ix < nx && iz >= 0 && iz < nz;
+      grid[ix + 1 + (iz + 1) * m] = inside ? heights[ix + iz * nx] : (heightAt.coarse ?? heightAt)(x0 + ix * step, z0 + iz * step);
     }
   }
   const at = (ix, iz) => grid[ix + 1 + (iz + 1) * m];
 
-  for (let iz = 0; iz < n; iz++) {
-    for (let ix = 0; ix < n; ix++) {
-      const i = ix + iz * n;
+  for (let iz = 0; iz < nz; iz++) {
+    for (let ix = 0; ix < nx; ix++) {
+      const i = ix + iz * nx;
       const x = x0 + ix * step;
       const z = z0 + iz * step;
       const h = heights[i];
@@ -367,6 +387,8 @@ export function createChunkMeshFromData({ positions, normals, colors, gravel, ro
 
   const mesh = new Mesh(geometry, terrainMaterial);
   mesh.receiveShadow = true;
+  // Before the tyre tracks, which are drawn over the ground (see Tracks).
+  mesh.renderOrder = -1;
   mesh.name = `chunk ${cx},${cz}`;
   return mesh;
 }
