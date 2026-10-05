@@ -116,6 +116,8 @@ function snapshot(readback) {
       rotation: c.wheelRotation(i),
       steering: c.wheelSteering(i),
       contact: c.wheelIsInContact(i),
+      detached: c.wheelDetached(i),
+      seat: c.wheelDetached(i) ? c.wheelSeat(i) : null,
     })),
     speed: vehicle.speed,
     steer: vehicle.steer,

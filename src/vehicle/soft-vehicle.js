@@ -24,6 +24,19 @@ const STEER_DAMPING = 8e3;
 const IFS_STEER_ARM = 0.14;
 // Brake motor gain (N·m per rad/s); the brake torque caps it, like pad friction.
 const BRAKE_GRIP = 2e5;
+// Crash damage, from how far a hit pulls a corner's joints apart (see jointDrift), times
+// CAR.partStrength. A rim that strikes the ground or a rock at speed yanks its hub off the axle;
+// past BREAK_DRIFT the axle lets go and the wheel comes off, from BEND_DRIFT the upright bends.
+// A hard landing from 2 m stretches the joints about 3 cm, a 3 m drop at 90 km/h up to 60 cm.
+const BEND_DRIFT = 0.08;
+const BREAK_DRIFT = 0.3;
+// The largest bend (m): how far the upper ball joint's seat moves across the upright (camber,
+// about 9° at the full amount) and the tie rod end along it (toe, about 12° on the steering arm).
+const MAX_CAMBER_BEND = 0.05;
+const MAX_TOE_BEND = 0.03;
+// A lost wheel this far (m) from the car is left lying: the GPU tyre's ground grid covers only
+// 16 m around the car.
+const LOST_WHEEL_RANGE = 7;
 
 // Quaternion helpers on plain {x, y, z, w} objects.
 function rotate(q, v) {
@@ -107,6 +120,7 @@ export class JointedVehicle {
       // mount moves down with the spindle lift.
       if (!this.solid) mount.y = DESIGN_WHEEL_MOUNT_Y + ifsSpringOffset(car) - ifsSpindleLift(car);
       const front = WHEELS[i].front;
+      const firstJoint = this.joints.length;
       const localHub = this.solid
         ? { x: mount.x, y: mount.y - car.suspensionRestLength, z: mount.z }
         : ifsCorner(i, car).wheel;
@@ -203,10 +217,15 @@ export class JointedVehicle {
         ifs,
         hub,
         axleJoint: axle,
+        // Where the hub turns on its knuckle (knuckle-local), and whether it has come off.
+        seat,
+        detached: false,
         slider,
         steer,
         soft,
         mesh,
+        // This corner's joints (arms, ball joints, tie rod, axle), for jointDrift.
+        joints: this.joints.slice(firstJoint),
         steering: 0,
         engineForce: 0,
         brakeForce: 0,
@@ -281,17 +300,22 @@ export class JointedVehicle {
     // Upper arm travel is limited by the lower arm; give it room so it never binds first.
     upperHinge.joint.setLimits(-IFS_ARM_LIMIT * 1.6, IFS_ARM_LIMIT * 1.6);
     this.joint(RAPIER.JointData.spherical(ORIGIN, onUpright(G.lowerBall)), lower, upright);
-    this.joint(RAPIER.JointData.spherical(ORIGIN, onUpright(G.upperBall)), upper, upright);
+    const upperOnUpright = onUpright(G.upperBall);
+    const upperJoint = this.joint(RAPIER.JointData.spherical(ORIGIN, upperOnUpright), upper, upright);
     const tieMid = midpoint(G.tieInner, G.tieOuter);
     const tie = this.createLink(tieMid, 6, 0.5);
     const tieOnUpright = onUpright(G.tieOuter);
-    this.joint(RAPIER.JointData.spherical(sub(G.tieOuter, tieMid), tieOnUpright), tie, upright);
+    const tieJoint = this.joint(RAPIER.JointData.spherical(sub(G.tieOuter, tieMid), tieOnUpright), tie, upright);
     if (G.front) {
       this.joint(RAPIER.JointData.spherical(sub(G.tieInner, this.rackGeo.center), sub(G.tieInner, tieMid)), this.rack.body, tie);
     } else {
       this.joint(RAPIER.JointData.spherical(G.tieInner, sub(G.tieInner, tieMid)), chassis, tie);
     }
-    return { G, lower, upper, upright, tie, tieOnUpright, lowerHinge, upperHinge, shockLocal: sub(G.shockBottom, G.lowerBall) };
+    return {
+      G, lower, upper, upright, tie, tieOnUpright, lowerHinge, upperHinge, shockLocal: sub(G.shockBottom, G.lowerBall),
+      // The seats a crash bends (see bendCorner), as built.
+      upperJoint, upperOnUpright, tieJoint, tieBuilt: tieOnUpright,
+    };
   }
 
   // Coil-over force for one double A-arm corner. The wheel rate (and bump/rebound damping) is the
@@ -448,13 +472,112 @@ export class JointedVehicle {
     const qcInv = conjugate(this.body.rotation());
     const pc = this.body.translation();
     const h = w.hub.translation();
+    const position = rotate(qcInv, { x: h.x - pc.x, y: h.y - pc.y, z: h.z - pc.z });
+    // A lost wheel is drawn as it lies: its whole turn in `steer`.
+    if (w.detached) return { position, steer: multiply(qcInv, w.hub.rotation()), spin: IDENTITY };
     const kq = w.knuckle.rotation();
-    return {
-      position: rotate(qcInv, { x: h.x - pc.x, y: h.y - pc.y, z: h.z - pc.z }),
-      steer: multiply(qcInv, kq),
-      spin: multiply(conjugate(kq), w.hub.rotation()),
-    };
+    return { position, steer: multiply(qcInv, kq), spin: multiply(conjugate(kq), w.hub.rotation()) };
   }
+  // Whether wheel i has come off (see detachWheel).
+  wheelDetached(i) {
+    return this.wheels[i].detached;
+  }
+  // Where wheel i's hub turns on its knuckle, in the chassis frame: the half-shaft ends there
+  // once the wheel has come off.
+  wheelSeat(i) {
+    const w = this.wheels[i];
+    return rotate(conjugate(this.body.rotation()), sub(worldPoint(w.knuckle, w.seat), this.body.translation()));
+  }
+  // How far corner i's joints are pulled apart (m): the largest gap between a joint's anchor on
+  // one body and its anchor on the other. Rapier's joints are soft under very large loads, so a
+  // hard hit stretches them; well under a centimetre is normal.
+  jointDrift(i) {
+    let max = 0;
+    for (const j of this.wheels[i].joints) {
+      if (!j.isValid()) continue;
+      const a = worldPoint(j.body1(), j.anchor1());
+      const b = worldPoint(j.body2(), j.anchor2());
+      max = Math.max(max, Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z));
+    }
+    return max;
+  }
+
+  // Crash damage for corner i, once per step before the solver (CAR.damage): an overload that
+  // stretches the joints past the break limit takes the wheel off; a smaller one bends the upright
+  // when the hit is over, by how close it came to breaking and the way the hub was pushed.
+  updateDamage(i) {
+    const w = this.wheels[i];
+    if (w.detached) return this.updateLostWheel(w);
+    const strength = Math.max(0.1, this.car.partStrength ?? 1);
+    const drift = this.jointDrift(i);
+    if (drift > BREAK_DRIFT * strength) return this.detachWheel(i);
+    if (!w.ifs) return;
+    if (drift > BEND_DRIFT * strength) {
+      if (drift > (w.impact?.drift ?? 0)) {
+        // The hub's push off its seat, in the upright's frame (it sits on the seat at rest).
+        const k = w.knuckle;
+        const push = rotate(conjugate(k.rotation()), sub(w.hub.translation(), worldPoint(k, w.seat)));
+        w.impact = { drift, push };
+      }
+    } else if (w.impact) {
+      const { drift: peak, push } = w.impact;
+      w.impact = null;
+      this.bendCorner(w, Math.min(1, (peak - BEND_DRIFT * strength) / ((BREAK_DRIFT - BEND_DRIFT) * strength)), push);
+    }
+  }
+
+  // Bends an independent corner's upright by `amount` (0..1 of the largest bend), the way the hub
+  // was pushed: sideways tilts the wheel (camber), lengthwise turns it (toe); every bend does a
+  // little of both. It moves the upper ball joint's and the tie rod end's seats on the upright, so
+  // it stays until a respawn.
+  bendCorner(w, amount, push) {
+    const c = w.ifs;
+    const len = Math.hypot(push.x, push.z);
+    // No clear direction: tilt the top of the wheel out, as a blow from below does.
+    const side = Math.sign(w.mount.z);
+    const across = len > 0.01 ? push.z / len : -side;
+    const along = len > 0.01 ? push.x / len : 0;
+    const clamp = (v, max) => Math.max(-max, Math.min(max, v));
+    const share = (v, fallback) => (Math.sign(v) || fallback) * Math.max(0.4, Math.abs(v));
+    w.bend ??= { camber: 0, toe: 0 };
+    w.bend.camber = clamp(w.bend.camber + amount * MAX_CAMBER_BEND * share(across, -side), MAX_CAMBER_BEND);
+    w.bend.toe = clamp(w.bend.toe + amount * MAX_TOE_BEND * share(along, 1), MAX_TOE_BEND);
+    const u = c.upperOnUpright;
+    c.upperJoint.setAnchor2({ x: u.x, y: u.y, z: u.z + w.bend.camber });
+    c.tieOnUpright = { x: c.tieBuilt.x + w.bend.toe, y: c.tieBuilt.y, z: c.tieBuilt.z };
+    c.tieJoint.setAnchor2(c.tieOnUpright);
+  }
+
+  // Takes wheel i off its knuckle: the axle joint is gone, so the hub and its tyre fly free.
+  detachWheel(i) {
+    const w = this.wheels[i];
+    if (w.detached) return;
+    w.detached = true;
+    w.impact = null;
+    this.world.removeImpulseJoint(w.axleJoint, true);
+    this.joints = this.joints.filter((j) => j !== w.axleJoint);
+    w.joints = w.joints.filter((j) => j !== w.axleJoint);
+    // A solid rear axle measured its travel at the hub; the knuckle (the beam) stays on the car.
+    if (w.center === w.hub) w.center = w.knuckle;
+    w.engineForce = 0;
+    w.brakeTorque = 0;
+    w.driveTorque = 0;
+    w.relSpin = 0;
+    if (!this.gpu && w.driveInertia) w.hub.setAdditionalMassProperties(1e-4, ORIGIN, { x: 0, y: 0, z: 0 }, IDENTITY, true);
+  }
+
+  // A lost wheel rolls on until it is out of the tyre's ground grid, then stays where it is.
+  updateLostWheel(w) {
+    if (w.lying) return;
+    const h = w.hub.translation();
+    const p = this.body.translation();
+    if (Math.hypot(h.x - p.x, h.z - p.z) < LOST_WHEEL_RANGE) return;
+    w.lying = true;
+    w.hub.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    w.hub.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    w.hub.setBodyType(this.RAPIER.RigidBodyType.Fixed, true);
+  }
+
   // Double A-arm points of corner i in the chassis frame, read from the physics links (for drawing).
   suspensionPose(i) {
     const w = this.wheels[i];
@@ -491,6 +614,7 @@ export class JointedVehicle {
   setDriveInertia(share) {
     const perWheel = Math.min(MAX_DRIVE_INERTIA, share);
     for (const w of this.wheels) {
+      if (w.detached) continue;
       if (Math.abs(perWheel - (w.driveInertia ?? 0)) <= 0.02 * Math.max(1, perWheel)) continue;
       w.driveInertia = perWheel;
       if (!this.gpu) w.hub.setAdditionalMassProperties(1e-4, ORIGIN, { x: 0, y: 0, z: perWheel }, IDENTITY, true);
@@ -499,7 +623,7 @@ export class JointedVehicle {
 
   // Share of a spin torque that turns the Rapier hub; the rest turns the engine's flywheel (GPU tyres).
   spinShare(w) {
-    if (!this.gpu) return 1;
+    if (!this.gpu || w.detached) return 1;
     return HUB_INERTIA_GPU.z / (HUB_INERTIA_GPU.z + (w.driveInertia ?? 0));
   }
 
@@ -554,13 +678,16 @@ export class JointedVehicle {
     return this.tire.outerRadius * 0.925;
   }
   // Wheel spin rate relative to its knuckle, rad/s, positive when rolling forward.
+  // A lost wheel's half-shaft spins free; the drivetrain reads the other wheel on its axle.
   wheelSpin(i) {
-    return this.wheels[i].spinRate ?? 0;
+    const w = this.wheels[i].detached ? this.wheels[i ^ 1] : this.wheels[i];
+    return w.detached ? 0 : (w.spinRate ?? 0);
   }
   wheelRotation(i) {
     return this.wheels[i].rotation;
   }
   wheelIsInContact(i) {
+    if (this.wheels[i].detached) return false;
     return this.wheels[i].suspensionLength < this.car.suspensionRestLength + 0.05;
   }
   // Spring settings are applied together; per-wheel tyre grip comes from the soft tyre itself.
@@ -617,6 +744,7 @@ export class JointedVehicle {
         w.ifs.lower.resetTorques(true);
       }
     }
+    if (car.damage) for (let i = 0; i < this.wheels.length; i++) this.updateDamage(i);
     for (const w of this.wheels) {
       // Suspension length from the wheel centre's position in the chassis frame.
       const s = (w.center ?? w.strut).translation();
@@ -630,6 +758,12 @@ export class JointedVehicle {
       const load = axleLoadFactor(w.front, car);
       const damping = (speed < 0 ? car.suspensionCompression : car.suspensionRelaxation) * car.mass * load;
       w.slider?.configureMotorPosition(car.suspensionRestLength, car.suspensionStiffness * car.mass * load, damping);
+
+      // A lost wheel gets no drive or brake; the GPU tyre spins it about its own axle.
+      if (w.detached) {
+        w.spinAxis = rotate(w.hub.rotation(), AXLE);
+        continue;
+      }
 
       // Hub spin relative to its knuckle, about the axle.
       const rel = multiply(conjugate(w.knuckle.rotation()), w.hub.rotation());
@@ -715,6 +849,7 @@ export class JointedVehicle {
     const wk = this.body.angvel();
     return this.hubStates().map((state, i) => {
       const w = this.wheels[i];
+      if (w.detached) return { ...state, spinAxis: rotate(w.hub.rotation(), AXLE), inertia: HUB_INERTIA_GPU.z, driveTorque: 0, brakeTorque: 0, knuckleSpin: 0 };
       const axis = rotate(w.knuckle.rotation(), AXLE);
       return {
         ...state,

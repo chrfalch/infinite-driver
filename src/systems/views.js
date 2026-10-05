@@ -50,6 +50,14 @@ export function syncWheels(world) {
       rig.hub.position.set(p.x, p.y, p.z);
       rig.steer.quaternion.set(s.x, s.y, s.z, s.w);
       rig.spin.quaternion.set(r.x, r.y, r.z, r.w);
+      // A lost wheel flies off without its knuckle; the shaft still ends at the knuckle's seat.
+      const lost = controller.wheelDetached?.(index) ?? false;
+      rig.knuckle.visible = !lost;
+      if (lost) {
+        const seat = controller.wheelSeat(index);
+        rig.axleEnd = (rig.lostSeat ??= new Vector3()).set(seat.x, seat.y, seat.z);
+        hubY = seat.y;
+      } else rig.axleEnd = rig.hub.position;
     } else {
       const suspension = controller.wheelSuspensionLength(index) ?? CAR.suspensionRestLength;
       hubY = mount.y - suspension;
@@ -145,7 +153,7 @@ export function syncAxles(world) {
     world.query(WheelOf(car), WheelRig).forEach((wheel) => {
       const { index } = wheel.get(WheelOf(car));
       const rig = wheel.get(WheelRig).rig;
-      hubs[index] = rig.hub.position;
+      hubs[index] = rig.axleEnd ?? rig.hub.position;
       if (index < 2) steerQuats[index] = rig.steer.quaternion;
     });
     if (hubs.length < 4 || hubs.includes(undefined)) return;
