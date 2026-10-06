@@ -49,6 +49,8 @@ export const GROUND_LOOK = GROUND_LOOKS.includes(params.get('ground')) ? params.
 // The photo look on the dry river: the ground outside the bed and the loose rocks get textures too.
 // Fixed for the page load (false in the workers, which do not draw), so other worlds pay nothing.
 export const RIVER_PBR = GROUND_LOOK === 'pbr' && worldMode() === 'river';
+// The same photo look on the red-rock canyon: its dirt, gravel road, rock faces and loose rocks.
+export const CANYON_PBR = GROUND_LOOK === 'pbr' && worldMode() === 'canyon';
 
 // ---- Noise (all on world xz in metres) -------------------------------------------------------
 
@@ -269,7 +271,7 @@ function mudLook() {
 const loader = new TextureLoader();
 function load(name, srgb) {
   // No page (unit tests, workers): an empty texture, so materials still build.
-  const t = typeof document === 'undefined' ? new Texture() : loader.load(`${import.meta.env?.BASE_URL ?? '/'}textures/river/${name}.jpg`);
+  const t = typeof document === 'undefined' ? new Texture() : loader.load(`${import.meta.env?.BASE_URL ?? '/'}textures/ground/${name}.jpg`);
   t.wrapS = t.wrapT = RepeatWrapping;
   t.anisotropy = 8;
   if (srgb) t.colorSpace = SRGBColorSpace;
@@ -365,6 +367,38 @@ export function forestFloorColor(color, steep) {
 export function forestFloorNormal(n) {
   const tn = texture(forestSet().normal, xz.div(2.5)).xyz.mul(2).sub(1);
   return normalize(vec3(tn.x.add(n.x), abs(tn.z).mul(n.y), tn.y.negate().add(n.z)));
+}
+
+// The canyon's ground with the photo look (render/terrain-mesh.js groundShading), each texture as
+// detail over the ground's own colours (divided by its mean colour, so the palette stays): the dry
+// dirt (ambientCG Ground109, also the river's soil) off the road, the gravel path (Ground081) on
+// it, and the sandstone (Rock029) mapped from three sides on steep faces. Two scales of the dirt
+// and the gravel, turned, are averaged so their tiles do not repeat visibly.
+const SOIL_MEAN = hex('#7e6e55');
+const GRAVEL_MEAN = hex('#958763');
+let gravelSet = null;
+const gravelTextures = () => (gravelSet ??= { color: load('gravel-color', true), normal: load('gravel-normal', false) });
+const turned = (p) => vec2(p.x.mul(0.8).sub(p.y.mul(0.6)), p.x.mul(0.6).add(p.y.mul(0.8)));
+const twoScales = (map, size) => texture(map, xz.div(size)).rgb.add(texture(map, turned(xz).div(size * 2.7)).rgb).mul(0.5);
+export function canyonDirtDetail() {
+  return twoScales(soilTextures().color, 2).div(SOIL_MEAN);
+}
+export function canyonGravelDetail() {
+  return twoScales(gravelTextures().color, 1.5).div(GRAVEL_MEAN);
+}
+// `n`: the ground's world normal.
+export function canyonRockDetail(n) {
+  return triplanar(rockTextures(), 3, n).color.div(ROCK_MEAN);
+}
+// The world normal `n` with the dirt's or the road's normal map (by `road`, 0..1) and on steep faces
+// (`steep`) the rock's.
+export function canyonNormal(n, steep, road) {
+  const planar = (map, size) => {
+    const tn = unpack(map, xz.div(size));
+    return normalize(vec3(tn.x.add(n.x), abs(tn.z).mul(n.y), tn.y.negate().add(n.z)));
+  };
+  const flat = normalize(mix(planar(soilTextures().normal, 2), planar(gravelTextures().normal, 1.5), road));
+  return normalize(mix(flat, triplanar(rockTextures(), 3, n).normal, steep));
 }
 
 // The loose rocks and pebbles with the photo look: the same sandstone texture from three sides, one
