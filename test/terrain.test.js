@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { CHUNK_SIZE, chunkTrimesh, sampleChunk, toRapierHeights } from '../src/terrain/chunk.js';
 import { createHeightField } from '../src/terrain/height.js';
 import { generateRocks } from '../src/terrain/rocks.js';
-import { ROCK_EDGE } from '../src/terrain/riverbed.js';
+import { ROCK_EDGE, SOIL_MIN } from '../src/terrain/riverbed.js';
 
 beforeAll(async () => {
   await RAPIER.init();
@@ -167,15 +167,23 @@ describe('dry river terrain', () => {
   it('floors the bed with one rock sheet, rising into boulder walls', () => {
     const points = walkBed(600).filter((_, i) => i % 4 === 0);
     let bedMax = 0;
+    let soil = 0;
+    let all = 0;
     let wallSum = 0;
     let walls = 0;
     for (const p of points) {
       const side = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
       for (let d = -3.5; d <= 3.5; d += 0.5) {
         const s = heightAt.sample(p.x + side[0] * d, p.z + side[1] * d);
-        // All rock, no ground showing between the humps, and bare rock for the tyres.
+        // Rock or soil pockets, no ground showing between the humps; bare rock for the tyres except
+        // in the pockets (soft, they take ruts), which are shallow.
         expect(s.stone).toBeGreaterThanOrEqual(0.04 - 1e-9);
-        expect(heightAt.rockAt(p.x + side[0] * d, p.z + side[1] * d)).toBe(true);
+        expect(s.soil).toBeLessThan(0.25);
+        const x = p.x + side[0] * d;
+        const z = p.z + side[1] * d;
+        if (heightAt.soilAt(x, z) > SOIL_MIN) soil++;
+        else expect(heightAt.rockAt(x, z)).toBe(true);
+        all++;
         bedMax = Math.max(bedMax, s.stone);
       }
       for (const sgn of [1, -1]) {
@@ -186,8 +194,37 @@ describe('dry river terrain', () => {
       }
     }
     expect(bedMax).toBeLessThan(1.2); // the big slabs in the bed stand at most about a metre
+    // Soil pockets cover some of the bed, not most of it.
+    expect(soil / all).toBeGreaterThan(0.08);
+    expect(soil / all).toBeLessThan(0.35);
     expect(wallSum / walls).toBeGreaterThan(1.0); // the walls stand over a metre
     // The forest beyond has only a few loose rocks.
+  });
+
+  it('marks the soil pockets on the drawn sheet where the tyres find soft ground', async () => {
+    const { rockSheetData } = await import('../src/terrain/rock-sheet.js');
+    const data = rockSheetData(heightAt, 0, -1);
+    let deep = 0;
+    let deepSoft = 0;
+    let shallowRock = 0;
+    let rockChecked = 0;
+    for (let k = 0; k < data.ground.length / 4; k++) {
+      const x = data.positions[k * 3];
+      const z = data.positions[k * 3 + 2];
+      const soil = data.ground[k * 4];
+      if (soil > 0.05) {
+        if (!heightAt.rockAt(x, z)) deepSoft++;
+        deep++;
+      } else if (soil === 0 && heightAt.roadDistance(x, z) < 4) {
+        rockChecked++;
+        if (heightAt.rockAt(x, z)) shallowRock++;
+      }
+    }
+    expect(deep).toBeGreaterThan(50);
+    // The tyres' soil depth is interpolated on a 25 cm grid, so the odd point in a narrow pocket or
+    // beside one reads the other way.
+    expect(deepSoft / deep).toBeGreaterThan(0.9);
+    expect(shallowRock / rockChecked).toBeGreaterThan(0.9);
   });
 
   it('builds a connected rock mesh and collider for chunks on the bed', async () => {

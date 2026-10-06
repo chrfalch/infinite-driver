@@ -10,7 +10,7 @@
 //
 // All are per pixel on the sheet's own 25 cm mesh: no change to its shape, so the tyres and the
 // colliders feel the same ground. The masks come from per-vertex values the chunk worker adds
-// (terrain/rock-sheet.js): 'ground' = (fill, rut, lift, dist) and 'aboveBed'. The relief is a bump
+// (terrain/rock-sheet.js): 'ground' = (soil, rut, lift, dist) and 'aboveBed'. The relief is a bump
 // (Mikkelsen's surface gradient from screen-space derivatives of a height in metres), so it only
 // shades; the silhouettes stay the mesh's.
 import { Color, MeshStandardNodeMaterial, RepeatWrapping, SRGBColorSpace, TextureLoader } from 'three/webgpu';
@@ -40,6 +40,7 @@ import {
   vec3,
 } from 'three/tsl';
 import { worldMode } from '../world.js';
+import { SOIL_MIN } from '../terrain/riverbed.js';
 
 const params = new URLSearchParams(globalThis.location?.search ?? '');
 export const GROUND_LOOKS = ['facets', 'sand', 'cobbles', 'mud', 'pbr'];
@@ -109,7 +110,7 @@ const voronoi = Fn(([p]) => {
 // The normal `n` (world, unit) tilted by the slope of height field `h` (m, per pixel): Mikkelsen,
 // "Bump Mapping Unparametrized Surfaces on the GPU", in world space with unscaled derivatives, so
 // a height in metres gives its true slope.
-const bump = (n, h) => {
+export const bump = (n, h) => {
   const sx = positionWorld.dFdx();
   const sy = positionWorld.dFdy();
   const r1 = sy.cross(n);
@@ -130,7 +131,7 @@ const grey = (c) => vec3(dot(c, vec3(0.3, 0.59, 0.11)));
 
 // The per-vertex inputs.
 const ground = attribute('ground', 'vec4');
-const fill = ground.x; // m below the surrounding sheet (hollows)
+const soil = ground.x; // m of soil in the bed's soil pockets (terrain/riverbed.js)
 const rut = ground.y; // 0..1 the low channel
 const lift = ground.z; // m of rock over the ground beneath (low in the creases)
 const aboveBed = attribute('aboveBed', 'float'); // m over the bed floor
@@ -168,7 +169,7 @@ function sandstone(polish = 0) {
 function settle(bias = 0) {
   const flat = smoothstep(0.7, 0.9, N.y);
   const ragged = fbm(xz.mul(2.2), 3).sub(0.5).mul(0.06);
-  const low = max(smoothstep(0.01, 0.05, fill.add(ragged).add(bias * 0.03)), smoothstep(0.1, 0.03, lift.add(ragged)));
+  const low = max(smoothstep(0.01, 0.05, soil.add(ragged).add(bias * 0.03)), smoothstep(0.1, 0.03, lift.add(ragged)));
   return low.mul(flat);
 }
 
@@ -303,7 +304,7 @@ let rockSet = null;
 const rockTextures = () => (rockSet ??= textureSet('rock'));
 
 function pbrLook() {
-  const sandTex = textureSet('sand');
+  const soilTex = textureSet('soil');
   // Rock: triplanar, one texture tile per 2.5 m.
   const rock = triplanar(rockTextures(), 2.5, N);
   const rockN = rock.normal;
@@ -313,22 +314,22 @@ function pbrLook() {
   const rockTexColor = rock.color;
   const rockColor = mix(grey(rockTexColor).mul(tone).mul(2.7), rockTexColor.mul(toneShift).mul(vec3(1.0, 1.08, 1.0)), 0.3);
 
-  // Sand: projected straight down, a tile per 1.6 m, with slow patches of
-  // tone so the repeats do not show.
+  // Soil (ambientCG Ground109, dry dirt with grit): projected straight down, a tile per 1.6 m, with
+  // slow patches of tone so the repeats do not show.
   const planar = (set, size) => {
     const uv = xz.div(size);
     const tn = unpack(set.normal, uv);
     return { color: texture(set.color, uv).rgb, arh: texture(set.arh, uv), n: normalize(vec3(tn.x.add(N.x), abs(tn.z).mul(N.y), tn.y.negate().add(N.z))) };
   };
-  const sand = planar(sandTex, 1.6);
+  const dirt = planar(soilTex, 1.6);
   const patches = fbm(xz.mul(0.35), 3).mul(0.25).add(0.88);
-  // Height blend: each layer's own height map (arh.b) decides which shows near the edge of its mask.
-  const sandAmt = settle(0.3);
-  const hRock = rockArh.b.mul(0.5);
-  const sandW = smoothstep(0.02, 0.12, sandAmt.mul(1.2).add(sand.arh.b.mul(0.5)).sub(hRock).sub(0.35));
-  const color = mix(rockColor, sand.color.mul(vec3(1.02, 0.98, 0.9)), sandW).mul(patches);
-  const n = normalize(mix(rockN, sand.n, sandW));
-  const arh = mix(rockArh, sand.arh, sandW);
+  // Soil where the soil pockets are (the same depth the tyres go by: soft ground over SOIL_MIN),
+  // its edge moved a centimetre either way by the two textures' height maps, so it runs ragged.
+  const edge = soil.sub(SOIL_MIN).add(dirt.arh.b.sub(rockArh.b).mul(0.012));
+  const soilW = smoothstep(-0.004, 0.004, edge);
+  const color = mix(rockColor, dirt.color.mul(vec3(1.08, 1.0, 0.9)), soilW).mul(patches);
+  const n = normalize(mix(rockN, dirt.n, soilW));
+  const arh = mix(rockArh, dirt.arh, soilW);
   return { color: color.mul(arh.r.mul(0.5).add(0.5)), normal: n, roughness: arh.g };
 }
 
@@ -388,6 +389,7 @@ export function riverGroundMaterial(look = GROUND_LOOK) {
   const out = build();
   material.colorNode = out.color;
   material.roughnessNode = out.roughness;
-  material.normalNode = transformNormalToView(out.normal ?? bump(N, out.height));
+  material.userData.worldNormal = out.normal ?? bump(N, out.height);
+  material.normalNode = transformNormalToView(material.userData.worldNormal);
   return material;
 }

@@ -18,6 +18,7 @@ export const PATCH_SIZE = 48; // m
 const CELL = DEFORM_CELL;
 const PER_METRE = Math.round(1 / CELL);
 const N = PATCH_SIZE * PER_METRE + 1; // vertices per side
+export const PATCH_N = N;
 const C = PATCH_SIZE + 1; // 1 m corners per side
 const EDGE_FADE = 1.5; // m over which the deformation fades out toward the edge
 const RECENTRE = 4; // m the car may get from the patch centre before it moves

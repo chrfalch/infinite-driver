@@ -28,6 +28,12 @@ export const ROCK_REACH = 9.4;
 const SPACING = 360; // m between neighbouring beds
 const LEDGE_STEP = 0.18; // m, height of a bedrock ledge across the bed
 const SIDES = 7; // side planes per boulder
+// Soil pockets: firm earth fills the bed's creases and hollows up to a level that wanders between
+// none and about 1.3 x SOIL_LEVEL over the ground beneath, so the rock humps stand out of flat patches of soil.
+// Where it is deeper than SOIL_MIN the ground is soil, not bare rock: it takes tracks and ruts.
+const SOIL_LEVEL = 0.18; // m
+export const SOIL_MIN = 0.015; // m
+const SOIL_STEP = 0.25; // m, grid the soil depth is cached on for rockAt (the sheet's own step)
 
 // Maximum with a soft corner `k` wide, so there is no crease where the two cross.
 const smoothMax = (a, b, k) => {
@@ -106,6 +112,7 @@ export function createRiverField(seed = 4711) {
   const bankNoise = createNoise2D(rand);
   const ridgeNoise = createNoise2D(rand);
   const chipNoise = createNoise2D(rand);
+  const soilNoise = createNoise2D(rand);
 
   // Warped coordinate across the beds; a bed is where it is a multiple of the spacing. Long gentle
   // bends plus shorter wiggles.
@@ -185,16 +192,23 @@ export function createRiverField(seed = 4711) {
     // walls; the creases never drop to the ground beneath (a 4 cm skin at least), so it is all rock.
     const zone = 1 - smoothstep(ROCK_EDGE, ROCK_REACH, dist);
     let stone = 0;
+    let soil = 0;
     const top = { h: -Infinity, id: 0 };
     const under = h;
     if (zone > 0) {
       const wall = smoothstep(BED_HALF_WIDTH + 0.6, BED_HALF_WIDTH + 2.4, dist);
       // Patches of small rocks and of bigger boulders, changing every 20-30 m (walls: big).
       const big = Math.max(wall, smoothstep(-0.35, 0.35, sizeNoise(x * 0.035, z * 0.035)));
+      // Soil pockets: how high the soil lies here (a share of SOIL_LEVEL), in patches some metres
+      // across, deeper in the low channel where the last water left its silt. Where it lies deep,
+      // the small rocks are mostly buried, so the pockets run on for metres between boulders.
+      const n = 0.5 + 0.5 * (0.75 * soilNoise(x * 0.045, z * 0.045) + 0.25 * soilNoise(x * 0.25 + 9, z * 0.25));
+      const want = (1 - wall) * (1.45 * n - 0.15 + 0.45 * channel);
+      const buried = smoothstep(0.55, 0.95, want);
       // Small rocks, about a metre across.
       layer(x, z, 1.1, 100, (hx, hz) => {
         const r = hash2(hx, hz, 102);
-        return { tall: 0.26 * (0.75 + 0.5 * r) * (1 - 0.8 * big), steep: 1.1, a: 0.5 * (0.8 + 0.4 * r), b: 0.5 * (0.8 + 0.4 * r) };
+        return { tall: 0.26 * (0.75 + 0.5 * r) * (1 - 0.8 * big) * (1 - 0.75 * buried), steep: 1.1, a: 0.5 * (0.8 + 0.4 * r), b: 0.5 * (0.8 + 0.4 * r) };
       }, top);
       // Boulders, 2-3 m across, rising into the walls.
       layer(x, z, 2.2, 200, (hx, hz) => {
@@ -216,9 +230,16 @@ export function createRiverField(seed = 4711) {
       // cm deep, so the faces read as broken sandstone rather than smooth humps.
       const chip = 0.05 * (Math.abs(chipNoise(x * 0.9, z * 0.9)) - 0.35) + 0.025 * (Math.abs(chipNoise(x * 2.3 + 7, z * 2.3 - 4)) - 0.35);
       stone = zone * Math.max(0.04, top.h + chip);
+      // Soil fills up to its level (not on the boulder walls); the rock pokes out above it, with a
+      // soft corner where they meet.
+      const level = zone * Math.max(0, SOIL_LEVEL * want);
+      if (level > stone) {
+        soil = level - stone;
+        stone = smoothMax(stone, level, 0.02);
+      }
       h += stone;
     }
-    return { h, under, stone, stoneId: top.id, rockZone: zone, road: inBed, rut: channel * inBed, dist, rock, bank, cliff: ridge, bedY: centre };
+    return { h, under, stone, soil, stoneId: top.id, rockZone: zone, road: inBed, rut: channel * inBed, dist, rock, bank, cliff: ridge, bedY: centre };
   }
 
   const heightAt = (x, z) => sample(x, z).h;
@@ -228,8 +249,31 @@ export function createRiverField(seed = 4711) {
     const s = sample(x, z);
     return s.stone > 0 ? s.under - 0.03 * s.rockZone : s.h;
   };
-  // Bare rock (grippy, hard, no ruts) where the sheet is.
-  heightAt.rockAt = (x, z) => Math.abs(bed(x, z).d) < (ROCK_EDGE + ROCK_REACH) / 2;
+  // Soil depth at (x, z), between the points of a SOIL_STEP grid (cached: the tyres ask often).
+  const soilCache = new Map();
+  const soilCorner = (ix, iz) => {
+    const key = ix * 1048576 + iz;
+    let v = soilCache.get(key);
+    if (v === undefined) {
+      if (soilCache.size > 400000) soilCache.clear();
+      v = sample(ix * SOIL_STEP, iz * SOIL_STEP).soil;
+      soilCache.set(key, v);
+    }
+    return v;
+  };
+  heightAt.soilAt = (x, z) => {
+    const gx = x / SOIL_STEP;
+    const gz = z / SOIL_STEP;
+    const ix = Math.floor(gx);
+    const iz = Math.floor(gz);
+    const fx = gx - ix;
+    const fz = gz - iz;
+    const a = soilCorner(ix, iz) + (soilCorner(ix + 1, iz) - soilCorner(ix, iz)) * fx;
+    const b = soilCorner(ix, iz + 1) + (soilCorner(ix + 1, iz + 1) - soilCorner(ix, iz + 1)) * fx;
+    return a + (b - a) * fz;
+  };
+  // Bare rock (grippy, hard, no ruts) where the sheet is, except in its soil pockets.
+  heightAt.rockAt = (x, z) => Math.abs(bed(x, z).d) < (ROCK_EDGE + ROCK_REACH) / 2 && heightAt.soilAt(x, z) <= SOIL_MIN;
   heightAt.sample = sample;
   heightAt.roadDistance = (x, z) => Math.abs(bed(x, z).d);
   // Heading (radians about +y, 0 = +x) along the bed through a point.

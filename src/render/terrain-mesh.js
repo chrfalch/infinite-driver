@@ -6,6 +6,7 @@ import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
 import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
 import { RIVER_PBR, forestFloorColor, forestFloorNormal } from './river-ground.js';
+import { SOIL_MIN } from '../terrain/riverbed.js';
 import { COVER_DEPTH, LAKE, ROAD as SNOW_ROAD } from '../terrain/snow.js';
 
 // Ground colour from the vertex colours, with the gravel stones drawn on top (the same stones the
@@ -247,10 +248,15 @@ function riverColor(s, slope, x, z, out) {
   out.lerp(BANK, bank * 0.85);
   // The bed: sand, darker in the low channel.
   out.lerp(tmp2.copy(SAND).lerp(CHANNEL, s.rut * 0.6), s.road);
+  // Under the rock sheet only its soil pockets take tyre tracks or throw soil: their colour (the
+  // terrain mesh there is hidden under the sheet).
+  if (s.soil > SOIL_MIN || s.rockZone > 0.5) out.copy(RIVER_PBR ? POCKET_TEXTURED : POCKET);
   out.offsetHSL(0, 0, fineNoise(x * 0.6, z * 0.6) * 0.025);
   return out;
 }
 const tmp2 = new Color();
+const POCKET = new Color('#a88d68'); // terrain/rock-sheet.js SOIL
+const POCKET_TEXTURED = new Color('#86704f'); // the soil texture's look (render/river-ground.js)
 
 // Snowfield palette (the terrain mesh far off; near the car the snow surface draws its own):
 // bright snow with faint blue-grey hollows and wind-blown patches.

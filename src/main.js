@@ -39,7 +39,9 @@ import { createHeightField } from './terrain/height.js';
 import { worldMode } from './world.js';
 import { setGroundPatch, setTerrainWorld } from './render/terrain-mesh.js';
 import { SnowSurface } from './render/snow-surface.js';
-import { GroundSurface } from './render/ground-surface.js';
+import { GroundSurface, PATCH_N } from './render/ground-surface.js';
+import { showRutsOnSheet } from './render/rock-surface.js';
+import { DEFORM_CELL } from './terrain/deformation.js';
 import { applyPendingCarAction, footprint, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
 import { updateInstanceBatchers } from './render/instance-batcher.js';
@@ -89,6 +91,8 @@ async function main() {
   // The ground near the car, drawn with its ruts: snow on the snowfield, soil elsewhere.
   const groundSurface = heightAt.snow ? new SnowSurface(render.scene, heightAt, deformation) : new GroundSurface(render.scene, heightAt, deformation);
   groundSurface.onMove = setGroundPatch;
+  // The dry river's rock sheet shows the ruts in its soil pockets from the same texture.
+  if (heightAt.rockAt && !heightAt.snow) showRutsOnSheet(groundSurface.deform, groundSurface.origin, PATCH_N, DEFORM_CELL);
 
   // Physics runs in a worker (with its own GPU device) for the GPU tyres when the browser has
   // WebGPU in workers; ?physics=main keeps it on this thread. Other tyre modes stay here.

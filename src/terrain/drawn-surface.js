@@ -83,7 +83,7 @@ function inTriangle(p, q, r, x, z, hp, hq, hr) {
 export function drawnSurface(heightAt, coarse = false) {
   if (heightAt.snowAt && !coarse) return heightAt;
   const ground = heightAt.coarse ?? heightAt;
-  const sheet = heightAt.coarse && heightAt.sample ? (x, z) => heightAt.sample(x, z).h : null;
+  const sheet = heightAt.coarse && heightAt.sample ? heightAt.sample : null;
   const cache = new Map();
   const corner = (fn, step, tag) => (ix, iz) => {
     const key = `${tag}${ix},${iz}`;
@@ -103,8 +103,10 @@ export function drawnSurface(heightAt, coarse = false) {
     let q = points.get(key);
     if (!q) {
       if (points.size > MAX_CACHED) points.clear();
-      q = jitteredPoint(ix, iz, ROCK_SHEET_STEP, ROCK_SHEET_JITTER, { x: 0, z: 0, h: 0 });
-      q.h = sheet(q.x, q.z);
+      q = jitteredPoint(ix, iz, ROCK_SHEET_STEP, ROCK_SHEET_JITTER, { x: 0, z: 0, h: 0, soil: 0 });
+      const s = sheet(q.x, q.z);
+      q.h = s.h;
+      q.soil = s.soil ?? 0;
       points.set(key, q);
     }
     return q;
@@ -140,8 +142,8 @@ export function drawnSurface(heightAt, coarse = false) {
     return Number.isNaN(top) ? h : Math.max(h, top);
   };
   // The sheet's own grid, for drawing code that needs its exact triangles (render/mt-tyre.js):
-  // point(ix, iz) = { x, z, h } where its mesh puts grid point (ix, iz), and whether the cell from
-  // there is drawn.
+  // point(ix, iz) = { x, z, h, soil } where its mesh puts grid point (ix, iz) (soil: the soil pocket's
+  // depth there), and whether the cell from there is drawn.
   if (sheet) surface.sheet = { step: ROCK_SHEET_STEP, point: sheetPoint, drawn: sheetCell };
   return surface;
 }

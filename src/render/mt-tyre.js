@@ -24,6 +24,7 @@ import {
 } from 'three/webgpu';
 import { Fn, If, Loop, attribute, cross, float, int, ivec2, modelWorldMatrix, modelWorldMatrixInverse, normalize, select, textureLoad, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import { GROUND_N } from '../tire/gpu-tire-solver.js';
+import { SOIL_MIN } from '../terrain/riverbed.js';
 
 // The ground under the car as the tyres feel it, without the gravel (the GPU tyre solver's grid:
 // the drawn terrain plus the ruts; see updateGpuGround), shared by every tyre. The tyre solver lets
@@ -101,7 +102,9 @@ export function setTyreSheet(sheet, x, z) {
   for (let j = 0; j < SHEET_N; j++) {
     for (let i = 0; i < SHEET_N; i++) {
       const q = sheet.point(ix0 + i, iz0 + j);
-      data.set([q.x, q.z, q.h, sheet.drawn(ix0 + i, iz0 + j) ? 1 : 0], (j * SHEET_N + i) * 4);
+      // Soil pockets take ruts, which this grid does not have: there the tyre grid (with the ruts)
+      // is the ground, so they count as not drawn.
+      data.set([q.x, q.z, q.h, sheet.drawn(ix0 + i, iz0 + j) && !(q.soil > SOIL_MIN) ? 1 : 0], (j * SHEET_N + i) * 4);
     }
   }
   sheetTexture.needsUpdate = true;

@@ -128,6 +128,7 @@ export function updateTracks(world) {
       snow,
       snowAt: heightAt.snowAt,
       pressureKpa: solver ? GPU_TIRE.pressureKpa : 100,
+      hardAt,
     });
   }
   tracks.update(delta);
