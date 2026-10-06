@@ -1,8 +1,9 @@
 import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardMaterial } from 'three/webgpu';
-import { RIVER_PBR, rockDetailMaterial } from './river-ground.js';
+import { CANYON_PBR, RIVER_PBR, rockDetailMaterial } from './river-ground.js';
 
-// With the dry river's photo look (?ground=pbr), sandstone texture detail over each rock's colour.
-export const rockMaterial = RIVER_PBR
+// With the photo look (?ground=pbr) on the dry river and the canyon, sandstone texture detail over
+// each rock's colour.
+export const rockMaterial = RIVER_PBR || CANYON_PBR
   ? rockDetailMaterial({ size: 1.2, bedMatch: true })
   : new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
 

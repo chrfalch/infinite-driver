@@ -82,14 +82,17 @@ function groundMaterial(corners, deform, origin) {
     const sz = base.z.negate().div(base.y).add(def(0, 1).sub(def(0, -1)).div(2 * CELL));
     return normalize(vec3(sx.negate(), 1, sz.negate()));
   })();
-  material.normalNode = transformNormalToView(groundNormal(normalize(varying(normal))));
-  const shading = groundShading({
+  const worldNormal = normalize(varying(normal));
+  const inputs = {
     color: varying(a.xyz),
     gravel: varying(a.w),
     roadDist: varying(b.x),
     steep: varying(b.y),
     lake: varying(b.z),
-  });
+    normal: worldNormal,
+  };
+  material.normalNode = transformNormalToView(groundNormal(worldNormal, inputs));
+  const shading = groundShading(inputs);
   material.colorNode = shading.color;
   material.roughnessNode = shading.roughness;
   return material;

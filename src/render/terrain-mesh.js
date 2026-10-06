@@ -5,7 +5,7 @@ import { gravelShade } from '../terrain/gravel.js';
 import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
 import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
-import { RIVER_PBR, forestFloorColor, forestFloorNormal } from './river-ground.js';
+import { CANYON_PBR, RIVER_PBR, canyonDirtDetail, canyonGravelDetail, canyonNormal, canyonRockDetail, forestFloorColor, forestFloorNormal } from './river-ground.js';
 import { SOIL_MIN } from '../terrain/riverbed.js';
 import { COVER_DEPTH, LAKE, ROAD as SNOW_ROAD } from '../terrain/snow.js';
 
@@ -110,19 +110,27 @@ const snowWorld = uniform(0);
 // Dry river with the photo-textured bed (?ground=pbr): the ground outside the bed gets a forest-floor
 // detail texture too (render/river-ground.js).
 const FOREST_DETAIL = RIVER_PBR;
-// The ground's world normal with any detail on it (the ground patch near the car uses this too).
-export const groundNormal = (n) => (FOREST_DETAIL ? forestFloorNormal(n) : n);
+// The canyon with the photo look: dirt, gravel road and rock textures (render/river-ground.js).
+const CANYON_DETAIL = CANYON_PBR;
+const roadShare = (roadDist) => smoothstep(4.3, 2.9, roadDist);
+// The ground's world normal `n` with any detail on it (the ground patch near the car uses this too);
+// `steep` and `roadDist` as for groundShading.
+export function groundNormal(n, { steep, roadDist }) {
+  if (FOREST_DETAIL) return forestFloorNormal(n);
+  if (CANYON_DETAIL) return canyonNormal(n, steep, roadShare(roadDist));
+  return n;
+}
 
 // The ground's colour and roughness from its per-vertex inputs: `color`, `steep` (rock strata
 // share), `gravel` (0..1, stones; on snow how packed the snow is, as the snow surface shades it, so
 // the two match where they meet), `roadDist` (m from the road centre line; signed on snow) and
 // `lake` (snowfield: m inside the lake's shoreline). The terrain mesh feeds them from its vertex
 // attributes; the ground patch near the car (render/ground-surface.js) from the same values
-// interpolated in its vertex shader.
-export function groundShading({ color, steep, gravel, roadDist, lake }) {
+// interpolated in its vertex shader. `normal`: the world normal (for the canyon's rock texture).
+export function groundShading({ color, steep, gravel, roadDist, lake, normal }) {
   // 'gravel' (0..1 per vertex) keeps the stones off steep rock faces. 'roadDist' (m from the road
   // centre line) paints the road and its two worn ruts per pixel, so edges stay crisp on the 1 m mesh.
-  const roadMask = smoothstep(4.3, 2.9, roadDist);
+  const roadMask = roadShare(roadDist);
   const rut = roadDist.sub(1.05);
   const rutWear = exp(rut.mul(rut).div(-0.13));
   // Gravel road: grey-beige crushed stone, compacted darker in the two ruts, looser and lighter on
@@ -136,15 +144,18 @@ export function groundShading({ color, steep, gravel, roadDist, lake }) {
   const pebbleScale = fwidth(positionWorld.x).div(0.18); // cells per pixel
   // Shown in the middle distance: gone when a cell is under ~2 px (shimmer) and when it is over
   // ~25 px (up close the round gravel stones take over and square cells would show).
-  const pebbleFade = smoothstep(0.6, 0.25, pebbleScale).mul(smoothstep(0.02, 0.06, pebbleScale));
+  // (Not with the canyon's gravel texture, which has real stones.)
+  const pebbleFade = CANYON_DETAIL ? float(0) : smoothstep(0.6, 0.25, pebbleScale).mul(smoothstep(0.02, 0.06, pebbleScale));
   const patches = sin(positionWorld.x.mul(0.43).add(sin(positionWorld.z.mul(0.31)).mul(2.1))).mul(sin(positionWorld.z.mul(0.37).add(positionWorld.x.mul(0.11)))).mul(0.07).add(1);
   const crown = smoothstep(0.9, 0.0, roadDist).mul(rutWear.oneMinus());
   const edge = smoothstep(2.2, 3.4, roadDist);
   const gravelBase = mix(vec3(0.63, 0.59, 0.52), vec3(0.72, 0.68, 0.6), crown.add(edge).clamp(0, 1));
   const roadColor = mix(gravelBase, vec3(0.5, 0.45, 0.39), rutWear.mul(0.75))
     .mul(mix(vec3(1), pebbleTone, pebbleFade.mul(rutWear.mul(0.5).oneMinus())))
-    .mul(patches);
-  const ground = mix(FOREST_DETAIL ? forestFloorColor(color, steep) : color, rock, steep);
+    .mul(patches)
+    .mul(CANYON_DETAIL ? mix(vec3(1), canyonGravelDetail(), 0.85) : vec3(1));
+  const dirt = FOREST_DETAIL ? forestFloorColor(color, steep) : CANYON_DETAIL ? color.mul(mix(vec3(1), canyonDirtDetail(), 0.85)) : color;
+  const ground = mix(dirt, CANYON_DETAIL ? rock.mul(mix(vec3(1), canyonRockDetail(normal), 0.8)) : rock, steep);
   const snowFar = snowGroundColor(roadDist, gravel, lake);
   return {
     color: vec4(
@@ -164,10 +175,13 @@ const terrainShading = groundShading({
   gravel: attribute('gravel', 'float'),
   roadDist: attribute('roadDist', 'float'),
   lake: attribute('lake', 'float'),
+  normal: normalWorldGeometry,
 });
 terrainMaterial.colorNode = terrainShading.color;
 terrainMaterial.roughnessNode = terrainShading.roughness;
-if (FOREST_DETAIL) terrainMaterial.normalNode = transformNormalToView(groundNormal(normalWorldGeometry));
+if (FOREST_DETAIL || CANYON_DETAIL) {
+  terrainMaterial.normalNode = transformNormalToView(groundNormal(normalWorldGeometry, { steep: attribute('steep', 'float'), roadDist: attribute('roadDist', 'float') }));
+}
 
 // The world's rock colours for the shader (steep faces): red sandstone, or yellow for the river.
 export function setTerrainWorld(world) {

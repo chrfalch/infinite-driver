@@ -80,7 +80,7 @@ Screens: `docs/research/river-ground/` (`*-low.jpg`: low camera, `*-close.jpg`: 
 
 ### D. Photo-scanned textures (`ground=pbr`)
 
-- CC0 textures from ambientCG: Rock029 (sandstone), Ground054 (sand), 1K, colour + normal + one packed image (AO, roughness, height). `public/textures/river/`.
+- CC0 textures from ambientCG: Rock029 (sandstone), Ground054 (sand), 1K, colour + normal + one packed image (AO, roughness, height). `public/textures/ground/`.
 - Rock: triplanar, one tile per 2.5 m, normals by the whiteout blend. Sand: projected from above. Height blend: each texture's height map decides where the layer edge runs.
 - Good: the most real detail per pixel, for the least shader work. Real roughness and AO.
 - The first version also had a gravel strip down the low channel. It read as a road, so it is
@@ -141,4 +141,4 @@ give more detail for less work.
 - `src/terrain/rock-sheet.js`: the `ground` and `aboveBed` attributes.
 - `src/terrain/riverbed.js`: `sample()` also returns `bedY`.
 - `src/terrain/chunk-worker.js`: transfers the new buffers.
-- `public/textures/river/`: the CC0 textures (see `LICENSE.md` there).
+- `public/textures/ground/`: the CC0 textures (see `LICENSE.md` there).
