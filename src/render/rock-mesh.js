@@ -1,6 +1,10 @@
 import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardMaterial } from 'three/webgpu';
+import { RIVER_PBR, rockDetailMaterial } from './river-ground.js';
 
-export const rockMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
+// With the dry river's photo look (?ground=pbr), sandstone texture detail over each rock's colour.
+export const rockMaterial = RIVER_PBR
+  ? rockDetailMaterial({ size: 1.2, bedMatch: true })
+  : new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
 
 const LIGHT = new Color('#a39a8c');
 const DARK = new Color('#6f675d');
@@ -26,8 +30,12 @@ export function rocksMeshData(rocks) {
   const positions = new Float32Array(triangles * 9);
   const colors = new Float32Array(triangles * 9);
   const normals = new Float32Array(triangles * 9);
+  // Per vertex: 0 for a rock that keeps its own colour, else how bright it is when it takes the bed
+  // rock's colour instead (dry river photo look, render/river-ground.js; half the rocks).
+  const bed = new Float32Array(triangles * 3);
   let o = 0;
   for (const rock of rocks) {
+    const match = rock.sand && (rock.tint * 13.7) % 1 < 0.5 ? 0.75 + 0.5 * ((rock.tint * 29.3) % 1) : 0;
     if (rock.red) tmp.copy(RED_DARK).lerp(RED_LIGHT, rock.tint);
     else if (rock.sand) tmp.copy(SAND_DARK).lerp(SAND_LIGHT, rock.tint).lerp(SAND_GREY, ((rock.tint * 7.3) % 1) * 0.55);
     else tmp.copy(DARK).lerp(LIGHT, rock.tint);
@@ -52,11 +60,12 @@ export function rocksMeshData(rocks) {
         normals[o] = nx;
         normals[o + 1] = ny;
         normals[o + 2] = nz;
+        bed[o / 3] = match;
         o += 3;
       }
     }
   }
-  return { positions, colors, normals };
+  return { positions, colors, normals, bed };
 }
 
 export function createRocksMeshFromData(data) {
@@ -65,6 +74,7 @@ export function createRocksMeshFromData(data) {
   geometry.setAttribute('position', new BufferAttribute(data.positions, 3));
   geometry.setAttribute('color', new BufferAttribute(data.colors, 3));
   geometry.setAttribute('normal', new BufferAttribute(data.normals, 3));
+  if (data.bed) geometry.setAttribute('bed', new BufferAttribute(data.bed, 1));
   geometry.computeBoundingSphere();
   const mesh = new Mesh(geometry, rockMaterial);
   mesh.castShadow = true;

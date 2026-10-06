@@ -1,10 +1,12 @@
 import { createNoise2D } from 'simplex-noise';
 import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, dot, exp, float, floor, fract, fwidth, max, mix, positionLocal, positionWorld, sin, smoothstep, step, uniform, vec2, vec3, vec4 } from 'three/tsl';
+import { attribute, dot, exp, normalWorldGeometry, transformNormalToView, float, floor, fract, fwidth, max, mix, positionLocal, positionWorld, sin, smoothstep, step, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import { gravelShade } from '../terrain/gravel.js';
 import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
 import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
+import { RIVER_PBR, forestFloorColor, forestFloorNormal } from './river-ground.js';
+import { SOIL_MIN } from '../terrain/riverbed.js';
 import { COVER_DEPTH, LAKE, ROAD as SNOW_ROAD } from '../terrain/snow.js';
 
 // Ground colour from the vertex colours, with the gravel stones drawn on top (the same stones the
@@ -105,6 +107,12 @@ export function snowGroundRoughness(side, packed, inside) {
 }
 const snowWorld = uniform(0);
 
+// Dry river with the photo-textured bed (?ground=pbr): the ground outside the bed gets a forest-floor
+// detail texture too (render/river-ground.js).
+const FOREST_DETAIL = RIVER_PBR;
+// The ground's world normal with any detail on it (the ground patch near the car uses this too).
+export const groundNormal = (n) => (FOREST_DETAIL ? forestFloorNormal(n) : n);
+
 // The ground's colour and roughness from its per-vertex inputs: `color`, `steep` (rock strata
 // share), `gravel` (0..1, stones; on snow how packed the snow is, as the snow surface shades it, so
 // the two match where they meet), `roadDist` (m from the road centre line; signed on snow) and
@@ -136,7 +144,7 @@ export function groundShading({ color, steep, gravel, roadDist, lake }) {
   const roadColor = mix(gravelBase, vec3(0.5, 0.45, 0.39), rutWear.mul(0.75))
     .mul(mix(vec3(1), pebbleTone, pebbleFade.mul(rutWear.mul(0.5).oneMinus())))
     .mul(patches);
-  const ground = mix(color, rock, steep);
+  const ground = mix(FOREST_DETAIL ? forestFloorColor(color, steep) : color, rock, steep);
   const snowFar = snowGroundColor(roadDist, gravel, lake);
   return {
     color: vec4(
@@ -159,6 +167,7 @@ const terrainShading = groundShading({
 });
 terrainMaterial.colorNode = terrainShading.color;
 terrainMaterial.roughnessNode = terrainShading.roughness;
+if (FOREST_DETAIL) terrainMaterial.normalNode = transformNormalToView(groundNormal(normalWorldGeometry));
 
 // The world's rock colours for the shader (steep faces): red sandstone, or yellow for the river.
 export function setTerrainWorld(world) {
@@ -239,10 +248,15 @@ function riverColor(s, slope, x, z, out) {
   out.lerp(BANK, bank * 0.85);
   // The bed: sand, darker in the low channel.
   out.lerp(tmp2.copy(SAND).lerp(CHANNEL, s.rut * 0.6), s.road);
+  // Under the rock sheet only its soil pockets take tyre tracks or throw soil: their colour (the
+  // terrain mesh there is hidden under the sheet).
+  if (s.soil > SOIL_MIN || s.rockZone > 0.5) out.copy(RIVER_PBR ? POCKET_TEXTURED : POCKET);
   out.offsetHSL(0, 0, fineNoise(x * 0.6, z * 0.6) * 0.025);
   return out;
 }
 const tmp2 = new Color();
+const POCKET = new Color('#a88d68'); // terrain/rock-sheet.js SOIL
+const POCKET_TEXTURED = new Color('#86704f'); // the soil texture's look (render/river-ground.js)
 
 // Snowfield palette (the terrain mesh far off; near the car the snow surface draws its own):
 // bright snow with faint blue-grey hollows and wind-blown patches.

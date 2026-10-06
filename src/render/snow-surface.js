@@ -15,6 +15,7 @@ import { drawnSurface } from '../terrain/drawn-surface.js';
 export const PATCH_SIZE = 48; // m
 const CELL = DEFORM_CELL;
 const N = Math.round(PATCH_SIZE / CELL) + 1; // vertices per side
+export const SNOW_PATCH_N = N;
 const EDGE_FADE = 1.5; // m over which the deformation fades out toward the edge
 const RECENTRE = 4; // m the car may get from the patch centre before it moves
 
@@ -114,6 +115,8 @@ export class SnowSurface {
     this.mesh = new Mesh(patchGeometry(), snowMaterial(this.texture, this.road, this.origin));
     this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
+    // With the terrain, before the tyre tracks (which write no depth).
+    this.mesh.renderOrder = -1;
     this.mesh.name = 'snow surface';
     scene.add(this.mesh);
     this.onMove = null; // (x0, z0, x1, z1) when the patch moves

@@ -26,6 +26,18 @@ describe('ground deformation', () => {
     expect(d.at(2, 1.75)).toBeGreaterThan(0);
   });
 
+  it('builds no berm on hard ground beside a rut (bare rock beside a soil pocket)', () => {
+    const d = new GroundDeformation(0.125);
+    const right = { x: 0, z: 1 };
+    const hardAt = (x, z) => z > 2.1;
+    for (let i = 0; i < 100; i++) {
+      compactSoil(d, [{ x: 2, z: 2, depth: 0.1 }], { softness: 0.5, dt: 1 / 60, right, bermOffset: 0.25, hardAt });
+    }
+    expect(d.at(2, 2)).toBeLessThan(0);
+    expect(d.at(2, 2.25)).toBe(0);
+    expect(d.at(2, 1.75)).toBeGreaterThan(0);
+  });
+
   it('leaves hard ground untouched', () => {
     const d = new GroundDeformation();
     compactSoil(d, [{ x: 0, z: 0, depth: 0.1 }], { softness: 0, dt: 1 / 60, right: { x: 1, z: 0 }, bermOffset: 0.2 });

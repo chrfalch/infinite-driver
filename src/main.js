@@ -38,8 +38,10 @@ import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
 import { worldMode } from './world.js';
 import { setGroundPatch, setTerrainWorld } from './render/terrain-mesh.js';
-import { SnowSurface } from './render/snow-surface.js';
-import { GroundSurface } from './render/ground-surface.js';
+import { SNOW_PATCH_N, SnowSurface } from './render/snow-surface.js';
+import { GroundSurface, PATCH_N } from './render/ground-surface.js';
+import { showRutsOnSheet } from './render/rock-surface.js';
+import { DEFORM_CELL } from './terrain/deformation.js';
 import { applyPendingCarAction, footprint, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
 import { updateInstanceBatchers } from './render/instance-batcher.js';
@@ -89,6 +91,11 @@ async function main() {
   // The ground near the car, drawn with its ruts: snow on the snowfield, soil elsewhere.
   const groundSurface = heightAt.snow ? new SnowSurface(render.scene, heightAt, deformation) : new GroundSurface(render.scene, heightAt, deformation);
   groundSurface.onMove = setGroundPatch;
+  // The dry river's rock sheet shows the ruts in its soil pockets from the same texture.
+  const ruts = heightAt.snow
+    ? { deform: groundSurface.texture, origin: groundSurface.origin, n: SNOW_PATCH_N, cell: DEFORM_CELL, absolute: true }
+    : { deform: groundSurface.deform, origin: groundSurface.origin, n: PATCH_N, cell: DEFORM_CELL };
+  if (heightAt.rockAt) showRutsOnSheet(ruts);
 
   // Physics runs in a worker (with its own GPU device) for the GPU tyres when the browser has
   // WebGPU in workers; ?physics=main keeps it on this thread. Other tyre modes stay here.
@@ -127,9 +134,10 @@ async function main() {
   world.add(Deformation({ map: deformation }));
   // Powder snow hangs in the air longer than clumps of soil, and light shines through it.
   world.add(Soil({ particles: new SoilParticles(render.scene, heightAt.snow ? { drag: 3, powder: true } : undefined), carry: [0, 0, 0, 0], spin: [0, 0, 0, 0] }));
+  // The tracks' floor follows the ruts near the car (render/rut-map.js).
   world.add(
     Tracks({
-      renderer: new TireTracks(render.scene, { segments: GROUND.trackLength, deformation }),
+      renderer: new TireTracks(render.scene, { segments: GROUND.trackLength, deformation, ruts, snow: !!heightAt.snow }),
       contacts: [null, null, null, null],
     }),
   );

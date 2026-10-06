@@ -396,12 +396,34 @@ function addTireFolder(gui, world, scheduleRebuild) {
     saveTire();
     scheduleRebuild();
   };
+  // Size as on a tyre's sidewall: overall height (diameter), rim diameter and width. TIRE keeps
+  // radii; these read and write them.
+  const size = {
+    get height() {
+      return TIRE.outerRadius * 2;
+    },
+    set height(v) {
+      TIRE.outerRadius = v / 2;
+    },
+    get rim() {
+      return TIRE.rimRadius * 2;
+    },
+    set rim(v) {
+      TIRE.rimRadius = v / 2;
+    },
+    get width() {
+      return TIRE.width;
+    },
+    set width(v) {
+      TIRE.width = v;
+    },
+  };
   for (const [key, label, min, max, step] of [
-    ['outerRadius', 'Outer radius (m)', 0.3, 0.8, 0.01],
-    ['rimRadius', 'Rim radius (m)', 0.15, 0.6, 0.01],
-    ['width', 'Width (m)', 0.12, 0.6, 0.01],
+    ['height', 'Tyre height / diameter (m)', 0.6, 1.6, 0.01],
+    ['rim', 'Rim diameter (m)', 0.3, 1.2, 0.01],
+    ['width', 'Tyre width (m)', 0.12, 0.6, 0.01],
   ]) {
-    folder.add(TIRE, key, min, max, step).name(label).onChange(resize);
+    folder.add(size, key, min, max, step).name(label).onChange(resize);
   }
 
   const solver = folder.addFolder('Tyre solver (advanced)');

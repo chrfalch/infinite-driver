@@ -182,7 +182,8 @@ export class GroundDeformation {
 // soft tyre presses on the ground with about its air pressure (the patch grows with the load), so
 // aired-down tyres float higher on snow, as they do for real. A parked car sinks into its ruts,
 // then stops. Snow that is already packed (the road's, most of a plough bank) packs little more.
-export function compactSoil(deformation, contacts, { softness, dt, right, bermOffset, maxRut = 0.22, snow = null, snowAt = null, pressureKpa = 100 }) {
+// `hardAt(x, z)`: ground that takes no berm (the dry river's bare rock).
+export function compactSoil(deformation, contacts, { softness, dt, right, bermOffset, maxRut = 0.22, snow = null, snowAt = null, pressureKpa = 100, hardAt = null }) {
   if ((!snow && softness <= 0) || contacts.length === 0) return;
   const limit = maxRut * softness;
   const rate = Math.min(1, (snow ? snow.packRate : 6 * softness) * dt);
@@ -217,7 +218,10 @@ export function compactSoil(deformation, contacts, { softness, dt, right, bermOf
     deformation.addCell(c.ix, c.iz, -dig);
     // About a third of the soil ends up in low ridges on both sides.
     const berm = dig * bermShare;
-    deformation.add(c.x + right.x * bermOffset, c.z + right.z * bermOffset, berm);
-    deformation.add(c.x - right.x * bermOffset, c.z - right.z * bermOffset, berm);
+    for (const side of [1, -1]) {
+      const bx = c.x + side * right.x * bermOffset;
+      const bz = c.z + side * right.z * bermOffset;
+      if (!hardAt?.(bx, bz)) deformation.add(bx, bz, berm);
+    }
   }
 }

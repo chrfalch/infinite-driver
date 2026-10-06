@@ -4,7 +4,7 @@
 // coarser collider from the same grid (rockSheetTrimesh). Plain maths, no renderer, so both
 // workers can use it.
 import { CHUNK_SIZE } from './chunk.js';
-import { ROCK_REACH } from './riverbed.js';
+import { ROCK_REACH, SOIL_MIN } from './riverbed.js';
 
 export const ROCK_SHEET_STEP = 0.25; // m, drawn mesh
 export const ROCK_COLLIDER_STEP = 0.5; // m, physics collider
@@ -40,6 +40,13 @@ function sampleSheet(heightAt, cx, cz, step, rows = [0, CHUNK_SIZE], jitter = 0)
   const ids = new Float32Array(n * n);
   const px = new Float32Array(n * n);
   const pz = new Float32Array(n * n);
+  // For the ground shading (render/river-ground.js): the sheet's thickness over the ground beneath,
+  // the low channel, the distance from the centre line and the height over the bed floor.
+  const lift = new Float32Array(n * n);
+  const soil = new Float32Array(n * n);
+  const rut = new Float32Array(n * n);
+  const dist = new Float32Array(n * n);
+  const above = new Float32Array(n * n);
   const x0 = cx * CHUNK_SIZE;
   const z0 = cz * CHUNK_SIZE;
   const cells = [];
@@ -53,6 +60,11 @@ function sampleSheet(heightAt, cx, cz, step, rows = [0, CHUNK_SIZE], jitter = 0)
       const s = heightAt.sample(px[i], pz[i]);
       heights[i] = s.h;
       ids[i] = s.rockZone > 0 ? s.stoneId : -1;
+      lift[i] = s.stone;
+      soil[i] = s.soil ?? 0;
+      rut[i] = s.rut;
+      dist[i] = s.dist;
+      above[i] = s.h - s.bedY;
     }
     return i;
   };
@@ -73,7 +85,7 @@ function sampleSheet(heightAt, cx, cz, step, rows = [0, CHUNK_SIZE], jitter = 0)
       }
     }
   }
-  return { heights, ids, px, pz, cells, n, x0, z0 };
+  return { heights, ids, px, pz, cells, n, x0, z0, lift, rut, dist, above, soil };
 }
 
 // Linear-light colours from sRGB hex (what three's Color does), for the vertex colours.
@@ -88,6 +100,8 @@ const OCHRE = lin('#c08a4e');
 // The big slabs: paler, weathered sandstone.
 const SLAB_LIGHT = lin('#e2d2ac');
 const SLAB_DARK = lin('#b9a47c');
+// The soil pockets: dry, gritty earth.
+const SOIL = lin('#a88d68');
 const tone = { r: 0, g: 0, b: 0 };
 const mix = (a, b, t) => a.map((v, k) => v + (b[k] - v) * t);
 
@@ -112,7 +126,7 @@ function toneFor(id, out) {
 export function rockSheetData(heightAt, cx, cz) {
   if (!heightAt.rockAt) return null;
   const step = ROCK_SHEET_STEP;
-  const { heights, ids, px, pz, cells, n } = sampleSheet(heightAt, cx, cz, step, undefined, ROCK_SHEET_JITTER);
+  const { heights, ids, px, pz, cells, n, lift, rut, dist, above, soil } = sampleSheet(heightAt, cx, cz, step, undefined, ROCK_SHEET_JITTER);
   if (!cells.length) return null;
   // Grid points in use, numbered in order.
   const index = new Int32Array(n * n).fill(-1);
@@ -121,6 +135,10 @@ export function rockSheetData(heightAt, cx, cz) {
   const positions = new Float32Array(count * 3);
   const normals = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
+  // Per point: (soil, rut, lift, dist) and the height over the bed floor; soil is the depth of the
+  // soil pocket there (terrain/riverbed.js; the tyres' rockAt uses the same).
+  const ground = new Float32Array(count * 4);
+  const aboveBed = new Float32Array(count);
   const h = (i, fallback) => (i >= 0 && i < heights.length && !Number.isNaN(heights[i]) ? heights[i] : fallback);
   for (let i = 0; i < heights.length; i++) {
     const k = index[i];
@@ -143,7 +161,10 @@ export function rockSheetData(heightAt, cx, cz) {
     toneFor(ids[i] < 0 ? 0.5 : ids[i], tone);
     const around = (Number.isNaN(l) ? y : l) + (Number.isNaN(r) ? y : r) + (Number.isNaN(u) ? y : u) + (Number.isNaN(d) ? y : d) - 4 * y;
     const shade = 1 - Math.min(0.5, Math.max(0, around * 1.4)) + Math.min(0.12, Math.max(0, -around * 0.5));
+    if (soil[i] > SOIL_MIN) [tone.r, tone.g, tone.b] = SOIL;
     colors.set([tone.r * shade, tone.g * shade, tone.b * shade], k * 3);
+    ground.set([soil[i], rut[i], lift[i], dist[i]], k * 4);
+    aboveBed[k] = above[i];
   }
   const indices = new Uint32Array(cells.length * 6);
   let o = 0;
@@ -158,7 +179,7 @@ export function rockSheetData(heightAt, cx, cz) {
     indices[o++] = index[c];
     indices[o++] = index[d];
   }
-  return { positions, normals, colors, indices };
+  return { positions, normals, colors, ground, aboveBed, indices };
 }
 
 // Bands a chunk's sheet collider is built in, one per call (each a few ms).
