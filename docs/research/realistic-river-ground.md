@@ -83,7 +83,7 @@ Screens: `docs/research/river-ground/` (`*-low.jpg`: low camera, `*-close.jpg`: 
   removed.
 - Weak: the scanned rock is browner than the world's yellow sandstone (now tinted by each
   boulder's colour; needs a better-matched texture or a colour grade). Repeats can show on large
-  flat areas. 3.7 MB of JPG as it is now.
+  flat areas. 3.5 MB of JPG as it is now.
 
 ## Cost
 
