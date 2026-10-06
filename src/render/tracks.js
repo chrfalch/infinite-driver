@@ -1,5 +1,7 @@
 import { BufferAttribute, BufferGeometry, Color, DoubleSide, Mesh, MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, clamp, float, int, positionLocal, uniformArray, varying, vec3, vec4 } from 'three/tsl';
+import { abs, attribute, cameraPosition, clamp, float, fract, int, mix, modelWorldMatrix, normalize, positionLocal, positionWorld, smoothstep, transformNormalToView, uniformArray, varying, vec3, vec4 } from 'three/tsl';
+import { RIVER_PBR, bump, groundPatches, soilColor } from './river-ground.js';
+import { rutAt } from './rut-map.js';
 import { terrainColorAt } from './terrain-mesh.js';
 import { count } from '../perf.js';
 
@@ -13,10 +15,16 @@ const CREST = 0.07; // berm crest distance outside the track edge
 const FOOT = 0.17; // berm foot distance outside the track edge
 const FADE_START = 0.75; // the oldest quarter of each ring fades out
 
+// The soil texture's mean colour, as soilColor returns it (render/river-ground.js).
+const SOIL_TEXTURE_MEAN = vec3(0.225, 0.156, 0.082);
+
 // Per vertex: colour without the track darkening, `seg` = (wheel, sequence number, darkening),
-// and `berm` = berm height (crest vertices only). The fade of old segments happens in the shader,
+// `berm` = berm height (crest vertices only) and `tread` = (along, across) on the floor (along in
+// segments, across 0..1; across < 0 off the floor). The fade of old segments happens in the shader,
 // from each wheel's newest sequence number, so old segments never have to be rewritten.
-function createMaterial(heads, segments) {
+// `ruts` (render/rut-map.js): the floor follows the ruts near the car, so the track lies in its rut
+// instead of over it.
+function createMaterial(heads, segments, ruts) {
   const seg = attribute('seg', 'vec3');
   const head = heads.element(int(seg.x));
   const age = head.sub(1).sub(seg.y).div(float(segments));
@@ -34,9 +42,43 @@ function createMaterial(heads, segments) {
     polygonOffsetUnits: -2,
   });
   // Berms sink back into the ground as the track fades.
-  material.positionNode = positionLocal.add(vec3(0, attribute('berm', 'float').mul(fade), 0));
+  let position = positionLocal.add(vec3(0, attribute('berm', 'float').mul(fade), 0));
+  if (ruts) {
+    // Down into the rut (the berms are already lifted above), and 3 cm toward the camera: the
+    // ground near the car is drawn on coarser grids (1 m mesh, 25 cm rock sheet) that cut across
+    // the rut's floor, and the track writes no depth, so it would hide behind their facets.
+    const world = modelWorldMatrix.mul(vec4(positionLocal, 1)).xyz;
+    const down = rutAt(ruts, world.x, world.z).min(0);
+    position = position.add(vec3(0, down, 0)).add(normalize(cameraPosition.sub(world)).mul(0.03));
+  }
+  material.positionNode = position;
   const fadeV = varying(fade);
-  material.colorNode = vec4(attribute('color', 'vec3').mul(float(1).sub(seg.z.mul(fadeV))), 1);
+  const shade = float(1).sub(seg.z.mul(fadeV));
+  if (!RIVER_PBR) {
+    material.colorNode = vec4(attribute('color', 'vec3').mul(shade), 1);
+    return material;
+  }
+  // Dry river, photo look: the ground's soil texture under each track (as detail over the track's
+  // own colour, so it matches the bed's soil pockets and the banks alike), pressed darker, with the
+  // tyre's tread printed in: chevron lugs about 7 cm apart across the middle, square shoulder blocks
+  // at the edges. The print and the darkening fade with the track.
+  const tread = attribute('tread', 'vec2');
+  const along = tread.x.mul(SPACING);
+  const across = tread.y;
+  const middle = abs(across.sub(0.5));
+  const chevron = fract(along.div(0.07).add(middle.mul(1.6)));
+  const shoulder = fract(along.div(0.09).add(0.25));
+  const lugs = mix(smoothstep(0.45, 0.55, chevron), smoothstep(0.4, 0.5, shoulder), smoothstep(0.33, 0.38, middle));
+  const onFloor = smoothstep(-0.05, 0.05, across).mul(fadeV);
+  const print = varying(onFloor).mul(lugs);
+  const texel = soilColor(positionWorld.xz).mul(groundPatches(positionWorld.xz)).div(SOIL_TEXTURE_MEAN);
+  // The berms (loose soil, no darkening) a touch lighter.
+  const loose = float(1).sub(smoothstep(0, 0.02, seg.z)).mul(0.08).add(1);
+  material.colorNode = vec4(attribute('color', 'vec3').mul(texel).mul(shade).mul(print.mul(-0.22).add(1)).mul(loose), 1);
+  // The lugs pressed 1 cm into the floor.
+  const face = normalize(positionWorld.dFdx().cross(positionWorld.dFdy()));
+  const up = face.mul(face.y.sign());
+  material.normalNode = transformNormalToView(bump(up, print.mul(-0.01)));
   return material;
 }
 
@@ -57,7 +99,7 @@ function markRange(attr, start, count) {
 // from the ground deformation. The oldest quarter of each ring fades back into the ground.
 // Only new segments and the settling berms of the newest ones are written and uploaded.
 export class TireTracks {
-  constructor(scene, { wheels = 4, segments = 1500, deformation = null } = {}) {
+  constructor(scene, { wheels = 4, segments = 1500, deformation = null, ruts = null } = {}) {
     this.wheels = wheels;
     this.segments = segments;
     this.deformation = deformation;
@@ -67,6 +109,7 @@ export class TireTracks {
     this.colors = new Float32Array(verts * 3);
     this.seg = new Float32Array(verts * 3);
     this.bermHeights = new Float32Array(verts);
+    this.tread = new Float32Array(verts * 2);
     // Berm crest points per segment: left c0, left c1, right c0, right c1 (x, z).
     this.crests = new Float32Array(total * 8);
     const index = new Uint32Array(total * QUADS * 6);
@@ -86,12 +129,13 @@ export class TireTracks {
       color: new BufferAttribute(this.colors, 3),
       seg: new BufferAttribute(this.seg, 3),
       berm: new BufferAttribute(this.bermHeights, 1),
+      tread: new BufferAttribute(this.tread, 2),
     };
     for (const [name, attr] of Object.entries(this.attrs)) geometry.setAttribute(name, attr);
     geometry.setIndex(new BufferAttribute(index, 1));
     // Newest sequence number + 1 per wheel (the number of segments laid so far).
     this.heads = uniformArray(new Array(wheels).fill(0), 'float');
-    this.mesh = new Mesh(geometry, createMaterial(this.heads, segments));
+    this.mesh = new Mesh(geometry, createMaterial(this.heads, segments, ruts));
     this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
     // Drawn right after the ground (it does not write depth, so the ground must already be there)
@@ -176,6 +220,8 @@ export class TireTracks {
     S[o + 1] = seq;
     S[o + 2] = dark;
     this.bermHeights[v] = 0;
+    this.tread[v * 2] = 0;
+    this.tread[v * 2 + 1] = -1;
   }
 
   writeSegment(q, wheel, seq, dark, l0x, l0z, r0x, r0z, a0x, a0z, y0, l1x, l1z, r1x, r1z, a1x, a1z, y1) {
@@ -198,6 +244,8 @@ export class TireTracks {
     this.vertex(v0 + 1, r0x, h0, r0z, fr, fg, fb, wheel, seq, dark);
     this.vertex(v0 + 2, l1x, h1, l1z, fr, fg, fb, wheel, seq, dark);
     this.vertex(v0 + 3, r1x, h1, r1z, fr, fg, fb, wheel, seq, dark);
+    // The floor's tread coordinates: along (in segments) and across (left 0, right 1).
+    this.tread.set([seq, 0, seq, 1, seq + 1, 0, seq + 1, 1], v0 * 2);
     const cr = this.crests;
     for (let n = 0; n < 2; n++) {
       const side = n === 0 ? -1 : 1;
@@ -230,10 +278,11 @@ export class TireTracks {
       this.vertex(k1 + 2, c1x, h1, c1z, lr, lg, lb, wheel, seq, 0);
       this.vertex(k1 + 3, f1x, h1, f1z, lr, lg, lb, wheel, seq, 0);
     }
-    const { position, color, seg } = this.attrs;
+    const { position, color, seg, tread } = this.attrs;
     markRange(position, v0 * 3, VERTS * 3);
     markRange(color, v0 * 3, VERTS * 3);
     markRange(seg, v0 * 3, VERTS * 3);
+    markRange(tread, v0 * 2, VERTS * 2);
   }
 
   // Berm heights of the newest segments follow the ground deformation until they settle.
@@ -286,6 +335,7 @@ export class TireTracks {
     this.colors.fill(0);
     this.seg.fill(0);
     this.bermHeights.fill(0);
+    this.tread.fill(0);
     for (const attr of Object.values(this.attrs)) {
       attr.clearUpdateRanges();
       attr.needsUpdate = true;

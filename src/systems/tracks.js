@@ -129,6 +129,8 @@ export function updateTracks(world) {
       snowAt: heightAt.snowAt,
       pressureKpa: solver ? GPU_TIRE.pressureKpa : 100,
       hardAt,
+      // The dry river's soil pockets rut a little deeper (about 5 cm at the default softness).
+      ...(heightAt.soilAt ? { maxRut: 0.35 } : {}),
     });
   }
   tracks.update(delta);

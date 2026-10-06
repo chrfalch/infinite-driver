@@ -92,7 +92,8 @@ async function main() {
   const groundSurface = heightAt.snow ? new SnowSurface(render.scene, heightAt, deformation) : new GroundSurface(render.scene, heightAt, deformation);
   groundSurface.onMove = setGroundPatch;
   // The dry river's rock sheet shows the ruts in its soil pockets from the same texture.
-  if (heightAt.rockAt && !heightAt.snow) showRutsOnSheet(groundSurface.deform, groundSurface.origin, PATCH_N, DEFORM_CELL);
+  const ruts = heightAt.snow ? null : { deform: groundSurface.deform, origin: groundSurface.origin, n: PATCH_N, cell: DEFORM_CELL };
+  if (heightAt.rockAt && ruts) showRutsOnSheet(ruts);
 
   // Physics runs in a worker (with its own GPU device) for the GPU tyres when the browser has
   // WebGPU in workers; ?physics=main keeps it on this thread. Other tyre modes stay here.
@@ -131,9 +132,10 @@ async function main() {
   world.add(Deformation({ map: deformation }));
   // Powder snow hangs in the air longer than clumps of soil, and light shines through it.
   world.add(Soil({ particles: new SoilParticles(render.scene, heightAt.snow ? { drag: 3, powder: true } : undefined), carry: [0, 0, 0, 0], spin: [0, 0, 0, 0] }));
+  // The tracks' floor follows the ruts near the car (render/rut-map.js).
   world.add(
     Tracks({
-      renderer: new TireTracks(render.scene, { segments: GROUND.trackLength, deformation }),
+      renderer: new TireTracks(render.scene, { segments: GROUND.trackLength, deformation, ruts }),
       contacts: [null, null, null, null],
     }),
   );

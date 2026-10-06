@@ -302,9 +302,16 @@ function triplanar(set, size, N) {
 const unpack = (tex, uv) => texture(tex, uv).xyz.mul(2).sub(1);
 let rockSet = null;
 const rockTextures = () => (rockSet ??= textureSet('rock'));
+let soilSet = null;
+const soilTextures = () => (soilSet ??= textureSet('soil'));
+// The soil pockets' colour at world `p` (xz): the soil texture projected from above, a tile per
+// 1.6 m, warmed a little (the tyre tracks in the pockets use it too).
+export const soilColor = (p) => texture(soilTextures().color, p.div(1.6)).rgb.mul(vec3(1.08, 1.0, 0.9));
+// Slow patches of tone over the textured bed, so the repeats do not show.
+export const groundPatches = (p) => fbm(p.mul(0.35), 3).mul(0.25).add(0.88);
 
 function pbrLook() {
-  const soilTex = textureSet('soil');
+  const soilTex = soilTextures();
   // Rock: triplanar, one texture tile per 2.5 m.
   const rock = triplanar(rockTextures(), 2.5, N);
   const rockN = rock.normal;
@@ -322,12 +329,12 @@ function pbrLook() {
     return { color: texture(set.color, uv).rgb, arh: texture(set.arh, uv), n: normalize(vec3(tn.x.add(N.x), abs(tn.z).mul(N.y), tn.y.negate().add(N.z))) };
   };
   const dirt = planar(soilTex, 1.6);
-  const patches = fbm(xz.mul(0.35), 3).mul(0.25).add(0.88);
+  const patches = groundPatches(xz);
   // Soil where the soil pockets are (the same depth the tyres go by: soft ground over SOIL_MIN),
   // its edge moved a centimetre either way by the two textures' height maps, so it runs ragged.
   const edge = soil.sub(SOIL_MIN).add(dirt.arh.b.sub(rockArh.b).mul(0.012));
   const soilW = smoothstep(-0.004, 0.004, edge);
-  const color = mix(rockColor, dirt.color.mul(vec3(1.08, 1.0, 0.9)), soilW).mul(patches);
+  const color = mix(rockColor, soilColor(xz), soilW).mul(patches);
   const n = normalize(mix(rockN, dirt.n, soilW));
   const arh = mix(rockArh, dirt.arh, soilW);
   return { color: color.mul(arh.r.mul(0.5).add(0.5)), normal: n, roughness: arh.g };
