@@ -218,7 +218,7 @@ export function createRiverField(seed = 4711) {
       stone = zone * Math.max(0.04, top.h + chip);
       h += stone;
     }
-    return { h, under, stone, stoneId: top.id, rockZone: zone, road: inBed, rut: channel * inBed, dist, rock, bank, cliff: ridge };
+    return { h, under, stone, stoneId: top.id, rockZone: zone, road: inBed, rut: channel * inBed, dist, rock, bank, cliff: ridge, bedY: centre };
   }
 
   const heightAt = (x, z) => sample(x, z).h;
