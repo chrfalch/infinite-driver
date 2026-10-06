@@ -360,13 +360,21 @@ export function forestFloorNormal(n) {
 // multiplies in): the texture divided by its mean colour, so each rock keeps its tint. Their faces
 // stay hard facets (the normal from screen-space derivatives), with the normal map on each face.
 const ROCK_MEAN = hex('#7a5338'); // Rock029's mean colour
-export function rockDetailMaterial({ size, vertexColors = false, roughness = 0.9 }) {
-  const material = new MeshStandardNodeMaterial({ roughness, metalness: 0, vertexColors });
+//
+// `bedMatch`: the rocks' 'bed' attribute (0, or a brightness) makes some of them take the bed rock's
+// colour, so they look broken off it; the others keep their own, paler colours for contrast.
+export const BED_ROCK = '#8f6b4d'; // about how the bed's textured rock looks
+export function rockDetailMaterial({ size, bedMatch = false, roughness = 0.9 }) {
+  const material = new MeshStandardNodeMaterial({ roughness, metalness: 0, vertexColors: !bedMatch });
   const face = normalize(positionWorld.dFdx().cross(positionWorld.dFdy()));
   const toCamera = cameraPosition.sub(positionWorld);
   const n = face.mul(dot(face, toCamera).sign());
   const rock = triplanar(rockTextures(), size, n);
-  material.colorNode = mix(vec3(1), rock.color.div(ROCK_MEAN), 0.85);
+  const detail = mix(vec3(1), rock.color.div(ROCK_MEAN), 0.85);
+  if (bedMatch) {
+    const bed = attribute('bed', 'float');
+    material.colorNode = detail.mul(mix(attribute('color', 'vec3'), hex(BED_ROCK).mul(bed), bed.sign()));
+  } else material.colorNode = detail;
   material.roughnessNode = rock.arh.g;
   material.normalNode = transformNormalToView(rock.normal);
   return material;

@@ -43,7 +43,7 @@ self.onmessage = (e) => {
     const pebbles = generatePebbles(heightAt, cx, cz);
     const transfer = [heights.buffer, ...Object.values(mesh).map((a) => a.buffer)];
     if (sheet) transfer.push(sheet.positions.buffer, sheet.normals.buffer, sheet.colors.buffer, sheet.ground.buffer, sheet.aboveBed.buffer, sheet.indices.buffer);
-    if (rocksMesh) transfer.push(rocksMesh.positions.buffer, rocksMesh.colors.buffer, rocksMesh.normals.buffer);
+    if (rocksMesh) transfer.push(rocksMesh.positions.buffer, rocksMesh.colors.buffer, rocksMesh.normals.buffer, rocksMesh.bed.buffer);
     if (pebbles) transfer.push(pebbles.buffer);
     postMessage({ type: 'chunk', cx, cz, heights, mesh, rocks, rocksMesh, plants, sheet, pebbles }, transfer);
   } catch (error) {
