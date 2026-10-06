@@ -19,6 +19,7 @@ import {
   If,
   abs,
   attribute,
+  cameraPosition,
   dot,
   float,
   floor,
@@ -38,10 +39,14 @@ import {
   vec2,
   vec3,
 } from 'three/tsl';
+import { worldMode } from '../world.js';
 
 const params = new URLSearchParams(globalThis.location?.search ?? '');
 export const GROUND_LOOKS = ['facets', 'sand', 'cobbles', 'mud', 'pbr'];
 export const GROUND_LOOK = GROUND_LOOKS.includes(params.get('ground')) ? params.get('ground') : 'facets';
+// The photo look on the dry river: the ground outside the bed and the loose rocks get textures too.
+// Fixed for the page load (false in the workers, which do not draw), so other worlds pay nothing.
+export const RIVER_PBR = GROUND_LOOK === 'pbr' && worldMode() === 'river';
 
 // ---- Noise (all on world xz in metres) -------------------------------------------------------
 
@@ -272,12 +277,11 @@ function textureSet(name) {
   return { color: load(`${name}-color`, true), normal: load(`${name}-normal`, false), arh: load(`${name}-arh`, false) };
 }
 
-function pbrLook() {
-  const rockTex = textureSet('rock');
-  const sandTex = textureSet('sand');
-  // Rock: triplanar, one texture tile per 2.5 m, the three projections blended by the normal, the
-  // normal maps by Golus's whiteout blend.
-  const p = positionWorld.div(2.5);
+// A texture set mapped from three sides (triplanar), one tile per `size` m, on a surface with world
+// normal `N`: the three projections blended by the normal, the normal maps by Golus's whiteout
+// blend. Returns the colour, the 'arh' texel and the normal.
+function triplanar(set, size, N) {
+  const p = positionWorld.div(size);
   const w0 = pow(abs(N), vec3(4));
   const w = w0.div(w0.x.add(w0.y).add(w0.z));
   const s = N.sign();
@@ -285,18 +289,28 @@ function pbrLook() {
   const uvY = vec2(p.x.mul(s.y), p.z);
   const uvZ = vec2(p.x.mul(s.z.negate()), p.y);
   const tri = (tex) => texture(tex, uvX).mul(w.x).add(texture(tex, uvY).mul(w.y)).add(texture(tex, uvZ).mul(w.z));
-  const unpack = (tex, uv) => texture(tex, uv).xyz.mul(2).sub(1);
-  const tnX = unpack(rockTex.normal, uvX).mul(vec3(s.x, 1, 1));
-  const tnY = unpack(rockTex.normal, uvY).mul(vec3(s.y, 1, 1));
-  const tnZ = unpack(rockTex.normal, uvZ).mul(vec3(s.z.negate(), 1, 1));
+  const tnX = unpack(set.normal, uvX).mul(vec3(s.x, 1, 1));
+  const tnY = unpack(set.normal, uvY).mul(vec3(s.y, 1, 1));
+  const tnZ = unpack(set.normal, uvZ).mul(vec3(s.z.negate(), 1, 1));
   const nX = vec3(tnX.xy.add(N.zy), abs(tnX.z).mul(N.x));
   const nY = vec3(tnY.xy.add(N.xz), abs(tnY.z).mul(N.y));
   const nZ = vec3(tnZ.xy.add(N.xy), abs(tnZ.z).mul(N.z));
-  const rockN = normalize(nX.zyx.mul(w.x).add(nY.xzy.mul(w.y)).add(nZ.mul(w.z)));
-  const rockArh = tri(rockTex.arh);
+  const normal = normalize(nX.zyx.mul(w.x).add(nY.xzy.mul(w.y)).add(nZ.mul(w.z)));
+  return { color: tri(set.color).rgb, arh: set.arh ? tri(set.arh) : null, normal };
+}
+const unpack = (tex, uv) => texture(tex, uv).xyz.mul(2).sub(1);
+let rockSet = null;
+const rockTextures = () => (rockSet ??= textureSet('rock'));
+
+function pbrLook() {
+  const sandTex = textureSet('sand');
+  // Rock: triplanar, one texture tile per 2.5 m.
+  const rock = triplanar(rockTextures(), 2.5, N);
+  const rockN = rock.normal;
+  const rockArh = rock.arh;
   // The texture's orange sandstone, nudged toward each boulder's own tone (yellower, varied).
   const toneShift = tone.div(max(grey(tone).x, 0.05)).mul(0.5).add(0.5);
-  const rockTexColor = tri(rockTex.color).rgb;
+  const rockTexColor = rock.color;
   const rockColor = mix(grey(rockTexColor).mul(tone).mul(2.7), rockTexColor.mul(toneShift).mul(vec3(1.0, 1.08, 1.0)), 0.3);
 
   // Sand: projected straight down, a tile per 1.6 m, with slow patches of
@@ -316,6 +330,46 @@ function pbrLook() {
   const n = normalize(mix(rockN, sand.n, sandW));
   const arh = mix(rockArh, sand.arh, sandW);
   return { color: color.mul(arh.r.mul(0.5).add(0.5)), normal: n, roughness: arh.g };
+}
+
+// Cheap detail for the ground outside the bed (the terrain mesh and the ground patch near the car,
+// both shaded by render/terrain-mesh.js groundShading): one forest-floor texture (ambientCG
+// Ground078: soil, leaf litter, bark) projected from above. Its colour, divided by its own mean
+// colour, scales the vertex colour, so the world's palette (litter, bank sand, soil) stays and the
+// texture only adds the small-scale detail. Two scales (2.5 m, and 6.1 m turned) are averaged so
+// the tile does not repeat visibly. Three texture reads per pixel.
+const FOREST_MEAN = hex('#977248'); // the texture's mean colour
+let forest = null;
+const forestSet = () => (forest ??= { color: load('forest-color', true), normal: load('forest-normal', false) });
+export function forestFloorColor(color, steep) {
+  const set = forestSet();
+  const uvA = xz.div(2.5);
+  const uvB = vec2(xz.x.mul(0.8).sub(xz.y.mul(0.6)), xz.x.mul(0.6).add(xz.y.mul(0.8))).div(6.1);
+  const ratio = texture(set.color, uvA).rgb.add(texture(set.color, uvB).rgb).mul(0.5).div(FOREST_MEAN);
+  // Not on steep faces (they show rock strata there).
+  return color.mul(mix(vec3(1), ratio, steep.oneMinus().mul(0.85)));
+}
+// The world normal `n` with the texture's normal map (at the 2.5 m scale) blended in.
+export function forestFloorNormal(n) {
+  const tn = texture(forestSet().normal, xz.div(2.5)).xyz.mul(2).sub(1);
+  return normalize(vec3(tn.x.add(n.x), abs(tn.z).mul(n.y), tn.y.negate().add(n.z)));
+}
+
+// The loose rocks and pebbles with the photo look: the same sandstone texture from three sides, one
+// tile per `size` m, as detail over their own colours (vertex or instance colour, which three
+// multiplies in): the texture divided by its mean colour, so each rock keeps its tint. Their faces
+// stay hard facets (the normal from screen-space derivatives), with the normal map on each face.
+const ROCK_MEAN = hex('#7a5338'); // Rock029's mean colour
+export function rockDetailMaterial({ size, vertexColors = false, roughness = 0.9 }) {
+  const material = new MeshStandardNodeMaterial({ roughness, metalness: 0, vertexColors });
+  const face = normalize(positionWorld.dFdx().cross(positionWorld.dFdy()));
+  const toCamera = cameraPosition.sub(positionWorld);
+  const n = face.mul(dot(face, toCamera).sign());
+  const rock = triplanar(rockTextures(), size, n);
+  material.colorNode = mix(vec3(1), rock.color.div(ROCK_MEAN), 0.85);
+  material.roughnessNode = rock.arh.g;
+  material.normalNode = transformNormalToView(rock.normal);
+  return material;
 }
 
 // The rock sheet's material for a look (null for the default, flat-shaded one).

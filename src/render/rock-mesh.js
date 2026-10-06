@@ -1,6 +1,10 @@
 import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardMaterial } from 'three/webgpu';
+import { RIVER_PBR, rockDetailMaterial } from './river-ground.js';
 
-export const rockMaterial = new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
+// With the dry river's photo look (?ground=pbr), sandstone texture detail over each rock's colour.
+export const rockMaterial = RIVER_PBR
+  ? rockDetailMaterial({ size: 1.2, vertexColors: true })
+  : new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true });
 
 const LIGHT = new Color('#a39a8c');
 const DARK = new Color('#6f675d');

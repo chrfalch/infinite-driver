@@ -10,7 +10,7 @@
 // each vertex's deformation, faded out toward the edge. The patch follows the car in whole metres.
 import { DataTexture, FloatType, Mesh, MeshStandardNodeMaterial, NearestFilter, RGBAFormat, RedFormat } from 'three/webgpu';
 import { Fn, ivec2, mix, normalize, positionLocal, step, textureLoad, transformNormalToView, uniform, varying, vec2, vec3 } from 'three/tsl';
-import { groundMeshData, groundShading } from './terrain-mesh.js';
+import { groundMeshData, groundNormal, groundShading } from './terrain-mesh.js';
 import { patchGeometry } from './snow-surface.js';
 import { DEFORM_CELL } from '../terrain/deformation.js';
 
@@ -81,7 +81,7 @@ function groundMaterial(corners, deform, origin) {
     const sz = base.z.negate().div(base.y).add(def(0, 1).sub(def(0, -1)).div(2 * CELL));
     return normalize(vec3(sx.negate(), 1, sz.negate()));
   })();
-  material.normalNode = transformNormalToView(normalize(varying(normal)));
+  material.normalNode = transformNormalToView(groundNormal(normalize(varying(normal))));
   const shading = groundShading({
     color: varying(a.xyz),
     gravel: varying(a.w),

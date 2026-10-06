@@ -2,9 +2,11 @@
 // icosahedron per pebble, the same shape as the stones the tyres throw (render/soil-particles.js).
 import { Color, IcosahedronGeometry, InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from 'three/webgpu';
 import { PEBBLE_STRIDE } from '../terrain/rocks.js';
+import { RIVER_PBR, rockDetailMaterial } from './river-ground.js';
 
 const geometry = new IcosahedronGeometry(1, 0);
-const material = new MeshStandardMaterial({ roughness: 1, metalness: 0, flatShading: true });
+// With the photo look (?ground=pbr), sandstone texture detail at a finer scale (pebbles are small).
+const material = RIVER_PBR ? rockDetailMaterial({ size: 0.4, roughness: 1 }) : new MeshStandardMaterial({ roughness: 1, metalness: 0, flatShading: true });
 const LIGHT = new Color('#d6c29a');
 const DARK = new Color('#7d6c52');
 const GREY = new Color('#9c978d');
