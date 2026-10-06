@@ -7,6 +7,10 @@ Answer: **yes, and mostly in the shader.** The shape of the bed is already good.
 artificial is the shading: hard 25 cm facets, one flat colour per boulder, and no loose material.
 Four prototype looks are in `src/render/river-ground.js`. Select one with `?ground=<look>`.
 
+**Status:** D (`pbr`) is now the default on the dry river (`?ground=facets` shows the old look), with
+firm soil pockets in the bed that take ruts, and textured tyre tracks with a tread print in every
+world. The sections below are the original research.
+
 ## Today
 
 The bed is one rock sheet (`terrain/rock-sheet.js`): a 25 cm jittered grid, flat-shaded, with one

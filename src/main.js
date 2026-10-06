@@ -38,7 +38,7 @@ import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
 import { worldMode } from './world.js';
 import { setGroundPatch, setTerrainWorld } from './render/terrain-mesh.js';
-import { SnowSurface } from './render/snow-surface.js';
+import { SNOW_PATCH_N, SnowSurface } from './render/snow-surface.js';
 import { GroundSurface, PATCH_N } from './render/ground-surface.js';
 import { showRutsOnSheet } from './render/rock-surface.js';
 import { DEFORM_CELL } from './terrain/deformation.js';
@@ -92,8 +92,10 @@ async function main() {
   const groundSurface = heightAt.snow ? new SnowSurface(render.scene, heightAt, deformation) : new GroundSurface(render.scene, heightAt, deformation);
   groundSurface.onMove = setGroundPatch;
   // The dry river's rock sheet shows the ruts in its soil pockets from the same texture.
-  const ruts = heightAt.snow ? null : { deform: groundSurface.deform, origin: groundSurface.origin, n: PATCH_N, cell: DEFORM_CELL };
-  if (heightAt.rockAt && ruts) showRutsOnSheet(ruts);
+  const ruts = heightAt.snow
+    ? { deform: groundSurface.texture, origin: groundSurface.origin, n: SNOW_PATCH_N, cell: DEFORM_CELL, absolute: true }
+    : { deform: groundSurface.deform, origin: groundSurface.origin, n: PATCH_N, cell: DEFORM_CELL };
+  if (heightAt.rockAt) showRutsOnSheet(ruts);
 
   // Physics runs in a worker (with its own GPU device) for the GPU tyres when the browser has
   // WebGPU in workers; ?physics=main keeps it on this thread. Other tyre modes stay here.
@@ -135,7 +137,7 @@ async function main() {
   // The tracks' floor follows the ruts near the car (render/rut-map.js).
   world.add(
     Tracks({
-      renderer: new TireTracks(render.scene, { segments: GROUND.trackLength, deformation, ruts }),
+      renderer: new TireTracks(render.scene, { segments: GROUND.trackLength, deformation, ruts, snow: !!heightAt.snow }),
       contacts: [null, null, null, null],
     }),
   );

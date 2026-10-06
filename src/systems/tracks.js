@@ -41,9 +41,10 @@ export function updateTracks(world) {
   const tracks = trackState.renderer;
   if (!tracks) return;
   trackState.contacts.fill(null);
-  // On snow the ruts are drawn by the snow surface itself (render/snow-surface.js).
+  // On snow the ruts themselves are the snow surface's (render/snow-surface.js); the track over
+  // them is the packed snow with the tread print.
   const snow = currentSnow();
-  tracks.mesh.visible = GROUND.tracks && !snow;
+  tracks.mesh.visible = GROUND.tracks;
   const car = world.queryFirst(IsPlayer, Vehicle);
   if (!car) return;
   const { heightAt, surfaceAt } = world.get(HeightField);
@@ -116,7 +117,7 @@ export function updateTracks(world) {
     }
     // Deeper sinking and softer soil leave darker tracks.
     const strength = Math.min(1, 0.25 + contact.depth * 5 + softness * 0.5);
-    if (GROUND.tracks && !snow) tracks.add(i, heightAt, contact, right, width, strength, maxGap);
+    if (GROUND.tracks) tracks.add(i, heightAt, contact, right, width, strength, maxGap);
   }
   const soilPressed = hardAt ? pressed.filter((p) => !hardAt(p.x, p.z)) : pressed;
   if (deformation && soilPressed.length) {

@@ -1,11 +1,11 @@
 // Prototype ground looks for the dry river's rock sheet, picked with ?ground=<look>:
 //
-//   facets  (default) the flat-shaded, vertex-coloured sheet as before (render/rock-surface.js)
+//   facets  the flat-shaded, vertex-coloured sheet as before (render/rock-surface.js)
 //   sand    weathered sandstone, smooth-shaded with a fine chipped relief, wind-blown sand in the hollows
 //   cobbles water-polished bedrock, with packed, rounded river cobbles and gravel in the low ground
 //   mud     cracked, curled silt in the low channel and hollows; the rock below the high-water line
 //           stained darker, with dark streaks of desert varnish down steep faces
-//   pbr     photo-scanned CC0 textures (ambientCG: sandstone, sand), triplanar on the rock,
+//   pbr     (default) photo-scanned CC0 textures (ambientCG: sandstone, sand), triplanar on the rock,
 //           height-blended into sand by the same masks
 //
 // All are per pixel on the sheet's own 25 cm mesh: no change to its shape, so the tyres and the
@@ -13,7 +13,7 @@
 // (terrain/rock-sheet.js): 'ground' = (soil, rut, lift, dist) and 'aboveBed'. The relief is a bump
 // (Mikkelsen's surface gradient from screen-space derivatives of a height in metres), so it only
 // shades; the silhouettes stay the mesh's.
-import { Color, MeshStandardNodeMaterial, RepeatWrapping, SRGBColorSpace, TextureLoader } from 'three/webgpu';
+import { Color, MeshStandardNodeMaterial, RepeatWrapping, SRGBColorSpace, Texture, TextureLoader } from 'three/webgpu';
 import {
   Fn,
   If,
@@ -44,7 +44,8 @@ import { SOIL_MIN } from '../terrain/riverbed.js';
 
 const params = new URLSearchParams(globalThis.location?.search ?? '');
 export const GROUND_LOOKS = ['facets', 'sand', 'cobbles', 'mud', 'pbr'];
-export const GROUND_LOOK = GROUND_LOOKS.includes(params.get('ground')) ? params.get('ground') : 'facets';
+// The photo look is the default; ?ground=facets shows the old flat-shaded sheet.
+export const GROUND_LOOK = GROUND_LOOKS.includes(params.get('ground')) ? params.get('ground') : 'pbr';
 // The photo look on the dry river: the ground outside the bed and the loose rocks get textures too.
 // Fixed for the page load (false in the workers, which do not draw), so other worlds pay nothing.
 export const RIVER_PBR = GROUND_LOOK === 'pbr' && worldMode() === 'river';
@@ -267,7 +268,8 @@ function mudLook() {
 
 const loader = new TextureLoader();
 function load(name, srgb) {
-  const t = loader.load(`${import.meta.env?.BASE_URL ?? '/'}textures/river/${name}.jpg`);
+  // No page (unit tests, workers): an empty texture, so materials still build.
+  const t = typeof document === 'undefined' ? new Texture() : loader.load(`${import.meta.env?.BASE_URL ?? '/'}textures/river/${name}.jpg`);
   t.wrapS = t.wrapT = RepeatWrapping;
   t.anisotropy = 8;
   if (srgb) t.colorSpace = SRGBColorSpace;
@@ -306,7 +308,9 @@ let soilSet = null;
 const soilTextures = () => (soilSet ??= textureSet('soil'));
 // The soil pockets' colour at world `p` (xz): the soil texture projected from above, a tile per
 // 1.6 m, warmed a little (the tyre tracks in the pockets use it too).
-export const soilColor = (p) => texture(soilTextures().color, p.div(1.6)).rgb.mul(vec3(1.08, 1.0, 0.9));
+let soilColorMap = null;
+// (Only the colour map: the tyre tracks in every world use it, without the rest of the set.)
+export const soilColor = (p) => texture((soilColorMap ??= soilSet?.color ?? load('soil-color', true)), p.div(1.6)).rgb.mul(vec3(1.08, 1.0, 0.9));
 // Slow patches of tone over the textured bed, so the repeats do not show.
 export const groundPatches = (p) => fbm(p.mul(0.35), 3).mul(0.25).add(0.88);
 

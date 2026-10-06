@@ -22,15 +22,15 @@ const SOIL_TEXTURE_MEAN = vec3(0.225, 0.156, 0.082);
 // `berm` = berm height (crest vertices only) and `tread` = (along, across) on the floor (along in
 // segments, across 0..1; across < 0 off the floor). The fade of old segments happens in the shader,
 // from each wheel's newest sequence number, so old segments never have to be rewritten.
-// `ruts` (render/rut-map.js): the floor follows the ruts near the car, so the track lies in its rut
-// instead of over it.
-function createMaterial(heads, segments, ruts) {
+// `ruts` (render/rut-map.js): the track lies in its rut instead of over it. On snow (`snow`) the
+// track is packed snow: a little greyer than the snow around, with no soil texture.
+function createMaterial(heads, segments, ruts, snow) {
   const seg = attribute('seg', 'vec3');
   const head = heads.element(int(seg.x));
   const age = head.sub(1).sub(seg.y).div(float(segments));
   const fade = clamp(float(1).sub(age.sub(FADE_START).div(1 - FADE_START)), 0, 1);
   const material = new MeshStandardNodeMaterial({
-    roughness: 1,
+    roughness: snow ? 0.6 : 1,
     metalness: 0,
     // Winding depends on the direction of travel, so draw both faces.
     side: DoubleSide,
@@ -44,24 +44,20 @@ function createMaterial(heads, segments, ruts) {
   // Berms sink back into the ground as the track fades.
   let position = positionLocal.add(vec3(0, attribute('berm', 'float').mul(fade), 0));
   if (ruts) {
-    // Down into the rut (the berms are already lifted above), and 3 cm toward the camera: the
-    // ground near the car is drawn on coarser grids (1 m mesh, 25 cm rock sheet) that cut across
-    // the rut's floor, and the track writes no depth, so it would hide behind their facets.
+    // Down into the rut (on snow: onto the snow surface, ruts and berms and all), and 3 cm toward
+    // the camera: the ground near the car is drawn on its own grids (1 m mesh, 25 cm rock sheet,
+    // 12.5 cm patches), whose facets cut across the rut's floor, and the track writes no depth, so
+    // it would hide behind them.
     const world = modelWorldMatrix.mul(vec4(positionLocal, 1)).xyz;
-    const down = rutAt(ruts, world.x, world.z).min(0);
-    position = position.add(vec3(0, down, 0)).add(normalize(cameraPosition.sub(world)).mul(0.03));
+    position = ruts.absolute
+      ? vec3(positionLocal.x, rutAt(ruts, world.x, world.z, positionLocal.y).add(LIFT), positionLocal.z)
+      : position.add(vec3(0, rutAt(ruts, world.x, world.z).min(0), 0));
+    position = position.add(normalize(cameraPosition.sub(world)).mul(0.03));
   }
   material.positionNode = position;
   const fadeV = varying(fade);
-  const shade = float(1).sub(seg.z.mul(fadeV));
-  if (!RIVER_PBR) {
-    material.colorNode = vec4(attribute('color', 'vec3').mul(shade), 1);
-    return material;
-  }
-  // Dry river, photo look: the ground's soil texture under each track (as detail over the track's
-  // own colour, so it matches the bed's soil pockets and the banks alike), pressed darker, with the
-  // tyre's tread printed in: chevron lugs about 7 cm apart across the middle, square shoulder blocks
-  // at the edges. The print and the darkening fade with the track.
+  // The tyre's tread printed in the floor: chevron lugs about 7 cm apart across the middle, square
+  // shoulder blocks at the edges; the print fades with the track.
   const tread = attribute('tread', 'vec2');
   const along = tread.x.mul(SPACING);
   const across = tread.y;
@@ -71,10 +67,13 @@ function createMaterial(heads, segments, ruts) {
   const lugs = mix(smoothstep(0.45, 0.55, chevron), smoothstep(0.4, 0.5, shoulder), smoothstep(0.33, 0.38, middle));
   const onFloor = smoothstep(-0.05, 0.05, across).mul(fadeV);
   const print = varying(onFloor).mul(lugs);
-  const texel = soilColor(positionWorld.xz).mul(groundPatches(positionWorld.xz)).div(SOIL_TEXTURE_MEAN);
-  // The berms (loose soil, no darkening) a touch lighter.
-  const loose = float(1).sub(smoothstep(0, 0.02, seg.z)).mul(0.08).add(1);
-  material.colorNode = vec4(attribute('color', 'vec3').mul(texel).mul(shade).mul(print.mul(-0.22).add(1)).mul(loose), 1);
+  // Soil: pressed darker, with the soil texture as detail over the track's own colour (on the dry
+  // river's photo look with the bed's slow tone patches, so it matches the soil pockets). Snow:
+  // packed, only a little greyer. The berms (loose, no darkening) a touch lighter.
+  const shade = float(1).sub(seg.z.mul(fadeV).mul(snow ? 0.35 : 1));
+  const texel = snow ? vec3(1) : soilColor(positionWorld.xz).mul(RIVER_PBR ? groundPatches(positionWorld.xz) : 1).div(SOIL_TEXTURE_MEAN);
+  const loose = snow ? float(1) : float(1).sub(smoothstep(0, 0.02, seg.z)).mul(0.08).add(1);
+  material.colorNode = vec4(attribute('color', 'vec3').mul(texel).mul(shade).mul(print.mul(snow ? -0.12 : -0.22).add(1)).mul(loose), 1);
   // The lugs pressed 1 cm into the floor.
   const face = normalize(positionWorld.dFdx().cross(positionWorld.dFdy()));
   const up = face.mul(face.y.sign());
@@ -99,7 +98,7 @@ function markRange(attr, start, count) {
 // from the ground deformation. The oldest quarter of each ring fades back into the ground.
 // Only new segments and the settling berms of the newest ones are written and uploaded.
 export class TireTracks {
-  constructor(scene, { wheels = 4, segments = 1500, deformation = null, ruts = null } = {}) {
+  constructor(scene, { wheels = 4, segments = 1500, deformation = null, ruts = null, snow = false } = {}) {
     this.wheels = wheels;
     this.segments = segments;
     this.deformation = deformation;
@@ -135,7 +134,7 @@ export class TireTracks {
     geometry.setIndex(new BufferAttribute(index, 1));
     // Newest sequence number + 1 per wheel (the number of segments laid so far).
     this.heads = uniformArray(new Array(wheels).fill(0), 'float');
-    this.mesh = new Mesh(geometry, createMaterial(this.heads, segments, ruts));
+    this.mesh = new Mesh(geometry, createMaterial(this.heads, segments, ruts, snow));
     this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
     // Drawn right after the ground (it does not write depth, so the ground must already be there)
