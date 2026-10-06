@@ -76,14 +76,14 @@ Screens: `docs/research/river-ground/` (`*-low.jpg`: low camera, `*-close.jpg`: 
 
 ### D. Photo-scanned textures (`ground=pbr`)
 
-- CC0 textures from ambientCG: Rock029 (sandstone), Ground054 (sand), Ground022 (river gravel),
-  1K, colour + normal + one packed image (AO, roughness, height). `public/textures/river/`.
-- Rock: triplanar, one tile per 2.5 m, normals by the whiteout blend. Sand and gravel: projected
-  from above. Height blend: each texture's height map decides where the layer edge runs.
+- CC0 textures from ambientCG: Rock029 (sandstone), Ground054 (sand), 1K, colour + normal + one packed image (AO, roughness, height). `public/textures/river/`.
+- Rock: triplanar, one tile per 2.5 m, normals by the whiteout blend. Sand: projected from above. Height blend: each texture's height map decides where the layer edge runs.
 - Good: the most real detail per pixel, for the least shader work. Real roughness and AO.
+- The first version also had a gravel strip down the low channel. It read as a road, so it is
+  removed.
 - Weak: the scanned rock is browner than the world's yellow sandstone (now tinted by each
   boulder's colour; needs a better-matched texture or a colour grade). Repeats can show on large
-  flat areas. 5.8 MB of JPG as it is now.
+  flat areas. 3.7 MB of JPG as it is now.
 
 ## Cost
 
@@ -96,7 +96,7 @@ renderer. Estimates from the shader code:
 | sand | ~25 value-noise lookups, 2 Voronoi (9 cells each) | too heavy for phones at full screen |
 | cobbles | ~15 noise, 4 Voronoi | heavy |
 | mud | ~18 noise, 4 Voronoi | heavy |
-| pbr | 15 texture reads, ~6 noise | normal for a terrain shader |
+| pbr | 12 texture reads, ~6 noise | normal for a terrain shader |
 
 Detail fades out where it is smaller than a few pixels (`detail()`), so far ground does not
 shimmer. Textures use mipmaps and 8× anisotropic filtering.
@@ -107,18 +107,19 @@ Use **D (textures) as the base**, and keep three cheap procedural parts from the
 
 1. The masks (`fill`, `rut`, `lift`, `aboveBed`) and the height blend. They place each layer.
 2. The high-water line from C (one value, no noise needed).
-3. Mud cracks from C, only in the narrow centre of the channel.
+3. Maybe mud cracks from C in a few hollows. Not as a strip down the channel: a continuous
+   strip reads as a road (as the gravel strip did).
 
 Procedural noise everywhere (A–C) looks good but costs too much per pixel for the iPhone. Textures
 give more detail for less work.
 
 ## Work plan
 
-1. **Textures.** Find (or make) a yellow sandstone, a sand, a gravel and a silt texture. Encode as
+1. **Textures.** Find (or make) a yellower sandstone and a sand texture. Encode as
    KTX2 (Basis) in one texture array: smaller download, compressed in GPU memory.
 2. **Rock mapping.** Change triplanar (3 projections) to biplanar (2 projections, Quilez): 6 rock
    reads instead of 9. Add anti-tiling (two scales mixed by noise, or hex tiling) on sand.
-3. **Narrow the masks.** A channel mask ~1 m wide for gravel/mud. Sand only in hollows.
+3. **Tune the sand mask.** Sand only in hollows and creases, no continuous strips.
 4. **Same material everywhere near the bed.** The terrain mesh (banks, forest floor), the ground
    patch near the car (`render/ground-surface.js`) and the loose rocks and pebbles must use the
    same textures. Now the sheet edge at `ROCK_REACH` shows a clear change of look.

@@ -5,8 +5,8 @@
 //   cobbles water-polished bedrock, with packed, rounded river cobbles and gravel in the low ground
 //   mud     cracked, curled silt in the low channel and hollows; the rock below the high-water line
 //           stained darker, with dark streaks of desert varnish down steep faces
-//   pbr     photo-scanned CC0 textures (ambientCG: sandstone, sand, river gravel), triplanar on the
-//           rock, height-blended into sand and gravel by the same masks
+//   pbr     photo-scanned CC0 textures (ambientCG: sandstone, sand), triplanar on the rock,
+//           height-blended into sand by the same masks
 //
 // All are per pixel on the sheet's own 25 cm mesh: no change to its shape, so the tyres and the
 // colliders feel the same ground. The masks come from per-vertex values the chunk worker adds
@@ -275,7 +275,6 @@ function textureSet(name) {
 function pbrLook() {
   const rockTex = textureSet('rock');
   const sandTex = textureSet('sand');
-  const gravelTex = textureSet('gravel');
   // Rock: triplanar, one texture tile per 2.5 m, the three projections blended by the normal, the
   // normal maps by Golus's whiteout blend.
   const p = positionWorld.div(2.5);
@@ -300,7 +299,7 @@ function pbrLook() {
   const rockTexColor = tri(rockTex.color).rgb;
   const rockColor = mix(grey(rockTexColor).mul(tone).mul(2.7), rockTexColor.mul(toneShift).mul(vec3(1.0, 1.08, 1.0)), 0.3);
 
-  // Sand and gravel: projected straight down, a tile per 1.6 m and 1.2 m, with slow patches of
+  // Sand: projected straight down, a tile per 1.6 m, with slow patches of
   // tone so the repeats do not show.
   const planar = (set, size) => {
     const uv = xz.div(size);
@@ -308,19 +307,14 @@ function pbrLook() {
     return { color: texture(set.color, uv).rgb, arh: texture(set.arh, uv), n: normalize(vec3(tn.x.add(N.x), abs(tn.z).mul(N.y), tn.y.negate().add(N.z))) };
   };
   const sand = planar(sandTex, 1.6);
-  const gravel = planar(gravelTex, 1.2);
   const patches = fbm(xz.mul(0.35), 3).mul(0.25).add(0.88);
   // Height blend: each layer's own height map (arh.b) decides which shows near the edge of its mask.
   const sandAmt = settle(0.3);
-  const gravelAmt = smoothstep(0.25, 0.6, rut).mul(smoothstep(0.7, 0.9, N.y));
   const hRock = rockArh.b.mul(0.5);
   const sandW = smoothstep(0.02, 0.12, sandAmt.mul(1.2).add(sand.arh.b.mul(0.5)).sub(hRock).sub(0.35));
-  const gravelW = smoothstep(0.02, 0.12, gravelAmt.mul(1.2).add(gravel.arh.b.mul(0.5)).sub(hRock).sub(0.3));
-  let color = mix(rockColor, sand.color.mul(vec3(1.02, 0.98, 0.9)), sandW);
-  color = mix(color, gravel.color.mul(vec3(1.08, 0.97, 0.8)), gravelW).mul(patches);
-  let n = normalize(mix(rockN, sand.n, sandW));
-  n = normalize(mix(n, gravel.n, gravelW));
-  const arh = mix(mix(rockArh, sand.arh, sandW), gravel.arh, gravelW);
+  const color = mix(rockColor, sand.color.mul(vec3(1.02, 0.98, 0.9)), sandW).mul(patches);
+  const n = normalize(mix(rockN, sand.n, sandW));
+  const arh = mix(rockArh, sand.arh, sandW);
   return { color: color.mul(arh.r.mul(0.5).add(0.5)), normal: n, roughness: arh.g };
 }
 
