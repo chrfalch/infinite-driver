@@ -44,6 +44,7 @@ import { showRutsOnSheet } from './render/rock-surface.js';
 import { DEFORM_CELL } from './terrain/deformation.js';
 import { applyPendingCarAction, footprint, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
+import { loadPanelOpen, panelStartsOpen, savePanelOpen } from './tuning/panel-state.js';
 import { updateInstanceBatchers } from './render/instance-batcher.js';
 import { createPhysicsClient, workerGpuSupported } from './physics/client.js';
 import { ROCK_COUNT, startChunkWorker } from './systems/terrain.js';
@@ -151,8 +152,11 @@ async function main() {
   });
   const panel = createTuningPanel(world, { heightAt });
   const touch = createTouchControls({ onRespawn: () => requestRespawn(world, heightAt), onCamera: () => toggleFollowCamera() });
-  // Small screens start with the panel folded so the road stays visible.
-  if (window.innerWidth < 700 || touch.isVisible()) panel.close();
+  // The panel opens as the player last left it (small screens start folded the first time).
+  if (!panelStartsOpen(loadPanelOpen(), window.innerWidth < 700 || touch.isVisible())) panel.close();
+  panel.onOpenClose((changed) => {
+    if (changed === panel) savePanelOpen(!panel._closed);
+  });
 
   // The chunk worker first, so the initial load can hand it the rock sheets (dry river).
   startChunkWorker({ mode });
