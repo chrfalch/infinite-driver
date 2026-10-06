@@ -72,7 +72,7 @@ Screens: `docs/research/river-ground/` (`*-low.jpg`: low camera, `*-close.jpg`: 
 - Rock below ~55 cm over the bed floor is darker and greyer (the last flood), with a ragged edge.
   Dark streaks of desert varnish run down steep faces.
 - Good: the water line is very cheap (one value per vertex) and tells the story of the river.
-- Weak: the channel mask is wide (± 2 m), so mud covers much of the bed.
+- Weak: the channel mask is wide (about ± 1.3 m), so mud covers much of the bed.
 
 ### D. Photo-scanned textures (`ground=pbr`)
 
