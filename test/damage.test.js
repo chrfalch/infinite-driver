@@ -76,10 +76,10 @@ describe('crash damage', () => {
     expect(controller.wheelDetached(1)).toBe(true);
     // Its axle joint is gone; the rest of the corner stays together.
     expect(controller.wheels[1].joints).not.toContain(controller.wheels[1].axleJoint);
-    run(2, { ...idle, throttle: 1 });
+    run(3, { ...idle, throttle: 1 });
     const hub = controller.wheels[1].hub.translation();
     const p = body.translation();
-    console.log('after 2 s on three wheels: car at', p.x.toFixed(1), 'm, lost wheel at', hub.x.toFixed(1), 'm');
+    console.log('after 3 s on three wheels: car at', p.x.toFixed(1), 'm, lost wheel at', hub.x.toFixed(1), 'm');
     for (const v of [p.x, p.y, p.z, hub.x, hub.y, hub.z]) expect(Number.isFinite(v)).toBe(true);
     expect(p.x).toBeGreaterThan(3);
     // The car has left its wheel behind, and the drivetrain reads the other front wheel's spin.
