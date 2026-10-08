@@ -30,8 +30,10 @@ export const DEFAULT_DRIVETRAIN = Object.freeze({
   coastStop: 1,
   gears: [4.4, 2.6, 1.65, 1.18, 0.88],
   reverse: 4.0,
-  finalDrive: 5.1,
-  lowRange: 2.7,
+  // Overall low 4th is about 12 (a Hilux is about 10): it climbs about 30° on torque, so the
+  // steepest, rockiest ground wants low 2nd or 1st. Low 1st is about 45.
+  finalDrive: 4.1,
+  lowRange: 2.5,
   efficiency: 0.9,
   clutchTorque: 700, // N·m the clutch can carry fully engaged
   shiftTime: 0.35, // s with the clutch open during a shift
@@ -241,8 +243,9 @@ export class Drivetrain {
     // Fuel is cut over the last 100 rpm to the limiter and 100 past it (a hard cut made the drive
     // torque switch on and off every step at the limiter).
     drive *= Math.min(1, Math.max(0, (p.limiterRpm + 100 - rpmNow) / 200));
-    // Idle governor keeps the engine running.
-    if (rpmNow < p.idleRpm) drive = Math.max(drive, (p.idleRpm - rpmNow) * 0.8 + frictionTorque(p, rpmNow));
+    // Idle governor keeps the engine running, with no more than the full-load curve (uncapped it
+    // gave up to about 550 N·m when the engine was lugged below idle, far past the curve's peak).
+    if (rpmNow < p.idleRpm) drive = Math.max(drive, Math.min(engineTorque(p, rpmNow), (p.idleRpm - rpmNow) * 0.8 + frictionTorque(p, rpmNow)));
     // During a shift the engine is blipped (or held back) to the speed the new gear will need, so
     // the clutch engages without a jolt.
     let matching = false;
@@ -303,7 +306,7 @@ export class Drivetrain {
     }
 
     // Locked, the engine's flywheel turns with the wheels: through the gears it weighs its inertia
-    // times the ratio squared (about 1,000 kg·m² in low first), shared by the wheels. The vehicle
+    // times the ratio squared (about 570 kg·m² in low first), shared by the wheels. The vehicle
     // adds it to the wheel hubs, so a wheel that lifts off revs up and slows at the engine's pace
     // instead of flying up and back each step.
     this.coupledInertia = locked ? p.engineInertia * ratio * ratio : 0;

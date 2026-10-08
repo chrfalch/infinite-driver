@@ -78,7 +78,27 @@ describe('drivetrain', () => {
   it('low range multiplies the ratio', () => {
     const d = new Drivetrain({ ...DEFAULT_DRIVETRAIN, low: true });
     d.gear = 1;
-    expect(d.ratio()).toBeCloseTo(4.4 * 5.1 * 2.7, 5);
+    expect(d.ratio()).toBeCloseTo(DEFAULT_DRIVETRAIN.gears[0] * DEFAULT_DRIVETRAIN.finalDrive * DEFAULT_DRIVETRAIN.lowRange, 5);
+  });
+
+  it('the idle governor gives no more than the full-load curve when lugged', () => {
+    const d = new Drivetrain({ ...DEFAULT_DRIVETRAIN });
+    d.gear = 1;
+    d.clutch = 1;
+    d.engineW = rpmToRad(300);
+    d.update(DT, { throttle: 1, reverseRequest: false }, [0, 0, 0, 0], 0, R);
+    expect(Math.abs(d.shaftTorque)).toBeLessThanOrEqual(engineTorque(DEFAULT_DRIVETRAIN, 300) * d.ratio(1) * DEFAULT_DRIVETRAIN.efficiency + 1e-6);
+  });
+
+  it('low 4th stalls on a 35° hill that low 2nd climbs', () => {
+    const climb = 9.81 * Math.sin((35 * Math.PI) / 180);
+    const run = (gear) => {
+      const drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN, automatic: false, low: true });
+      drive.shiftTo(gear);
+      return simulate(10, () => ({ throttle: 1, reverseRequest: false, climb, mass: MASS }), { dt: drive }).v;
+    };
+    expect(run(4)).toBeLessThan(0);
+    expect(run(2)).toBeGreaterThan(1);
   });
 
   it('open axle splits torque equally; a locked axle feeds the slower wheel', () => {

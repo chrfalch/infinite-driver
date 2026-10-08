@@ -646,7 +646,7 @@ export class JointedVehicle {
 
   // Extra spin inertia per wheel from the engine's flywheel while the clutch is locked (see
   // Drivetrain.coupledInertia). Capped at MAX_DRIVE_INERTIA: the full share in low first (about
-  // 250 kg·m²) on a hub jointed to a ~10 kg knuckle was more than Rapier's joint solver could hold
+  // 140 kg·m²) on a hub jointed to a ~10 kg knuckle was more than Rapier's joint solver could hold
   // steady, and the hub shook.
   // With GPU tyres the flywheel is not put on the Rapier hub: a body with 25 times the inertia about
   // its axle as across it precesses far faster than the step (about 1200 rad/s at 50 rad/s of
