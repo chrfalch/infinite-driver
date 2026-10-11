@@ -12,6 +12,7 @@ import {
 } from 'three/webgpu';
 import { CAR } from '../vehicle/config.js';
 import { frameStretch, stretchX, wheelMount } from '../vehicle/physics.js';
+import { createAntenna } from './antenna.js';
 import { createAxleRig } from './axles.js';
 import { createBeadlockWheel } from './beadlock-wheel.js';
 import { LUG_HEIGHT, createStaticMtTyre } from './mt-tyre.js';
@@ -142,7 +143,12 @@ export function createCarMesh() {
   const axles = createAxleRig();
   car.add(axles.group);
 
-  return { object: car, steeringWheel, axles };
+  // Whip antenna on the rear of the roof; its whip and pennant move each frame (see syncAntenna).
+  const antenna = createAntenna();
+  car.add(antenna.object);
+  car.userData.antenna = antenna;
+
+  return { object: car, steeringWheel, axles, antenna };
 }
 
 // Rigid-wheel mode: a static mud-terrain tyre (the same tread as the soft tyres, built from the

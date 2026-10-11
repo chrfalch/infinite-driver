@@ -168,6 +168,12 @@ export function syncWheels(world) {
   });
 }
 
+// The antenna's whip and pennant follow the chassis as it is drawn (after syncViews).
+export function syncAntenna(world) {
+  const delta = world.get(Time).delta;
+  world.query(View).updateEach(([view]) => view.object.userData.antenna?.update(view.object, delta));
+}
+
 // Brake lights: dim tail-light glow, bright red while braking (a quick fade, like a filament).
 export function syncBrakeLights(world) {
   const vehicle = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle);
