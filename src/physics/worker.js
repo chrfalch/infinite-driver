@@ -122,7 +122,7 @@ function snapshot(readback) {
     speed: vehicle.speed,
     steer: vehicle.steer,
     braking: vehicle.braking,
-    drivetrain: { rpm: d.rpm, gear: d.gear, pendingGear: d.pendingGear, throttle: d.throttle, fuel: d.fuel, exhaustBrake: d.exhaustBrake, clutch: d.clutch, shaftTorque: d.shaftTorque },
+    drivetrain: { rpm: d.rpm, gear: d.gear, pendingGear: d.pendingGear, throttle: d.throttle, fuel: d.fuel, exhaustBrake: d.exhaustBrake, clutch: d.clutch, shaftTorque: d.shaftTorque, engaged: { ...d.engaged } },
     positions,
     readbackHubs: solver?.readbackHubs ?? null,
   };

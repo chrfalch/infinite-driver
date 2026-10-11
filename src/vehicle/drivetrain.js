@@ -45,8 +45,22 @@ export const DEFAULT_DRIVETRAIN = Object.freeze({
   centerLock: false,
   frontLock: false,
   rearLock: false,
-  lockStiffness: 900, // N·m per rad/s of speed difference across a locked differential
-  lockMaxTorque: 4000, // N·m a locked differential can move
+  // A locked differential drives the speed difference across it toward zero: lockGain of it per
+  // step, from both sides' inertia (1 would close it in one step), plus a held torque that grows by
+  // lockHold of it per step, so a steady pull (one wheel in the air) is carried with no speed
+  // difference left, as a solid locker does. At most lockMaxTorque.
+  lockGain: 0.6,
+  lockHold: 0.2,
+  // Most of the flywheel a wheel hub carries, kg·m² (see setDriveInertia in soft-vehicle.js). The
+  // lockers work from the same inertia, so they do not overshoot.
+  maxDriveInertia: 60,
+  lockMaxTorque: 6000, // N·m a locked differential can move (about a half-shaft's limit)
+  // A locker engages once the speeds across it are within lockEngageSpeed (rad/s) for lockEngageTime
+  // (its dog teeth line up), so a wheel spinning hard has to slow before it locks. The axle lockers
+  // drop out above axleLockMaxSpeed (m/s) and come back below it less 1.5 m/s.
+  lockEngageSpeed: 2,
+  lockEngageTime: 0.25,
+  axleLockMaxSpeed: 8.3,
   automatic: true,
   low: false,
 });
@@ -117,6 +131,54 @@ export class Drivetrain {
     this.fuel = 0;
     this.exhaustBrake = 0;
     this.shaftTorque = 0; // N·m out of the gearbox (for the driveline's clunk and whine)
+    // Lockers as engaged (the driver asks through params.centerLock / frontLock / rearLock).
+    this.engaged = { center: false, front: false, rear: false };
+    this.engageTimers = { center: 0, front: 0, rear: 0 };
+    this.lockHeld = { center: 0, front: 0, rear: 0 }; // N·m each locker carries steadily
+    // Spin inertia per wheel, kg·m²: the wheel's own plus its share of the engine's flywheel.
+    this.wheelInertia = [0, 0, 0, 0].map(() => params.wheelInertia ?? 3.5);
+  }
+
+  // Engages or releases the lockers toward what the driver asks for. spins: raw wheel spin rates.
+  updateLocks(dt, spins, speed) {
+    const p = this.params;
+    const front = (spins[0] + spins[1]) / 2;
+    const rear = (spins[2] + spins[3]) / 2;
+    const fast = Math.abs(speed) > p.axleLockMaxSpeed;
+    const slowEnough = Math.abs(speed) < p.axleLockMaxSpeed - 1.5;
+    const step = (key, wanted, across, axle) => {
+      if (!wanted || (axle && fast)) {
+        this.engaged[key] = false;
+        this.engageTimers[key] = 0;
+        this.lockHeld[key] = 0;
+        return;
+      }
+      if (this.engaged[key]) return;
+      const aligned = Math.abs(across) < p.lockEngageSpeed && (!axle || slowEnough);
+      this.engageTimers[key] = aligned ? this.engageTimers[key] + dt : 0;
+      if (this.engageTimers[key] >= p.lockEngageTime) this.engaged[key] = true;
+    };
+    step('center', p.centerLock, front - rear, false);
+    step('front', p.frontLock, spins[1] - spins[0], true);
+    step('rear', p.rearLock, spins[3] - spins[2], true);
+  }
+
+  // Each wheel's share of the engine's flywheel while the clutch is locked (J, kg·m² at the
+  // wheels). A wheel turns the driveshaft by c of its own speed (open centre: frontShare / 2 for a
+  // front wheel, (1 - frontShare) / 2 for a rear one; locked centre: 1/4), so alone it feels J·c².
+  // Locked to others, they turn the shaft with it: it feels J·c times the c of all of them (all
+  // four locked together share J). Spreading J evenly, as before, made a wheel that broke loose on
+  // its own spin up three to six times too slowly.
+  driveInertiaShares(J) {
+    const p = this.params;
+    const e = this.engaged;
+    const c = e.center ? [0.25, 0.25, 0.25, 0.25] : [p.frontShare / 2, p.frontShare / 2, (1 - p.frontShare) / 2, (1 - p.frontShare) / 2];
+    const axle = (i) => (i < 2 ? e.front : e.rear);
+    return c.map((ci, i) => {
+      if (axle(i) && e.center && e.front && e.rear) return J * ci; // all four as one
+      const group = axle(i) ? c[i] + c[i ^ 1] : ci;
+      return J * ci * group;
+    });
   }
 
   get rpm() {
@@ -191,8 +253,10 @@ export class Drivetrain {
     const sp = this.smoothSpins;
     const front = (sp[0] + sp[1]) / 2;
     const rear = (sp[2] + sp[3]) / 2;
+    this.updateLocks(dt, spins, speed);
+    const locks = this.engaged;
     // Driveshaft speed behind the centre differential (open diff: torque-weighted average).
-    const shaftW = p.centerLock ? (front + rear) / 2 : front * p.frontShare + rear * (1 - p.frontShare);
+    const shaftW = locks.center ? (front + rear) / 2 : front * p.frontShare + rear * (1 - p.frontShare);
 
     const coast = coastSettings(p);
     this.lastSpeed = speed;
@@ -328,30 +392,52 @@ export class Drivetrain {
     // adds it to the wheel hubs, so a wheel that lifts off revs up and slows at the engine's pace
     // instead of flying up and back each step.
     this.coupledInertia = locked ? p.engineInertia * ratio * ratio : 0;
+    const shares = this.driveInertiaShares(this.coupledInertia);
+    const I = this.wheelInertia;
+    for (let i = 0; i < 4; i++) I[i] = (p.wheelInertia ?? 3.5) + Math.min(p.maxDriveInertia ?? Infinity, shares[i]);
 
-    // Torque into the gearbox output; reverse flips the sign via the ratio.
+    // Torque into the gearbox output; reverse flips the sign via the ratio. The open differentials
+    // split it (centre by frontShare, each axle equally); a locked one adds a torque that closes
+    // the speed difference across it. Lockers read the raw wheel speeds: smoothed, they lagged and
+    // let a wheel run away before they caught it.
     const shaftT = clutchT * ratio * p.efficiency;
     this.shaftTorque = shaftT;
     const t = this.torques;
     t.fill(0);
-    if (shaftT !== 0) {
-      let frontT = shaftT * p.frontShare;
-      let rearT = shaftT * (1 - p.frontShare);
-      if (p.centerLock) {
-        // Locked centre: push torque toward the slower axle.
-        const lock = Math.max(-p.lockMaxTorque, Math.min(p.lockMaxTorque, p.lockStiffness * (rear - front)));
-        frontT += lock / 2;
-        rearT -= lock / 2;
-      }
-      splitAxle(t, 0, 1, frontT, sp, p.frontLock, p);
-      splitAxle(t, 2, 3, rearT, sp, p.rearLock, p);
+    let frontT = shaftT * p.frontShare;
+    let rearT = shaftT * (1 - p.frontShare);
+    if (locks.center) {
+      const lock = this.lockTorque('center', dt, (spins[0] + spins[1]) / 2 - (spins[2] + spins[3]) / 2, I[0] + I[1], I[2] + I[3]);
+      frontT += lock;
+      rearT -= lock;
     }
-    // A locked axle also resists speed differences with no engine torque.
-    if (shaftT === 0) {
-      if (p.frontLock) splitAxle(t, 0, 1, 0, sp, true, p);
-      if (p.rearLock) splitAxle(t, 2, 3, 0, sp, true, p);
-    }
+    this.splitAxle(t, 0, 1, frontT, spins, locks.front && 'front', dt);
+    this.splitAxle(t, 2, 3, rearT, spins, locks.rear && 'rear', dt);
     return t;
+  }
+
+  // Torque a locked differential moves from the faster side (speed difference `diff`, rad/s, side
+  // A minus side B) to the slower one, given the inertia each side has about the differential
+  // (iA, iB, kg·m²). Positive speeds up side A.
+  lockTorque(key, dt, diff, iA, iB) {
+    const p = this.params;
+    const pair = (iA * iB) / (iA + iB);
+    const max = p.lockMaxTorque;
+    const held = Math.max(-max, Math.min(max, this.lockHeld[key] - (p.lockHold * pair * diff) / dt));
+    this.lockHeld[key] = held;
+    return Math.max(-max, Math.min(max, held - (p.lockGain * pair * diff) / dt));
+  }
+
+  // Open differential: equal torque both sides. Locked (`lock` names the locker): equal torque
+  // plus a lock torque toward the slower wheel.
+  splitAxle(out, a, b, torque, spins, lock, dt) {
+    out[a] += torque / 2;
+    out[b] += torque / 2;
+    if (lock) {
+      const t = this.lockTorque(lock, dt, spins[a] - spins[b], this.wheelInertia[a], this.wheelInertia[b]);
+      out[a] += t;
+      out[b] -= t;
+    }
   }
 
   // Name for the HUD: R, N, 1..5, with L for low range.
@@ -359,17 +445,5 @@ export class Drivetrain {
     const g = this.pendingGear ?? this.gear;
     const name = g < 0 ? 'R' : g === 0 ? 'N' : String(g);
     return this.params.low ? `L${name}` : name;
-  }
-}
-
-// Open differential: equal torque both sides. Locked: equal torque plus a correction toward the
-// slower wheel.
-function splitAxle(out, a, b, torque, spins, locked, p) {
-  out[a] += torque / 2;
-  out[b] += torque / 2;
-  if (locked) {
-    const lock = Math.max(-p.lockMaxTorque, Math.min(p.lockMaxTorque, p.lockStiffness * (spins[b] - spins[a])));
-    out[a] += lock / 2;
-    out[b] -= lock / 2;
   }
 }

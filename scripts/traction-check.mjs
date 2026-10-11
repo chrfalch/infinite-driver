@@ -1,6 +1,7 @@
 // Full-throttle pulls from a standstill on a few grounds; prints each wheel's slip so tyre-grip and
 // drivetrain changes can be compared. Usage: node scripts/traction-check.mjs [port] ["<extra query>"]
-// RUNS=0,2 picks runs by index; LOCKS=centre,rear,front locks those differentials first.
+// RUNS=0,2 picks runs by index; LOCKS=centre,rear,front locks those differentials first;
+// HOLD=400 opens the throttle for 400 ms, then locks it there with Shift and lets the pedal go.
 import { webkit } from 'playwright-core';
 const port = process.argv[2] ?? '8731';
 const extra = process.argv[3] ?? '';
@@ -44,6 +45,12 @@ for (const [name, query, low, ms] of runs.filter((_, i) => !pick || pick.include
     });
   const start = await read();
   await p.keyboard.down('ArrowUp');
+  const hold = Number(process.env.HOLD ?? 0);
+  if (hold) {
+    await p.waitForTimeout(hold);
+    await p.keyboard.press('ShiftLeft');
+    await p.keyboard.up('ArrowUp');
+  }
   const samples = [];
   const end = Date.now() + ms;
   while (Date.now() < end) {

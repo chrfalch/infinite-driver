@@ -188,6 +188,7 @@ function drivePlate(hud, font) {
   const lockMeshes = [];
   const range = centredText(hud, font, '4H', 12, '#fff6e2', 3);
   const slips = [0, 0, 0, 0];
+  let blink = 0;
   const build = (w, h) => {
     group.clear();
     lockMeshes.length = 0;
@@ -240,16 +241,21 @@ function drivePlate(hud, font) {
       group.position.set(x, y, 0);
       range.place(x, y - h * 0.36);
     },
-    // `slip`: each wheel's tread speed past the ground's, m/s.
-    update(params, slip, dt) {
+    // `slip`: each wheel's tread speed past the ground's, m/s. `engaged`: the lockers actually in.
+    update(params, slip, dt, engaged = null) {
       const k = Math.min(1, dt / 0.15);
       wheels.forEach((m, i) => {
         slips[i] += ((slip[i] ?? 0) - slips[i]) * k;
         const c = slipTint(slips[i]);
         m.color.setRGB(c.r, c.g, c.b);
       });
-      [params.centerLock, params.frontLock, params.rearLock].forEach((on, i) => {
-        if (lockMeshes[i]) lockMeshes[i].visible = !!on;
+      // Asked for but not engaged yet (the speeds across it have to line up, and the axle lockers
+      // drop out at speed): the marker blinks.
+      blink = (blink + dt) % 0.5;
+      const asked = [params.centerLock, params.frontLock, params.rearLock];
+      const on = engaged ? [engaged.center, engaged.front, engaged.rear] : asked;
+      asked.forEach((a, i) => {
+        if (lockMeshes[i]) lockMeshes[i].visible = !!on[i] || (!!a && blink < 0.25);
       });
       range.set(params.low ? '4L' : '4H');
     },
@@ -411,7 +417,7 @@ export function createGauges({ hud, font, scene }) {
       const r = vehicle.controller?.rollingRadius?.() ?? 0.43;
       const v = vehicle.speed ?? 0;
       const c = vehicle.controller;
-      plate.update(d.params, [0, 1, 2, 3].map((i) => (c?.wheelSpin ? c.wheelSpin(i) * r - v : 0)), dt);
+      plate.update(d.params, [0, 1, 2, 3].map((i) => (c?.wheelSpin ? c.wheelSpin(i) * r - v : 0)), dt, d.engaged);
     }
   };
 
