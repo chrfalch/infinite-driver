@@ -21,6 +21,7 @@ import {
 } from './ecs/traits.js';
 import { createRenderer } from './render/scene.js';
 import { createGauges } from './ui/gauges.js';
+import { createMinimap } from './ui/minimap.js';
 import { attachZoom, followCamera, isFollowCamera, orbitCamera, toggleFollowCamera } from './systems/camera.js';
 import { attachKeyboard, readCameraKeys, readInput } from './systems/input.js';
 import { CONTROLS } from './controls.js';
@@ -176,6 +177,8 @@ async function main() {
   await inter.load();
   // Speedometer, tachometer, and gear indicator.
   const gauges = createGauges({ hud, font: inter, scene: render.hudScene });
+  // Round map of the ground around the car, bottom left (?map=0 hides it).
+  const minimap = params.get('map') === '0' ? null : createMinimap(heightAt);
 
   // The perf card's two lines (P or the panel's switch shows it).
   const gpuName = render.renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2 (no WebGPU)';
@@ -272,8 +275,9 @@ async function main() {
       const player = world.queryFirst(IsPlayer, Vehicle);
       if (player) {
         const canvas = render.renderer.domElement;
-        gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible());
+        gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible(), minimap?.root.offsetWidth ?? 0);
         const vehicle = player.get(Vehicle);
+        if (minimap) timed('sys.minimap', () => minimap.update(vehicle.body.translation(), vehicle.body.rotation()));
         audio?.update(vehicle, world.get(Soil), render.activeCamera);
         gauges.update(vehicle, time.delta, { follow: isFollowCamera(), perf: CONTROLS.showPerf ? perfLines(vehicle) : null, throttleLock: world.get(Input).throttleLock });
         { const v = player.get(Vehicle).body.linvel(); sample('speed.kmh', Math.hypot(v.x, v.z) * 3.6); }
@@ -300,6 +304,7 @@ async function main() {
     heightAt,
     audio,
     audioFeed,
+    minimap,
     traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig, RockField },
   };
 }
