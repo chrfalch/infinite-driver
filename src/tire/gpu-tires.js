@@ -1,5 +1,5 @@
-import { DEFAULT_TIRE, GPU_TIRE, TIRE } from './config.js';
-import { GpuTireSolver, GROUND_N, rockToGpu } from './gpu-tire-solver.js';
+import { DEFAULT_GPU_TIRE, DEFAULT_TIRE, GPU_TIRE, TIRE } from './config.js';
+import { GpuTireSolver, GROUND_N, rockToGpu, treadParticleArea } from './gpu-tire-solver.js';
 import { torusMesh } from './soft-tire.js';
 import { drawnSurface } from '../terrain/drawn-surface.js';
 import { BARE_DEPTH } from '../terrain/snow.js';
@@ -9,6 +9,17 @@ import { BARE_DEPTH } from '../terrain/snow.js';
 export function gpuTireMeshes(tire = TIRE, gpu = GPU_TIRE) {
   const shape = { ...DEFAULT_TIRE, ...tire, segmentsAround: gpu.segmentsAround, segmentsAcross: gpu.segmentsAcross, beadRings: 0 };
   return { mesh: torusMesh(shape), mirrored: torusMesh(shape, { mirror: true }) };
+}
+
+// Tread area of one particle on the default tyre at the default resolution: the soil stiffness
+// settings are per particle of that tyre (see soilStiffness in config.js).
+let referenceArea = 0;
+export function referenceTreadArea() {
+  if (!referenceArea) {
+    const { mesh } = gpuTireMeshes(DEFAULT_TIRE, DEFAULT_GPU_TIRE);
+    referenceArea = treadParticleArea(mesh.vertices, mesh.nu, mesh.nv);
+  }
+  return referenceArea;
 }
 
 // Builds the mesh description and GPU solver for `count` tyres with the current settings.
@@ -23,6 +34,7 @@ export function createGpuTires(device, count, tire = TIRE, gpu = GPU_TIRE) {
     restLocal: mesh.vertices,
     beadLow: inner - spread,
     beadHigh: inner + spread,
+    referenceArea: referenceTreadArea(),
   });
   return { solver, mesh, mirrored };
 }
@@ -33,8 +45,9 @@ const RECENTRE = 1; // metres the car may drift from the grid centre before it i
 // matches the deformation map, so ruts are read cell for cell. The grid only moves when the car is
 // RECENTRE metres off its centre (terrain heights of the overlap are kept), and rut changes are
 // patched in from the deformation's dirty rectangle, so most frames do little or nothing. Each cell
-// also carries a bare-rock flag (heightAt.rockAt; the dry river's rock sheet) for the solver, or on
-// snow how packed the snow is (see snowPacking).
+// also carries a bare-rock flag (heightAt.rockAt, the dry river's rock sheet, or heightAt.groundAt,
+// the canyon's sandstone) and how much of it is graded road (groundAt) for the solver, or on snow
+// how packed the snow is (see snowPacking) and its drag.
 export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell = 0.125) {
   const N = GROUND_N;
   const half = ((N - 1) * cell) / 2;
@@ -46,8 +59,8 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
   if (!recentre && g.version === version) return;
 
   if (!g) {
-    // grid: the heights (terrain plus ruts), the rock flags, then the snow drag, as the solver
-    // takes them.
+    // grid: the heights (terrain plus ruts), the rock flags, then the snow drag (or the road share
+    // on dry ground), as the solver takes them.
     const grid = new Float32Array(N * N * 3);
     g = solver.groundCache = {
       base: new Float32Array(N * N),
@@ -67,6 +80,8 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
   const { heights } = g;
   const rockAt = heightAt.rockAt;
   const snowAt = heightAt.snowAt;
+  const groundAt = heightAt.groundAt;
+  const ground = { rock: 0, road: 0 };
   // The tyres feel the ground as it is drawn (see terrain/drawn-surface.js).
   const surface = (heightAt.drawn ??= drawnSurface(heightAt));
   if (recentre) {
@@ -100,6 +115,10 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
             rock[iz * N + ix] = bare > 0 ? (sn.ice ? 2 : 1) + Math.min(1, bare) : sn.firm;
             pack[iz * N + ix] = sn.packDepth;
             drag[iz * N + ix] = sn.drag;
+          } else if (groundAt) {
+            groundAt(ox + ix * cell, oz + iz * cell, ground);
+            rock[iz * N + ix] = ground.rock;
+            drag[iz * N + ix] = ground.road;
           } else rock[iz * N + ix] = rockAt?.(ox + ix * cell, oz + iz * cell) ? 1 : 0;
         }
       }
@@ -110,8 +129,8 @@ export function updateGpuGround(solver, heightAt, x, z, deformation = null, cell
     g.rock = rock;
     g.sparePack = g.pack;
     g.pack = pack;
-    // The drag lives in the grid itself (g.drag views it); the spare was only scratch.
-    if (snowAt) g.drag.set(drag);
+    // The drag (or road) lives in the grid itself (g.drag views it); the spare was only scratch.
+    if (snowAt || groundAt) g.drag.set(drag);
     g.grid.set(rock, N * N);
     g.ix0 = ix0;
     g.iz0 = iz0;
@@ -192,6 +211,20 @@ export function gpuGroundHeight(solver, x, z) {
   const h11 = h[o + N + 1];
   if (fx + fz <= 1) return h00 + (h10 - h00) * fx + (h01 - h00) * fz;
   return h11 + (h01 - h11) * (1 - fx) + (h10 - h11) * (1 - fz);
+}
+
+// The road share and rock flag of the solver's grid cell nearest (x, z) into `out` (dry ground),
+// or null outside the grid.
+export function gpuGroundKind(solver, x, z, out) {
+  const g = solver.groundCache;
+  if (!g || !solver.groundReady) return null;
+  const N = GROUND_N;
+  const ix = Math.round(x / g.cell - g.ix0);
+  const iz = Math.round(z / g.cell - g.iz0);
+  if (!(ix >= 0 && iz >= 0 && ix < N && iz < N)) return null;
+  out.road = g.drag[iz * N + ix];
+  out.rock = g.rock[iz * N + ix];
+  return out;
 }
 
 // Picks the rocks nearest to (x, z) and uploads them as convex shapes.
