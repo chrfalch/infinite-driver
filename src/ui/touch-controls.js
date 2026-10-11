@@ -12,6 +12,7 @@ const BUTTONS = [
   { code: 'ArrowUp', label: '▲', area: 'gas', title: 'Accelerate' },
   { code: 'ArrowDown', label: '▼', area: 'brake', title: 'Brake / reverse' },
   { code: 'Space', label: 'Handbrake', area: 'hand', title: 'Handbrake', small: true },
+  { code: 'KeyX', label: 'Diff lock', area: 'lock', title: 'Step the differential locks', small: true },
 ];
 
 export function isTouchDevice() {

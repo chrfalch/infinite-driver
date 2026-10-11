@@ -1,6 +1,7 @@
 import { CONTROLS, saveControls } from '../controls.js';
 import { Input, IsPlayer, Vehicle } from '../ecs/traits.js';
 import { DRIVETRAIN, saveDrivetrain } from '../vehicle/config.js';
+import { lockStage, setLockStage } from '../vehicle/drivetrain.js';
 import { isTyping } from '../tuning/panel.js';
 import { toggleFollowCamera } from './camera.js';
 
@@ -99,7 +100,8 @@ export function readInput(world) {
     saveControls();
   }
 
-  // Gearbox keys: Q / E shift down / up (and switch to manual), L toggles low range when slow.
+  // Gearbox keys: Q / E shift down / up (and switch to manual), L toggles low range when slow,
+  // X steps through the differential locks (open, centre, centre + rear, all, open).
   const car = world.queryFirst(IsPlayer, Vehicle);
   const vehicle = car?.get(Vehicle);
   if (vehicle?.drivetrain) {
@@ -113,6 +115,10 @@ export function readInput(world) {
     }
     if (tapped('KeyL') && Math.abs(vehicle.speed) < 3) {
       DRIVETRAIN.low = !DRIVETRAIN.low;
+      saveDrivetrain();
+    }
+    if (tapped('KeyX')) {
+      setLockStage(DRIVETRAIN, lockStage(DRIVETRAIN) + 1);
       saveDrivetrain();
     }
   }

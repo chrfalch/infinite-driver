@@ -242,10 +242,10 @@ export function createTuningPanel(world, { heightAt }) {
   const dt = gui.addFolder('Drivetrain');
   dt.add(DRIVETRAIN, 'coastStop', 0, 1, 0.05).name('Quick stop off throttle (0 = realistic)').onChange(saveDrivetrain);
   dt.add(DRIVETRAIN, 'automatic').name('Automatic gearbox (Q/E = manual)').onChange(saveDrivetrain);
-  dt.add(DRIVETRAIN, 'low').name('Low range (L)').onChange(saveDrivetrain);
-  dt.add(DRIVETRAIN, 'centerLock').name('Lock centre diff').onChange(saveDrivetrain);
-  dt.add(DRIVETRAIN, 'frontLock').name('Lock front diff').onChange(saveDrivetrain);
-  dt.add(DRIVETRAIN, 'rearLock').name('Lock rear diff').onChange(saveDrivetrain);
+  dt.add(DRIVETRAIN, 'low').name('Low range (L)').onChange(saveDrivetrain).listen();
+  dt.add(DRIVETRAIN, 'centerLock').name('Lock centre diff (X)').onChange(saveDrivetrain).listen();
+  dt.add(DRIVETRAIN, 'frontLock').name('Lock front diff (X)').onChange(saveDrivetrain).listen();
+  dt.add(DRIVETRAIN, 'rearLock').name('Lock rear diff (X)').onChange(saveDrivetrain).listen();
   const torqueScale = { value: 1 };
   const baseCurve = DRIVETRAIN.torqueCurve.map(([r, t]) => [r, t]);
   dt.add(torqueScale, 'value', 0.3, 3, 0.05)
@@ -345,6 +345,7 @@ const KEYS = [
   ['A D / ← →', 'Steer'],
   ['Q E', 'Shift down / up'],
   ['L', 'Low range (when slow)'],
+  ['X', 'Diff locks: centre, + rear, + front, off'],
   ['Space', 'Handbrake'],
   ['R', 'Respawn'],
   ['C', 'Follow camera on / off (tap)'],

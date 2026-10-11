@@ -51,6 +51,23 @@ export const DEFAULT_DRIVETRAIN = Object.freeze({
   low: false,
 });
 
+// Differential lock stages, stepped through like a real 4x4's switch: open, centre, centre and
+// rear, then all three.
+export const LOCK_STAGES = ['open', 'centre', 'rear', 'all'];
+
+export function lockStage(params) {
+  if (params.frontLock) return 3;
+  if (params.rearLock) return 2;
+  return params.centerLock ? 1 : 0;
+}
+
+export function setLockStage(params, stage) {
+  const s = ((stage % LOCK_STAGES.length) + LOCK_STAGES.length) % LOCK_STAGES.length;
+  params.centerLock = s >= 1;
+  params.rearLock = s >= 2;
+  params.frontLock = s >= 3;
+}
+
 export function engineTorque(params, rpm) {
   const curve = params.torqueCurve;
   if (rpm <= curve[0][0]) return curve[0][1];
