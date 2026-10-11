@@ -129,6 +129,28 @@ describe('drivetrain', () => {
     expect(decel).toBeLessThan(0.12);
   });
 
+  // The automatic's torque converter: lifting off at speed lets the lock-up go, so the revs sag
+  // below road speed (more with the quick stop off), and back on throttle they meet it and lock.
+  it('coasts through the torque converter: revs sag off throttle, and lock up again on throttle', () => {
+    for (const coastStop of [0, 1]) {
+      const drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN, coastStop });
+      simulate(8, () => ({ throttle: 1, reverseRequest: false }), { dt: drive });
+      const v0 = 20;
+      const { log, v } = simulate(2, () => ({ throttle: 0, reverseRequest: false }), { dt: drive, v0 });
+      const road = (v / R) * drive.ratio() * (60 / (2 * Math.PI));
+      const sag = road - drive.rpm;
+      console.log(`coast, quick stop ${coastStop}: ${road.toFixed(0)} rpm at the gearbox, engine ${drive.rpm.toFixed(0)}`);
+      expect(drive.locked).toBe(false);
+      expect(sag).toBeGreaterThan(coastStop ? 300 : 800);
+      expect(drive.rpm).toBeGreaterThan(DEFAULT_DRIVETRAIN.idleRpm - 50);
+      // No jolt anywhere along the coast: speed falls smoothly.
+      for (let i = 1; i < log.length; i++) expect(log[i - 1].v - log[i].v).toBeLessThan((0.45 * 9.81) / 120);
+      const back = simulate(1, () => ({ throttle: 1, reverseRequest: false }), { dt: drive, v0: v });
+      expect(drive.locked).toBe(true);
+      expect(back.v).toBeGreaterThan(v);
+    }
+  });
+
   it('never engages reverse while rolling forward, or a gear that would over-rev', () => {
     const d = new Drivetrain({ ...DEFAULT_DRIVETRAIN, automatic: false });
     // Rolling forward at 13 m/s in 3rd.
