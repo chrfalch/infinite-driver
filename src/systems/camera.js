@@ -1,3 +1,4 @@
+import { clearanceElevation } from '../camera-clearance.js';
 import { loadCameraView, restoreCameraView, saveCameraView } from '../camera-store.js';
 import { CameraTarget, HeightField, Render, Time, Transform, Vehicle } from '../ecs/traits.js';
 import { createBackdrop } from '../render/backdrop.js';
@@ -31,10 +32,14 @@ const offset = { x: 0, y: 0, z: 0 };
 const PERSPECTIVE_BELOW = (30 * Math.PI) / 180;
 let backdrop = null;
 let orthoFog = null;
+// The elevation the camera actually flies at: the chosen one, or higher while a ridge or mesa
+// between the camera and the car would hide the car (see followCamera).
+let clearance = 0;
 function updateOffset() {
-  const h = DISTANCE * Math.cos(view.elevation);
+  const elevation = Math.max(view.elevation, clearance);
+  const h = DISTANCE * Math.cos(elevation);
   offset.x = h * Math.cos(view.azimuth);
-  offset.y = DISTANCE * Math.sin(view.elevation);
+  offset.y = DISTANCE * Math.sin(elevation);
   offset.z = h * Math.sin(view.azimuth);
 }
 updateOffset();
@@ -177,8 +182,18 @@ export function followCamera(world) {
     // The heading the camera tracks lags the car (about 0.6 s), so turns swing the view smoothly.
     follow.heading += wrap(carAzimuth - follow.heading) * (1 - Math.exp(-delta / 0.6));
     view.azimuth = follow.heading + follow.relative;
-    updateOffset();
   }
+  // Climb over terrain that would block the view of the car: quickly up, slowly back down, so the
+  // camera does not bob over every crest. The ground counts out to where the camera is (the
+  // perspective camera sits closer than the orthographic one).
+  const heightAt = world.get(HeightField)?.heightAt;
+  if (heightAt) {
+    const low = view.elevation < PERSPECTIVE_BELOW;
+    const reach = low ? VIEW_HEIGHT / state.zoom / 2 / Math.tan((world.get(Render).perspective.fov * Math.PI) / 360) : DISTANCE;
+    const need = Math.min(MAX_ELEVATION, clearanceElevation(heightAt, position.x, position.y, position.z, view.azimuth, reach * Math.cos(view.elevation)));
+    clearance += (need - clearance) * (1 - Math.exp(-delta / (need > clearance ? 0.15 : 1.2)));
+  }
+  updateOffset();
   // Look ahead in the direction of travel so the car does not drift toward the screen edge.
   const v = target.get(Vehicle)?.body.linvel() ?? { x: 0, y: 0, z: 0 };
   const lead = 0.45;
@@ -211,7 +226,6 @@ export function followCamera(world) {
     let px = state.x + offset.x * inv * d;
     let py = state.y + offset.y * inv * d;
     let pz = state.z + offset.z * inv * d;
-    const heightAt = world.get(HeightField)?.heightAt;
     if (heightAt) py = Math.max(py, heightAt(px, pz) + 1.5);
     persp.position.set(px, py, pz);
     persp.lookAt(state.x, state.y + 0.6, state.z);
