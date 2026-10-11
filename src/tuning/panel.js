@@ -184,6 +184,7 @@ export function createTuningPanel(world, { heightAt }) {
       saveControls();
       world.get(Input).engineOn = false;
     });
+  controls.add(CONTROLS, 'throttleRamp', 0, 3, 0.1).name('Throttle opens over (s, Shift locks)').onChange(saveControls);
 
   const suspension = { independent: !CAR.solidAxles };
   controls
@@ -344,6 +345,7 @@ const KEYS = [
   ['S / ↓', 'Brake, reverse'],
   ['A D / ← →', 'Steer'],
   ['Q E', 'Shift down / up'],
+  ['Shift', 'Lock the throttle where it is (again: release)'],
   ['L', 'Low range (when slow)'],
   ['X', 'Diff locks: centre, + rear, + front, off'],
   ['Space', 'Handbrake'],

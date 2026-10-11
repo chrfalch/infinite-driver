@@ -80,8 +80,28 @@ export function readCameraKeys() {
 }
 const tapped = (...codes) => codes.some((c) => taps.has(c));
 
+const THROTTLE_LOCK = ['ShiftLeft', 'ShiftRight'];
+let lastRead = null;
+
+// The accelerator is progressive: held, the throttle opens over CONTROLS.throttleRamp seconds
+// (0 = at once); released, it closes quickly. Shift locks it where it is (the throttle then holds
+// with no key down, and ▲ still opens it further for as long as it is held), and Shift again, the
+// brake, the handbrake, or reverse lets it go. Returns the locked throttle, or null.
+export function updateThrottle(state, { pedal, lockTap, release, dt, ramp }) {
+  if (release) state.lock = null;
+  else if (lockTap) state.lock = state.lock !== null && !pedal ? null : state.throttle > 0.02 ? state.throttle : null;
+  const floor = state.lock ?? 0;
+  if (pedal) state.throttle = ramp > 0 ? Math.min(1, Math.max(state.throttle, floor) + dt / ramp) : 1;
+  else state.throttle = Math.max(floor, state.throttle - dt * 5);
+  if (!pedal && state.lock === null && state.throttle < 1e-3) state.throttle = 0;
+  return state.lock;
+}
+
 export function readInput(world) {
   const input = world.get(Input);
+  const now = performance.now();
+  const dt = lastRead === null ? 0 : Math.min(0.1, (now - lastRead) / 1000);
+  lastRead = now;
   if (CONTROLS.latchAccelerator) {
     // Tap to latch the engine on, tap again to switch it off.
     if (tapped(...ACCELERATOR)) input.engineOn = !input.engineOn;
@@ -91,7 +111,16 @@ export function readInput(world) {
   }
   input.brake = pressed(...BRAKE) ? 1 : 0;
   if (input.brake) input.engineOn = false;
-  input.throttle = input.engineOn ? 1 : 0;
+  const player = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle);
+  const throttle = (input.throttleState ??= { throttle: 0, lock: null });
+  input.throttleLock = updateThrottle(throttle, {
+    pedal: input.engineOn,
+    lockTap: tapped(...THROTTLE_LOCK),
+    release: !!input.brake || pressed('Space') || (player?.drivetrain?.gear ?? 0) < 0,
+    dt,
+    ramp: CONTROLS.throttleRamp,
+  });
+  input.throttle = throttle.throttle;
   // Positive steer turns left.
   input.steer = (pressed('KeyA', 'ArrowLeft') ? 1 : 0) - (pressed('KeyD', 'ArrowRight') ? 1 : 0);
   input.handbrake = pressed('Space');
@@ -102,8 +131,7 @@ export function readInput(world) {
 
   // Gearbox keys: Q / E shift down / up (and switch to manual), L toggles low range when slow,
   // X steps through the differential locks (open, centre, centre + rear, all, open).
-  const car = world.queryFirst(IsPlayer, Vehicle);
-  const vehicle = car?.get(Vehicle);
+  const vehicle = player;
   if (vehicle?.drivetrain) {
     if (tapped('KeyE', 'KeyQ')) {
       if (DRIVETRAIN.automatic) {

@@ -7,6 +7,8 @@ export const DEFAULT_CONTROLS = Object.freeze({
   // false: hold the accelerator to drive, release for engine braking.
   // true: tap once to latch the engine on, tap again to switch it off.
   latchAccelerator: false,
+  // Seconds the accelerator takes to open the throttle fully (0 = at once). Shift locks it.
+  throttleRamp: 0.8,
   // Cheaper tyre simulation: fewer solver passes and a coarser mesh.
   performance: false,
   // Graphics quality: 'auto', 'high', or 'low'. See render/quality.js.

@@ -299,6 +299,7 @@ export function createGauges({ hud, font, scene }) {
   root.add(gearBox);
   const gearText = centredText(hud, font, 'N', 40, '#fff6e2');
   const modeText = centredText(hud, font, 'AUTO', 10, '#b9af97');
+  const holdText = centredText(hud, font, '', 11, LOCKED);
   const plate = drivePlate(hud, font);
   root.add(plate.group);
 
@@ -312,7 +313,7 @@ export function createGauges({ hud, font, scene }) {
   root.add(perfCard);
   const perfLines = [centredText(hud, font, '', 12, '#fff6e2', 22), centredText(hud, font, '', 12, '#efe6d0', 22)];
 
-  const texts = [...speed.labels, speed.unit, speed.readout, ...tach.labels, tach.unit, tach.readout, gearText, modeText, ...plate.texts, ...perfLines];
+  const texts = [...speed.labels, speed.unit, speed.readout, ...tach.labels, tach.unit, tach.readout, gearText, modeText, holdText, ...plate.texts, ...perfLines];
   for (const t of texts) scene.add(t.object);
 
   let size = null;
@@ -355,6 +356,8 @@ export function createGauges({ hud, font, scene }) {
     gearText.place(cx, cy + R * 0.02);
     modeText.setSize(Math.max(8, Math.round(R * 0.13)));
     modeText.place(cx, cy + boxH * 0.34);
+    holdText.setSize(Math.max(8, Math.round(R * 0.14)));
+    holdText.place(cx, cy - boxH * 0.34);
 
     // Camera icon in the gap above the gear box, between the dials.
     const iconW = R * 0.36;
@@ -385,7 +388,9 @@ export function createGauges({ hud, font, scene }) {
   };
 
   // `follow`: the follow camera is on. `perf`: two lines of stats, or null to hide the card.
-  const update = (vehicle, dt, { follow = false, perf = null } = {}) => {
+  // `throttleLock`: the throttle Shift holds (0..1), or null.
+  const update = (vehicle, dt, { follow = false, perf = null, throttleLock = null } = {}) => {
+    holdText.set(throttleLock === null ? '' : `HOLD ${Math.round(throttleLock * 100)}%`);
     followIcon.visible = follow;
     perfCard.visible = !!perf;
     perfLines.forEach((t, i) => {
