@@ -193,8 +193,9 @@ export class Drivetrain {
       } else if (this.gear > 0 && this.sinceShift > p.minShiftInterval) {
         const now = gearboxRpm(this.gear);
         // Upshift on road speed, or on engine speed when the wheels are spinning up with the clutch in.
-        // With input.holdInSpin (snow) a gear is held while the wheels spin well past the road
-        // speed, so a slide under power (a donut) keeps its torque instead of shifting it away.
+        // With input.holdInSpin a gear is held while the wheels spin well past the road speed, so
+        // wheelspin and a slide under power (a donut) keep their torque instead of an upshift
+        // quietly taking it away (traction control by accident).
         const spinning = input.holdInSpin && Math.abs(shaftW * radius) > Math.abs(speed) + 2;
         const revving = this.clutch > 0.95 && this.rpm > p.upshiftRpm + 300 && !spinning;
         const atLimiter = now > p.limiterRpm - 150;
