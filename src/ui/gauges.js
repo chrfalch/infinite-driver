@@ -327,12 +327,14 @@ export function createGauges({ hud, font, scene }) {
   // On narrow touch screens the cluster moves to the top, below the folded tuning panel. The perf
   // card sits on top of the cluster when there is room, below it when the cluster is at the top,
   // and in the top left corner of short screens (a phone on its side) so it does not cover the car.
-  const layout = (w, h, touch) => {
-    const key = `${w}x${h}:${touch}`;
+  // `reserve`: the width of the minimap in the bottom left corner, kept clear on both sides so the
+  // cluster stays centred.
+  const layout = (w, h, touch, reserve = 0) => {
+    const key = `${w}x${h}:${touch}:${reserve}`;
     if (key === size) return;
     size = key;
     // The cluster is about 6.6 R wide: the drive plate, two dials, and the gear box.
-    const free = touch ? w - 470 : Math.min(w - 56, 820);
+    const free = touch ? w - 470 : Math.min(w - 56 - (reserve ? 2 * (reserve + 16) : 0), 820);
     let R = Math.min(76, Math.max(40, free / 6.8));
     let top = false;
     if (touch && free / 6.8 < 44) {
