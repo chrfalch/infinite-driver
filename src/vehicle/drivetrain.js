@@ -111,6 +111,10 @@ export function coastSettings(params) {
     exhaustBrake: 180 * q, // extra engine braking torque, N·m
     extraFriction: 0.01 * q, // N·m per rpm on top of the engine's own friction
     coastDownshiftRpm: 1300 + 1400 * q, // off throttle the automatic holds lower gears
+    // Off throttle the torque converter's lock-up lets go, and the wheels drive the engine through
+    // the fluid: torque = coupling × slip² (slip in rad/s at the engine). Soft, the revs sag toward
+    // idle and the car rolls on; stiff, they stay close to road speed and carry the engine braking.
+    coupling: 0.004 + 0.026 * q,
   };
 }
 
@@ -131,6 +135,7 @@ export class Drivetrain {
     this.fuel = 0;
     this.exhaustBrake = 0;
     this.shaftTorque = 0; // N·m out of the gearbox (for the driveline's clunk and whine)
+    this.fluidT = 0; // N·m the torque converter's fluid carries (see update())
     // Lockers as engaged (the driver asks through params.centerLock / frontLock / rearLock).
     this.engaged = { center: false, front: false, rear: false };
     this.engageTimers = { center: 0, front: 0, rear: 0 };
@@ -302,14 +307,20 @@ export class Drivetrain {
 
     const ratio = this.ratio();
     const gearboxEngineW = shaftW * ratio; // engine speed the gears ask for
+    const aboveIdle = radToRpm(Math.abs(gearboxEngineW)) >= p.idleRpm;
+    // The automatic works as a torque converter once rolling in gear. On throttle its lock-up clutch
+    // holds engine and gearbox together. Off throttle the lock-up lets go and the wheels drive the
+    // engine through the fluid, so its revs sag below road speed; coasting it also changes gear
+    // through the fluid, with no declutching or rev-matching blip.
+    const coasting = p.automatic && throttle === 0 && this.gear !== 0 && aboveIdle;
 
-    // Automatic clutch: open while shifting or in neutral; when pulling away it engages with
-    // engine speed; once the gearbox side is above idle it stays in.
+    // Automatic clutch: open while shifting on throttle or in neutral; when pulling away it engages
+    // with engine speed; once the gearbox side is above idle it stays in.
     const idleW = rpmToRad(p.idleRpm);
     let target = 0;
-    if (this.shiftTimer <= 0 && this.gear !== 0) {
-      const gearboxRpm = radToRpm(Math.abs(gearboxEngineW));
-      if (gearboxRpm >= p.idleRpm) target = 1;
+    if (coasting) target = 1;
+    else if (this.shiftTimer <= 0 && this.gear !== 0) {
+      if (aboveIdle) target = 1;
       else if (throttle > 0) {
         // Bite progressively (squared), so the engine can rev into its torque before it is loaded.
         const x = Math.min(1, Math.max(0, (this.rpm - p.idleRpm) / (p.launchRpm - p.idleRpm)));
@@ -331,7 +342,7 @@ export class Drivetrain {
     // During a shift the engine is blipped (or held back) to the speed the new gear will need, so
     // the clutch engages without a jolt.
     let matching = false;
-    if (this.shiftTimer > 0 && this.pendingGear) {
+    if (this.shiftTimer > 0 && this.pendingGear && !coasting) {
       const targetW = Math.min(rpmToRad(p.limiterRpm), Math.max(rpmToRad(p.idleRpm), Math.abs(shaftW * this.ratio(this.pendingGear))));
       const needed = ((targetW - this.engineW) * p.engineInertia) / Math.max(this.shiftTimer, dt) + frictionTorque(p, rpmNow);
       drive = Math.max(0, Math.min(engineTorque(p, rpmNow), needed));
@@ -361,7 +372,11 @@ export class Drivetrain {
     // locked however fast the wheels change speed (free-spinning wheels change the gearbox speed by
     // more than that in one step, which unlocked it, and the slipping clutch then yanked them
     // back: a chatter every few steps).
-    const canLock = this.clutch > 0.98 && ratio !== 0 && Math.abs(engineNet) <= capacity;
+    // Back on throttle after a coast, the fluid carries the engine while it flares up to the
+    // gearbox's speed, and the lock-up clutch takes over from there.
+    const flaring = p.automatic && this.clutch > 0.98 && this.shiftTimer <= 0 && aboveIdle && !this.locked && slipW < 0;
+    const fluid = coasting || flaring;
+    const canLock = this.clutch > 0.98 && ratio !== 0 && Math.abs(engineNet) <= capacity && !coasting;
     const close = Math.abs(slipW) < Math.max(rpmToRad(120), 1.5 * Math.abs(ratio));
     const crossed = this.lastSlipW !== undefined && Math.sign(slipW) !== Math.sign(this.lastSlipW);
     const locked = canLock && (this.locked || close || crossed);
@@ -382,6 +397,18 @@ export class Drivetrain {
         const pairI = (p.engineInertia * wheelsI) / (p.engineInertia + wheelsI);
         const lockT = (slipW * pairI) / dt + (engineNet * pairI) / p.engineInertia;
         clutchT = Math.max(-capacity, Math.min(capacity, lockT));
+        // The fluid carries less than the clutch could, and no more than brings the speeds together
+        // this step (the same overshoot as above, against light wheels in a low gear).
+        // The fluid's torque builds over a moment (0.25 s), and it never holds the car back harder
+        // than the engine would braking at the gearbox's speed, so a coast downshift, which doubles
+        // the slip at once and has to spin the engine up, eases into the lower gear.
+        if (fluid) {
+          const gearboxRpm = radToRpm(Math.abs(gearboxEngineW));
+          const overrun = frictionTorque(p, gearboxRpm) + coast.exhaustBrake + coast.extraFriction * gearboxRpm;
+          const fluidT = Math.max(-overrun, coast.coupling * slipW * Math.abs(slipW));
+          this.fluidT += (fluidT - this.fluidT) * Math.min(1, dt / 0.25);
+          clutchT = Math.max(Math.min(0, clutchT), Math.min(Math.max(0, clutchT), this.fluidT));
+        }
       }
       this.engineW += ((engineNet - clutchT) / p.engineInertia) * dt;
       this.engineW = Math.max(rpmToRad(200), this.engineW);
@@ -391,6 +418,7 @@ export class Drivetrain {
     // times the ratio squared (about 570 kg·m² in low first), shared by the wheels. The vehicle
     // adds it to the wheel hubs, so a wheel that lifts off revs up and slows at the engine's pace
     // instead of flying up and back each step.
+    if (!fluid) this.fluidT = clutchT; // the fluid takes over from what the clutch carried
     this.coupledInertia = locked ? p.engineInertia * ratio * ratio : 0;
     const shares = this.driveInertiaShares(this.coupledInertia);
     const I = this.wheelInertia;
