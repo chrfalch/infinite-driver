@@ -3,7 +3,7 @@ import { MAX_TIRES } from '../tire/gpu-tire-solver.js';
 import { GROUP, createSoftTire, groups } from '../tire/soft-tire.js';
 import { CAR, DRIVETRAIN } from './config.js';
 import { WHEELS, frameStretch, wheelMount } from './physics.js';
-import { DESIGN_WHEEL_MOUNT_Y, IFS_ARM_LIMIT, IFS_RACK, ifsCorner, ifsRack, ifsSpindleLift, ifsSpringOffset, spindleAlignment } from './frame-geometry.js';
+import { DESIGN_WHEEL_MOUNT_Y, IFS_ARM_LIMIT, IFS_RACK, ifsCorner, ifsRack, ifsSpindleLift, spindleAlignment } from './frame-geometry.js';
 
 const DOWN = { x: 0, y: -1, z: 0 };
 const UP = { x: 0, y: 1, z: 0 };
@@ -126,12 +126,10 @@ export class JointedVehicle {
     this.rack = this.solid ? null : this.createRack();
     for (let i = 0; i < WHEELS.length; i++) {
       const mount = wheelMount(i, car);
-      // Independent suspension (see ifsSpindleLift): taller uprights put the wheel centre lower, and
-      // the spring offset raises the wheel's rest position. The car is built at the design point
-      // and settles to the new height, so the arms and coil-overs follow instead of the springs
-      // starting preloaded (bouncy). Suspension length is measured from the wheel centre, so the
-      // mount moves down with the spindle lift.
-      if (!this.solid) mount.y = DESIGN_WHEEL_MOUNT_Y + ifsSpringOffset(car) - ifsSpindleLift(car);
+      // Independent suspension (see ifsSpindleLift): taller or shorter uprights put the wheel centre
+      // lower or higher while the arms and coil-overs stay at the design point. Suspension length is
+      // measured from the wheel centre, so the mount moves with the spindle lift.
+      if (!this.solid) mount.y = DESIGN_WHEEL_MOUNT_Y - ifsSpindleLift(car);
       const front = WHEELS[i].front;
       const firstJoint = this.joints.length;
       const localHub = this.solid

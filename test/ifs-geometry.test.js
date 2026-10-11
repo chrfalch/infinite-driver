@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ifsCorner } from '../src/vehicle/frame-geometry.js';
+import { CAR, DEFAULT_CAR } from '../src/vehicle/config.js';
+import { DESIGN_WHEEL_MOUNT_Y, IFS_MAX_DROP, ifsCorner } from '../src/vehicle/frame-geometry.js';
 
 const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
 const add = (a, b) => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z });
@@ -76,5 +77,24 @@ describe('double A-arm geometry', () => {
     expect(Math.min(...bump.map((r) => r.camber))).toBeLessThan(-1);
     const inRange = rows.filter((r) => Math.abs(r.travel) <= 0.15);
     expect(Math.max(...inRange.map((r) => Math.abs(r.toe)))).toBeLessThan(0.5);
+  });
+});
+
+describe('wheel height (independent suspension)', () => {
+  const at = (wheelMountY) => ifsCorner(1, { ...DEFAULT_CAR, ...CAR, wheelMountY });
+  const design = at(DESIGN_WHEEL_MOUNT_Y);
+
+  it('raises the wheel on its upright and leaves the arms and coil-over at the design point', () => {
+    // Moving the springs' rest position instead left the arms almost no bump travel (the tyres
+    // jittered against the arm limits).
+    const high = at(DESIGN_WHEEL_MOUNT_Y + 0.06);
+    expect(high.wheel.y - design.wheel.y).toBeCloseTo(0.06, 6);
+    for (const key of ['lowerBall', 'upperBall', 'shockBottom', 'shockTop', 'tieOuter']) expect(high[key]).toEqual(design[key]);
+  });
+
+  it('keeps the lower ball joint inside the rim at the highest wheel', () => {
+    const top = at(0.3);
+    expect(top.wheel.y - design.wheel.y).toBeCloseTo(IFS_MAX_DROP, 6);
+    expect(top.wheel.y - top.lowerBall.y).toBeLessThan(0.27);
   });
 });
