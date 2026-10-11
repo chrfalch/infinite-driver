@@ -316,6 +316,7 @@ export function createTuningPanel(world, { heightAt }) {
           world.get(Tracks).renderer?.clear();
           world.get(Deformation)?.map?.clear();
           world.get(Soil)?.particles?.clear();
+          world.get(Soil)?.fines?.clear();
         },
       },
       'clear',

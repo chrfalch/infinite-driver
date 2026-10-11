@@ -31,7 +31,7 @@ import { syncAntenna, syncAxles, syncBrakeLights, syncSoftTires, syncViews, sync
 import { updateTracks } from './systems/tracks.js';
 import { updateSoil } from './systems/soil.js';
 import { updateBushes } from './systems/vegetation.js';
-import { SoilParticles } from './render/soil-particles.js';
+import { SoilParticles, createFineParticles } from './render/soil-particles.js';
 import { TireTracks } from './render/tracks.js';
 import { GROUND, setSnowCover } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
@@ -134,7 +134,15 @@ async function main() {
   world.add(HeightField({ heightAt, surfaceAt }));
   world.add(Deformation({ map: deformation }));
   // Powder snow hangs in the air longer than clumps of soil, and light shines through it.
-  world.add(Soil({ particles: new SoilParticles(render.scene, heightAt.snow ? { drag: 3, powder: true } : undefined), carry: [0, 0, 0, 0], spin: [0, 0, 0, 0] }));
+  // Sand and dust grains on soil (not on snow: the powder spray is already fine).
+  world.add(
+    Soil({
+      particles: new SoilParticles(render.scene, heightAt.snow ? { drag: 3, powder: true } : undefined),
+      fines: heightAt.snow ? null : createFineParticles(render.scene),
+      carry: [0, 0, 0, 0],
+      spin: [0, 0, 0, 0],
+    }),
+  );
   // The tracks' floor follows the ruts near the car (render/rut-map.js).
   world.add(
     Tracks({

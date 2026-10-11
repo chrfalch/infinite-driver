@@ -1,4 +1,4 @@
-import { Color, IcosahedronGeometry, InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from 'three/webgpu';
+import { Color, IcosahedronGeometry, InstancedMesh, OctahedronGeometry, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from 'three/webgpu';
 
 const GRAVITY = 9.81;
 const DRAG = 1.2; // 1/s, clumps slow down in the air (powder snow: more, see `drag`)
@@ -14,17 +14,19 @@ const s3 = new Vector3();
 
 // Soil thrown by the tyres: a pool of small clumps with gravity, drag, and one bounce. When a
 // clump lands it settles, shrinks away, and hands its soil back to the ground (onLand), so digging
-// at the tyre and piling up where it lands balance out.
+// at the tyre and piling up where it lands balance out. Fine grains (sand, dust) use the same pool
+// with a cheaper shape, no shadows, and a quick settle (createFineParticles).
 export class SoilParticles {
-  constructor(scene, { capacity = 2500, drag = DRAG, powder = false } = {}) {
+  constructor(scene, { capacity = 2500, drag = DRAG, powder = false, settle = SETTLE_TIME, geometry = null, shadows = true, name = 'soil spray' } = {}) {
     this.capacity = capacity;
     this.drag = drag;
-    this.mesh = new InstancedMesh(new IcosahedronGeometry(1, 0), powder ? powderMaterial : material, capacity);
-    this.mesh.castShadow = true;
+    this.settle = settle;
+    this.mesh = new InstancedMesh(geometry ?? new IcosahedronGeometry(1, 0), powder ? powderMaterial : material, capacity);
+    this.mesh.castShadow = shadows;
     this.mesh.receiveShadow = !powder;
     this.mesh.frustumCulled = false;
     this.mesh.count = 0;
-    this.mesh.name = 'soil spray';
+    this.mesh.name = name;
     for (let i = 0; i < capacity; i++) this.mesh.setColorAt(i, new Color(1, 1, 1));
     scene.add(this.mesh);
     // Structure of arrays for the live clumps, packed in [0, count).
@@ -73,7 +75,7 @@ export class SoilParticles {
       this.age[i] += dt;
       if (this.landed[i] >= 0) {
         this.landed[i] += dt;
-        if (this.landed[i] > SETTLE_TIME || this.age[i] > 12) this.remove(i);
+        if (this.landed[i] > this.settle || this.age[i] > 12) this.remove(i);
         continue;
       }
       this.vel[o + 1] -= GRAVITY * dt;
@@ -102,7 +104,7 @@ export class SoilParticles {
     // Write instances: clumps tumble in flight and crumble once settled.
     for (let i = 0; i < this.count; i++) {
       const o = i * 3;
-      const shrink = this.landed[i] >= 0 ? Math.max(0, 1 - this.landed[i] / SETTLE_TIME) : 1;
+      const shrink = this.landed[i] >= 0 ? Math.max(0, 1 - this.landed[i] / this.settle) : 1;
       const s = this.size[i] * shrink;
       const tumble = this.landed[i] >= 0 ? 0 : this.age[i];
       q.setFromAxisAngle(v3.set(this.spin[i * 2], 1, this.spin[i * 2 + 1]).normalize(), tumble * 8);
@@ -120,4 +122,10 @@ export class SoilParticles {
     this.count = 0;
     this.mesh.count = 0;
   }
+}
+
+// Sand and dust kicked up with the clumps: many tiny grains that hang in the air a little longer
+// and vanish soon after they land (too fine to pile up visibly).
+export function createFineParticles(scene) {
+  return new SoilParticles(scene, { capacity: 8000, drag: 2.2, settle: 0.5, geometry: new OctahedronGeometry(1, 0), shadows: false, name: 'soil fines' });
 }

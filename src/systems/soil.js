@@ -6,6 +6,9 @@ import { CAR } from '../vehicle/config.js';
 import { surfaceAt as groundAt } from '../audio/wheels.js';
 
 const landGround = { rock: 0, gravel: 0 };
+const fineGround = { rock: 0, gravel: 0 };
+const fineColor = { r: 0, g: 0, b: 0 };
+const MAX_FINES_PER_FRAME = 200; // per wheel, so a hitch does not dump a burst
 const MAX_SOUND_EVENTS = 64;
 // Stones thrown and landing, for the sound (audio/ground-synth.js); the audio takes them every frame.
 function soundEvent(soil, e) {
@@ -15,6 +18,41 @@ function soundEvent(soil, e) {
 
 const tmp = new Color();
 const MAX_DIG = 0.4; // m, deepest hole spinning tyres can dig
+
+// Share of the ground that is fine soil or sand (dust and grains) rather than gravel or rock.
+function fineShare(heightAt, x, z) {
+  groundAt(heightAt, x, z, fineGround);
+  return (1 - fineGround.rock) * (1 - 0.7 * fineGround.gravel);
+}
+
+// Throws `n` fine grains from (x, z): `dir` is the throw direction on the ground (unit), `speed`
+// its speed, `lift` the upward speed, `v` the car's velocity they partly keep.
+function throwFines(fines, n, x, z, dirX, dirZ, speed, lift, v, surfaceAt, tmpColor) {
+  for (let k = 0; k < Math.min(n, MAX_FINES_PER_FRAME); k++) {
+    const jx = (Math.random() - 0.5) * 0.3;
+    const jz = (Math.random() - 0.5) * 0.3;
+    const s = speed * (0.4 + Math.random() * 0.9);
+    // A wide fan: grains scatter far more than clumps.
+    const spread = (Math.random() - 0.5) * (1.5 + speed * 0.6);
+    const c = Math.random() < 0.5 ? 0.6 + Math.random() * 0.2 : 1.1 + Math.random() * 0.3; // damp grains darker, dry dust lighter
+    fineColor.r = Math.min(1, tmpColor.r * c);
+    fineColor.g = Math.min(1, tmpColor.g * c);
+    fineColor.b = Math.min(1, tmpColor.b * c * 0.97);
+    const px = x + jx;
+    const pz = z + jz;
+    const ok = fines.emit(
+      px,
+      surfaceAt(px, pz) + 0.04,
+      pz,
+      v.x * 0.5 + dirX * s - dirZ * spread,
+      lift * (0.3 + Math.random() * 1.1),
+      v.z * 0.5 + dirZ * s + dirX * spread,
+      0.008 + Math.random() * Math.random() * 0.024,
+      fineColor,
+    );
+    if (!ok) return;
+  }
+}
 
 // Throws soil from tyres on soft ground: many clumps when a wheel spins faster (or slower) than
 // the ground passes under it, a few when rolling fast. Soil taken at the tyre is put back where
@@ -40,6 +78,9 @@ export function updateSoil(world) {
     if (hard > 0.2) soundEvent(soil, { kind: 'land', size, rock: hard });
   };
   particles.update(delta, surfaceAt, land);
+  // Fine grains are too small to move the ground or be heard.
+  const fines = soil.fines;
+  fines?.update(delta, surfaceAt, null);
 
   // Snow throws more, finer and whiter spray than soil: powder, not clumps of dirt.
   const snow = currentSnow();
@@ -74,6 +115,9 @@ export function updateSoil(world) {
       soil.carry[i] = 0;
       continue;
     }
+    // Sand and dust go up even from firm ground; gravel and rock have little of it.
+    const fine = fines ? fineShare(heightAt, contact.x, contact.z) * (0.4 + softness) : 0;
+    soil.carryFine ??= [0, 0, 0, 0];
     // Sideways sliding (understeer or oversteer): the tyre bulldozes soil and gravel out toward
     // the way it slides. Slip below about 0.8 m/s (a few degrees of slip angle) throws nothing.
     const hub = controller.wheels?.[i]?.hub;
@@ -93,7 +137,13 @@ export function updateSoil(world) {
       soil.carryLat ??= [0, 0, 0, 0];
       soil.carryLat[i] += softness * Math.max(0, slide - 0.8) * 60 * delta;
       const out = Math.sign(soil.lateral[i]);
-      if (soil.carryLat[i] >= 1) terrainColorAt(heightAt, contact.x, contact.z, tmp);
+      soil.carryFine[i] += fine * Math.max(0, slide - 0.6) * 300 * delta;
+      if (soil.carryLat[i] >= 1 || soil.carryFine[i] >= 1) terrainColorAt(heightAt, contact.x, contact.z, tmp);
+      if (soil.carryFine[i] >= 1) {
+        const n = Math.floor(soil.carryFine[i]);
+        soil.carryFine[i] -= n;
+        throwFines(fines, n, contact.x + ax * out * 0.15, contact.z + az * out * 0.15, ax * out, az * out, Math.min(8, slide * 0.9 + 1), 1.2 + slide * 0.25, v, surfaceAt, tmp);
+      }
       while (soil.carryLat[i] >= 1) {
         soil.carryLat[i] -= 1;
         const size = (0.02 + Math.random() * 0.04) * grain;
@@ -126,6 +176,7 @@ export function updateSoil(world) {
     // Only a wheel that is actually turning throws soil.
     if (Math.abs(tread) < 1.2) {
       soil.carry[i] = 0;
+      soil.carryFine[i] = 0;
       continue;
     }
     const slip = tread - ground;
@@ -135,6 +186,13 @@ export function updateSoil(world) {
     // it when reversing.
     const back = tread > 0 ? -1 : 1;
     terrainColorAt(heightAt, contact.x, contact.z, tmp);
+    // Many more fine grains than clumps when the tyre spins, and a light dust trail when rolling fast.
+    soil.carryFine[i] += fine * (Math.max(0, Math.abs(slip) - 0.6) * 400 + Math.max(0, Math.abs(ground) - 4) * 6) * delta;
+    if (soil.carryFine[i] >= 1) {
+      const n = Math.floor(soil.carryFine[i]);
+      soil.carryFine[i] -= n;
+      throwFines(fines, n, contact.x + fx * back * 0.2, contact.z + fz * back * 0.2, fx * back, fz * back, Math.min(14, Math.abs(slip) * 0.7 + 1.5), 1.5 + Math.abs(slip) * 0.3, v, surfaceAt, tmp);
+    }
     while (soil.carry[i] >= 1) {
       soil.carry[i] -= 1;
       const size = (0.025 + Math.random() * 0.045) * grain;
