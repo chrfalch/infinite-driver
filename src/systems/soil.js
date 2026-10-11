@@ -26,8 +26,9 @@ function fineShare(heightAt, x, z) {
 }
 
 // Throws `n` fine grains from (x, z): `dir` is the throw direction on the ground (unit), `speed`
-// its speed, `lift` the upward speed, `v` the car's velocity they partly keep.
-function throwFines(fines, n, x, z, dirX, dirZ, speed, lift, v, surfaceAt, tmpColor) {
+// its speed, `lift` the upward speed, `v` the car's velocity they partly keep, `rise` how far up
+// the tyre they leave the tread (at speed the tread carries them up before they fly off).
+function throwFines(fines, n, x, z, dirX, dirZ, speed, lift, v, surfaceAt, tmpColor, rise = 0) {
   for (let k = 0; k < Math.min(n, MAX_FINES_PER_FRAME); k++) {
     const jx = (Math.random() - 0.5) * 0.3;
     const jz = (Math.random() - 0.5) * 0.3;
@@ -42,12 +43,12 @@ function throwFines(fines, n, x, z, dirX, dirZ, speed, lift, v, surfaceAt, tmpCo
     const pz = z + jz;
     const ok = fines.emit(
       px,
-      surfaceAt(px, pz) + 0.04,
+      surfaceAt(px, pz) + 0.04 + Math.random() * rise,
       pz,
       v.x * 0.5 + dirX * s - dirZ * spread,
       lift * (0.3 + Math.random() * 1.1),
       v.z * 0.5 + dirZ * s + dirX * spread,
-      0.008 + Math.random() * Math.random() * 0.024,
+      0.008 + Math.random() * Math.random() * 0.03,
       fineColor,
     );
     if (!ok) return;
@@ -187,11 +188,14 @@ export function updateSoil(world) {
     const back = tread > 0 ? -1 : 1;
     terrainColorAt(heightAt, contact.x, contact.z, tmp);
     // Many more fine grains than clumps when the tyre spins, and a light dust trail when rolling fast.
-    soil.carryFine[i] += fine * (Math.max(0, Math.abs(slip) - 0.6) * 400 + Math.max(0, Math.abs(ground) - 4) * 6) * delta;
+    // Even the slight slip of a driven wheel at speed sends up grains: the faster the tread sweeps
+    // the ground, the more it scuffs loose.
+    const slipFine = Math.max(0, Math.abs(slip) - 0.25);
+    soil.carryFine[i] += fine * (slipFine * (400 + Math.abs(ground) * 80) + Math.max(0, Math.abs(ground) - 3) * 20) * delta;
     if (soil.carryFine[i] >= 1) {
       const n = Math.floor(soil.carryFine[i]);
       soil.carryFine[i] -= n;
-      throwFines(fines, n, contact.x + fx * back * 0.2, contact.z + fz * back * 0.2, fx * back, fz * back, Math.min(14, Math.abs(slip) * 0.7 + 1.5), 1.5 + Math.abs(slip) * 0.3, v, surfaceAt, tmp);
+      throwFines(fines, n, contact.x + fx * back * 0.2, contact.z + fz * back * 0.2, fx * back, fz * back, Math.min(14, Math.abs(slip) * 0.7 + 1.5), 1.5 + Math.abs(slip) * 0.3 + Math.abs(ground) * 0.2, v, surfaceAt, tmp, Math.min(0.45, Math.abs(ground) * 0.04));
     }
     while (soil.carry[i] >= 1) {
       soil.carry[i] -= 1;
