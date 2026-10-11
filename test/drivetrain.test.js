@@ -104,6 +104,7 @@ describe('drivetrain', () => {
   it('open axle splits torque equally; a locked axle feeds the slower wheel', () => {
     const run = (locked) => {
       const d = new Drivetrain({ ...DEFAULT_DRIVETRAIN, rearLock: locked });
+      d.engaged.rear = locked; // already engaged (engaging waits for the speeds to line up)
       d.gear = 1;
       d.clutch = 1;
       d.engineW = rpmToRad(2000);
@@ -148,7 +149,6 @@ describe('drivetrain', () => {
   it('clutch does not chatter against light wheels, in high or low range', () => {
     for (const low of [false, true]) {
       const drive = new Drivetrain({ ...DEFAULT_DRIVETRAIN, low });
-      const I = DEFAULT_DRIVETRAIN.wheelInertia;
       const w = [0, 0, 0, 0];
       // Chatter: the drive torque changing sign on consecutive steps (back, forth, back).
       let chatter = 0;
@@ -156,8 +156,7 @@ describe('drivetrain', () => {
       for (let step = 0; step < 240; step++) {
         const t = drive.update(DT, { throttle: step < 120 ? 1 : 0 }, w, 0, R);
         // The vehicle adds the engine's flywheel to the hubs while the clutch is locked.
-        const hubI = I + drive.coupledInertia / 4;
-        for (let i = 0; i < 4; i++) w[i] += (t[i] / hubI) * DT - w[i] * 0.02 * DT; // a little bearing drag
+        for (let i = 0; i < 4; i++) w[i] += (t[i] / drive.wheelInertia[i]) * DT - w[i] * 0.02 * DT; // a little bearing drag
         sums.push(t.reduce((a, b) => a + b, 0));
         const [a, b, c] = sums.slice(-3);
         if (sums.length >= 3 && Math.min(Math.abs(a), Math.abs(b), Math.abs(c)) > 50 && Math.sign(a) !== Math.sign(b) && Math.sign(b) !== Math.sign(c)) chatter++;
@@ -165,5 +164,63 @@ describe('drivetrain', () => {
       }
       expect(chatter).toBeLessThanOrEqual(2); // was every step (it diverged in low range)
     }
+  });
+
+  it('a locker engages only once the speeds across it line up, and the axle lockers drop out at speed', () => {
+    const d = new Drivetrain({ ...DEFAULT_DRIVETRAIN, rearLock: true, centerLock: true });
+    // Rear-right spinning 10 rad/s faster: the rear locker waits; the centre (axles level) engages.
+    for (let i = 0; i < 60; i++) d.updateLocks(DT, [10, 10, 5, 15], 4);
+    expect(d.engaged).toEqual({ center: true, front: false, rear: false });
+    for (let i = 0; i < 60; i++) d.updateLocks(DT, [10, 10, 9.5, 10.5], 4);
+    expect(d.engaged.rear).toBe(true);
+    // Above 30 km/h the rear locker lets go; the centre stays.
+    d.updateLocks(DT, [25, 25, 25, 25], 10);
+    expect(d.engaged).toEqual({ center: true, front: false, rear: false });
+    // Switched off: released at once.
+    d.params.centerLock = false;
+    d.updateLocks(DT, [10, 10, 10, 10], 4);
+    expect(d.engaged.center).toBe(false);
+  });
+
+  it('a wheel alone feels its own share of the flywheel; locked wheels share it', () => {
+    const d = new Drivetrain({ ...DEFAULT_DRIVETRAIN });
+    const J = 100;
+    const open = d.driveInertiaShares(J);
+    // Open centre (40 / 60) and axles: a front wheel turns the shaft by 0.2 of its speed, a rear by 0.3.
+    expect(open[0]).toBeCloseTo(J * 0.04);
+    expect(open[2]).toBeCloseTo(J * 0.09);
+    d.engaged.rear = true;
+    expect(d.driveInertiaShares(J)[2]).toBeCloseTo(J * 0.3 * 0.6);
+    Object.assign(d.engaged, { center: true, front: true, rear: true });
+    const all = d.driveInertiaShares(J);
+    expect(all.reduce((a, b) => a + b, 0)).toBeCloseTo(J);
+  });
+
+  it('a locked axle carries a wheel in the air with its partner, with no gap left', () => {
+    const d = new Drivetrain({ ...DEFAULT_DRIVETRAIN, rearLock: true });
+    d.engaged.rear = true;
+    d.gear = 1;
+    d.clutch = 1;
+    d.engineW = rpmToRad(1200);
+    // Rear-right in the air (no tyre torque); the others on the ground (a stiff tyre about 2 rad/s).
+    const w = [2, 2, 2, 2];
+    const gaps = [];
+    for (let step = 0; step < 240; step++) {
+      const t = d.update(DT, { throttle: 1, reverseRequest: false }, w, 0.86, R);
+      for (let i = 0; i < 4; i++) w[i] += ((t[i] + (i === 3 ? 0 : -300 * (w[i] - 2))) / d.wheelInertia[i]) * DT;
+      gaps.push(w[3] - w[2]);
+    }
+    // The clutch slams in at the start; within 0.1 s the locker has the wheels together.
+    expect(Math.max(...gaps.slice(12).map(Math.abs))).toBeLessThan(0.6);
+    expect(Math.abs(gaps.at(-1))).toBeLessThan(0.01); // held, not lagging behind
+    // Open, the free wheel runs away.
+    const open = new Drivetrain({ ...DEFAULT_DRIVETRAIN });
+    Object.assign(open, { gear: 1, clutch: 1, engineW: rpmToRad(1200) });
+    const v = [2, 2, 2, 2];
+    for (let step = 0; step < 240; step++) {
+      const t = open.update(DT, { throttle: 1, reverseRequest: false }, v, 0.86, R);
+      for (let i = 0; i < 4; i++) v[i] += ((t[i] + (i === 3 ? 0 : -300 * (v[i] - 2))) / open.wheelInertia[i]) * DT;
+    }
+    expect(v[3] - v[2]).toBeGreaterThan(10);
   });
 });

@@ -1,5 +1,4 @@
 import { CAR } from './config.js';
-import { currentSnow } from '../tire/config.js';
 
 export const WHEELS = [
   { name: 'FL', front: true },
@@ -160,8 +159,8 @@ export function applyDriverInput(state, input, dt, car = CAR) {
   const slopeForce = car.mass * 1.15 * 9.81 * Math.abs(noseUp);
   const dir = inReverse || reverseRequest ? -1 : 1;
   const climb = 9.81 * noseUp * dir;
-  const torques = drivetrain.update(dt, { throttle, reverseRequest, climb, mass: car.mass * 1.15, holdInSpin: !!currentSnow() }, spins, speed, rolling);
-  controller.setDriveInertia?.(drivetrain.coupledInertia / 4);
+  const torques = drivetrain.update(dt, { throttle, reverseRequest, climb, mass: car.mass * 1.15, holdInSpin: true }, spins, speed, rolling);
+  controller.setDriveInertia?.(drivetrain.wheelInertia.map((I) => I - (drivetrain.params.wheelInertia ?? 3.5)));
 
   // With nothing pressed at walking pace, the clutch is out and there is no engine braking left, so
   // roll gently to a stop and hold there (like a light touch on the brake), also on a slope.

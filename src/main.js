@@ -267,7 +267,7 @@ async function main() {
         gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible());
         const vehicle = player.get(Vehicle);
         audio?.update(vehicle, world.get(Soil), render.activeCamera);
-        gauges.update(vehicle, time.delta, { follow: isFollowCamera(), perf: CONTROLS.showPerf ? perfLines(vehicle) : null });
+        gauges.update(vehicle, time.delta, { follow: isFollowCamera(), perf: CONTROLS.showPerf ? perfLines(vehicle) : null, throttleLock: world.get(Input).throttleLock });
         { const v = player.get(Vehicle).body.linvel(); sample('speed.kmh', Math.hypot(v.x, v.z) * 3.6); }
       }
       timed('sys.glyph', () => glyph.shape());

@@ -104,8 +104,20 @@ export function effectiveTire(tire, performance) {
   if (!performance) return tire;
   return { ...tire, pgsIterations: 1, substeps: 1, segmentsAround: 20, segmentsAcross: 6 };
 }
-// Tyre friction on rock, as a multiple of the tyre's friction setting.
-export const ROCK_GRIP = 2;
+// Grip on dry ground, as multiples of the tyre's friction setting (1.1 by default, so packed dirt
+// is about μ 0.8 and clean sandstone about 1.1). Loose soil and gravel take grip off the dirt: the
+// top layer shears and the stones roll under the tread. Once the tread slides it grips less than it
+// held (slideGrip, falling over slideSpeed m/s of slip), so a wheel that breaks loose keeps spinning
+// until the driver lifts.
+export const SURFACE_GRIP = Object.freeze({
+  dirt: 0.75,
+  rock: 1.0,
+  softSoil: 0.35, // share of the dirt grip lost at softness 1
+  gravel: 0.25, // share lost at gravel 1
+  slideGrip: 0.8, // dirt
+  rockSlideGrip: 0.9,
+  slideSpeed: 0.5, // m/s
+});
 
 // The world's snow (terrain/snow.js), or null on soil. Set once per page (and per worker) from the
 // height field, as the world is fixed for a page load.
@@ -118,7 +130,7 @@ export function currentSnow() {
 }
 
 export function effectiveGpuTire(gpu, performance, ground = GROUND, snow = snowCover) {
-  // Loose soil grips less than firm ground.
+  // Loose soil and gravel grip less than packed dirt (see SURFACE_GRIP).
   // Bare rock grips better than dusty ground (rubber on sandstone), and soil does not soften it.
   // On snow the ground grid's second channel is the snow (0 fresh, 1 packed, 2 bare asphalt; see
   // snowPacking in gpu-tires.js) instead of the rock flag: the solver blends stiffness and grip by it.
@@ -137,9 +149,24 @@ export function effectiveGpuTire(gpu, performance, ground = GROUND, snow = snowC
         maxSink: snow.maxSink,
         gravel: 0,
       }
-    : { ...gpu, soilStiffness: soilStiffness(ground.softness), friction: gpu.friction * (1 - 0.4 * ground.softness), rockFriction: gpu.friction * ROCK_GRIP, gravel: ground.gravel };
+    : {
+        ...gpu,
+        soilStiffness: soilStiffness(ground.softness),
+        friction: gpu.friction * dirtGrip(ground),
+        rockFriction: gpu.friction * SURFACE_GRIP.rock,
+        slideGrip: SURFACE_GRIP.slideGrip,
+        rockSlideGrip: SURFACE_GRIP.rockSlideGrip,
+        slideSpeed: SURFACE_GRIP.slideSpeed,
+        gravel: ground.gravel,
+      };
   if (!performance) return withSoil;
   return { ...withSoil, substeps: Math.min(gpu.substeps, 3), iterations: Math.min(gpu.iterations, 6), segmentsAround: 32, segmentsAcross: 8 };
+}
+
+// Grip on soil for the ground settings, as a multiple of the tyre's friction setting.
+export function dirtGrip(ground) {
+  const g = SURFACE_GRIP;
+  return g.dirt * (1 - g.softSoil * ground.softness) * (1 - g.gravel * ground.gravel);
 }
 
 // Ground settings shared by the tyres and the track renderer.

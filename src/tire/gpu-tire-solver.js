@@ -54,6 +54,9 @@ const Params = d.struct({
   bareFriction: d.f32, // snow: grip on bare asphalt
   iceFriction: d.f32, // snow: grip on bare ice
   snowSlide: d.f32, // snow: sliding grip as a share of the grip before it slides
+  slideGrip: d.f32, // dry ground: grip at speed while sliding, as a share of the grip before it slides
+  rockSlideGrip: d.f32, // the same on bare rock
+  slideSpeed: d.f32, // m/s of slip over which dry grip falls to its sliding share
   packedStiffness: d.f32, // N/m per particle, fully packed snow
   pressureLead: d.f32, // substeps of wheel spin the pressure normal is turned ahead
   groundStiffness: d.f32, // N/m per particle, hard ground and rocks
@@ -586,9 +589,14 @@ export class GpuTireSolver {
             let mu = select(select(params.friction, params.rockFriction, surfF > 0.5), snowMu, params.snow > 0.5);
             let limit = mu * push * dt * dt / m;
             var cut = slide;
-            // Once the tread slides on snow it grips less than it held (the snow shears into a
-            // slick layer), so a slide carries on: drifts and donuts. Bare asphalt keeps its grip.
-            let kinetic = select(1.0, mix(params.snowSlide, 1.0, clamp(surfF - 1.0, 0.0, 1.0)), params.snow > 0.5);
+            // Once the tread slides it grips less than it held, so a wheel that breaks loose keeps
+            // spinning until the torque drops well below what started it. On dry ground the grip
+            // falls with the slip speed (the speed the tread would slide at if let go): rubber on
+            // rock a little, on dirt more, as the top layer shears. On snow it drops at once (the
+            // snow shears into a slick layer): drifts and donuts. Bare asphalt keeps its grip.
+            let dryShare = mix(params.slideGrip, params.rockSlideGrip, clamp(surfF, 0.0, 1.0));
+            let dry = dryShare + (1.0 - dryShare) * exp(-len / (dt * params.slideSpeed));
+            let kinetic = select(dry, mix(params.snowSlide, 1.0, clamp(surfF - 1.0, 0.0, 1.0)), params.snow > 0.5);
             if (len > limit) { cut = slide * (limit * kinetic / len); }
             p -= cut;
             let ff = -cut * (m / (dt * dt));
@@ -766,6 +774,9 @@ export class GpuTireSolver {
       bareFriction: s.bareFriction ?? s.friction,
       iceFriction: s.iceFriction ?? s.friction,
       snowSlide: s.snowSlide ?? 1,
+      slideGrip: s.slideGrip ?? 1,
+      rockSlideGrip: s.rockSlideGrip ?? 1,
+      slideSpeed: s.slideSpeed ?? 0.5,
       packedStiffness: Math.min(s.packedStiffness ?? 0, (3.2 * (s.rubberMass / this.perTire)) / ((dt / this.substeps) ** 2)),
       soilRebound: s.soilRebound ?? 0.35,
       pressureLead: s.pressureLead ?? 1,

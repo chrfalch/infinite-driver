@@ -654,14 +654,15 @@ export class JointedVehicle {
   // bead (a wheel spinning in a snow bank in low gear). The flywheel only resists the spin, so the
   // hub gets its share of the spin torques instead (see spinShare) and the GPU hub step uses the
   // whole inertia. Rapier's soft tyres pass their torque through joints, so they keep it on the hub.
-  setDriveInertia(share) {
-    const perWheel = Math.min(MAX_DRIVE_INERTIA, share);
-    for (const w of this.wheels) {
-      if (w.detached) continue;
-      if (Math.abs(perWheel - (w.driveInertia ?? 0)) <= 0.02 * Math.max(1, perWheel)) continue;
+  // `shares`: the flywheel's share for each wheel (see Drivetrain.driveInertiaShares).
+  setDriveInertia(shares) {
+    this.wheels.forEach((w, i) => {
+      if (w.detached) return;
+      const perWheel = Math.min(MAX_DRIVE_INERTIA, shares[i] ?? 0);
+      if (Math.abs(perWheel - (w.driveInertia ?? 0)) <= 0.02 * Math.max(1, perWheel)) return;
       w.driveInertia = perWheel;
       if (!this.gpu) w.hub.setAdditionalMassProperties(1e-4, ORIGIN, { x: 0, y: 0, z: perWheel }, IDENTITY, true);
-    }
+    });
   }
 
   // Share of a spin torque that turns the Rapier hub; the rest turns the engine's flywheel (GPU tyres).

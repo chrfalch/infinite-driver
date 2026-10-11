@@ -1,5 +1,6 @@
-// Instrument cluster in the HUD: speedometer, tachometer (with a red zone), and a gear indicator
-// between them, with a camera icon while the follow camera is on and an optional perf card. Drawn with plain meshes in the screen-space HUD scene (CSS pixels, y up, origin at
+// Instrument cluster in the HUD: a drive plate (the car from above with its differential locks and
+// each wheel tinted by how much it slips, and 4H / 4L), speedometer, tachometer (with a red zone),
+// and a gear indicator between the dials, with a camera icon while the follow camera is on and an optional perf card. Drawn with plain meshes in the screen-space HUD scene (CSS pixels, y up, origin at
 // the top-left corner) and Glyph text for the numbers.
 import { CircleGeometry, Group, Mesh, MeshBasicMaterial, PlaneGeometry, RingGeometry, Shape, ShapeGeometry } from 'three/webgpu';
 
@@ -17,6 +18,22 @@ const NEEDLE = material('#e8743f');
 const CAP = material('#2b2823');
 const GEAR_FACE = material('#1f1d19', 0.9);
 const CARD_FACE = material('#1f1d19', 0.82);
+const LINE = material('#b9af97', 0.8);
+
+// Wheel tints on the drive plate by slip speed (m/s): rolling, slipping, spinning.
+const ROLLING = { r: 0.94, g: 0.9, b: 0.82 };
+const SLIPPING = { r: 0.95, g: 0.69, b: 0.25 };
+const SPINNING = { r: 0.88, g: 0.33, b: 0.23 };
+const SLIP_AT = 0.6;
+const SPIN_AT = 2.5;
+const LOCKED = '#f0a13a';
+
+export function slipTint(slip) {
+  const a = Math.abs(slip);
+  const mix = (x, y, t) => ({ r: x.r + (y.r - x.r) * t, g: x.g + (y.g - x.g) * t, b: x.b + (y.b - x.b) * t });
+  if (a <= SLIP_AT) return mix(ROLLING, SLIPPING, Math.max(0, (a - 0.2) / (SLIP_AT - 0.2)));
+  return mix(SLIPPING, SPINNING, Math.min(1, (a - SLIP_AT) / (SPIN_AT - SLIP_AT)));
+}
 
 // Needle pointing along +x, pivot at the origin: a long thin triangle with a short tail.
 function needleGeometry(length, width) {
@@ -161,6 +178,90 @@ function cameraIcon(s) {
   return icon;
 }
 
+// The drive plate: the car from above (four wheels, the axles and the driveshaft), a lock marker
+// on each differential (a ring when open, filled when locked), and 4H / 4L below. Width `w`,
+// height `h`, centred on the origin. Wheels are ordered FL, FR, RL, RR, the front at the top.
+function drivePlate(hud, font) {
+  const group = new Group();
+  const wheels = [0, 1, 2, 3].map(() => material('#efe6d0', 0.95));
+  const locks = [0, 1, 2].map(() => material(LOCKED)); // centre, front, rear
+  const lockMeshes = [];
+  const range = centredText(hud, font, '4H', 12, '#fff6e2', 3);
+  const slips = [0, 0, 0, 0];
+  let blink = 0;
+  const build = (w, h) => {
+    group.clear();
+    lockMeshes.length = 0;
+    group.add(layer(new Mesh(roundedRect(w, h, w * 0.16), RIM), 1));
+    group.add(layer(new Mesh(roundedRect(w - 4, h - 4, w * 0.14), GEAR_FACE), 2));
+    const track = w * 0.56;
+    const base = h * 0.46;
+    const cy = h * 0.1; // the car sits above the 4H / 4L label
+    const ww = w * 0.17;
+    const wh = h * 0.17;
+    const thin = Math.max(1.5, w * 0.03);
+    const axle = (y) => {
+      const m = layer(new Mesh(new PlaneGeometry(track, thin), LINE), 3);
+      m.position.set(0, y, m.position.z);
+      group.add(m);
+    };
+    axle(cy + base / 2);
+    axle(cy - base / 2);
+    const shaft = layer(new Mesh(new PlaneGeometry(thin, base), LINE), 3);
+    shaft.position.set(0, cy, shaft.position.z);
+    group.add(shaft);
+    [
+      [-1, 1],
+      [1, 1],
+      [-1, -1],
+      [1, -1],
+    ].forEach(([x, y], i) => {
+      const m = layer(new Mesh(roundedRect(ww, wh, ww * 0.3), wheels[i]), 4);
+      m.position.set((x * track) / 2, cy + (y * base) / 2, m.position.z);
+      group.add(m);
+    });
+    const r = w * 0.085;
+    [cy, cy + base / 2, cy - base / 2].forEach((y, i) => {
+      const ring = layer(new Mesh(new RingGeometry(r - Math.max(1.5, r * 0.3), r, 24), LINE), 5);
+      const dot = layer(new Mesh(new CircleGeometry(r, 24), locks[i]), 6);
+      const back = layer(new Mesh(new CircleGeometry(r, 24), GEAR_FACE), 4);
+      for (const m of [ring, dot, back]) {
+        m.position.set(0, y, m.position.z);
+        group.add(m);
+      }
+      lockMeshes.push(dot);
+    });
+    range.setSize(Math.max(9, Math.round(w * 0.2)));
+  };
+  return {
+    group,
+    texts: [range],
+    build,
+    place(x, y, h) {
+      group.position.set(x, y, 0);
+      range.place(x, y - h * 0.36);
+    },
+    // `slip`: each wheel's tread speed past the ground's, m/s. `engaged`: the lockers actually in.
+    update(params, slip, dt, engaged = null) {
+      const k = Math.min(1, dt / 0.15);
+      wheels.forEach((m, i) => {
+        slips[i] += ((slip[i] ?? 0) - slips[i]) * k;
+        const c = slipTint(slips[i]);
+        m.color.setRGB(c.r, c.g, c.b);
+      });
+      // Asked for but not engaged yet (the speeds across it have to line up, and the axle lockers
+      // drop out at speed): the marker blinks.
+      blink = (blink + dt) % 0.5;
+      const asked = [params.centerLock, params.frontLock, params.rearLock];
+      const on = engaged ? [engaged.center, engaged.front, engaged.rear] : asked;
+      asked.forEach((a, i) => {
+        if (lockMeshes[i]) lockMeshes[i].visible = !!on[i] || (!!a && blink < 0.25);
+      });
+      range.set(params.low ? '4L' : '4H');
+    },
+  };
+}
+
 // Safe-area insets at the top and left of the screen (the notch on a phone), in CSS pixels.
 let insetProbe = null;
 function safeInsets() {
@@ -204,7 +305,9 @@ export function createGauges({ hud, font, scene }) {
   root.add(gearBox);
   const gearText = centredText(hud, font, 'N', 40, '#fff6e2');
   const modeText = centredText(hud, font, 'AUTO', 10, '#b9af97');
-  const lowText = centredText(hud, font, '', 11, '#e8743f');
+  const holdText = centredText(hud, font, '', 11, LOCKED);
+  const plate = drivePlate(hud, font);
+  root.add(plate.group);
 
   const followIcon = new Group();
   followIcon.visible = false;
@@ -216,7 +319,7 @@ export function createGauges({ hud, font, scene }) {
   root.add(perfCard);
   const perfLines = [centredText(hud, font, '', 12, '#fff6e2', 22), centredText(hud, font, '', 12, '#efe6d0', 22)];
 
-  const texts = [...speed.labels, speed.unit, speed.readout, ...tach.labels, tach.unit, tach.readout, gearText, modeText, lowText, ...perfLines];
+  const texts = [...speed.labels, speed.unit, speed.readout, ...tach.labels, tach.unit, tach.readout, gearText, modeText, holdText, ...plate.texts, ...perfLines];
   for (const t of texts) scene.add(t.object);
 
   let size = null;
@@ -228,11 +331,12 @@ export function createGauges({ hud, font, scene }) {
     const key = `${w}x${h}:${touch}`;
     if (key === size) return;
     size = key;
-    const free = touch ? w - 470 : Math.min(w - 56, 720);
-    let R = Math.min(76, Math.max(40, free / 5.8));
+    // The cluster is about 6.6 R wide: the drive plate, two dials, and the gear box.
+    const free = touch ? w - 470 : Math.min(w - 56, 820);
+    let R = Math.min(76, Math.max(40, free / 6.8));
     let top = false;
-    if (touch && free / 5.8 < 44) {
-      R = Math.min(62, Math.max(34, (w - 40) / 5.8));
+    if (touch && free / 6.8 < 44) {
+      R = Math.min(62, Math.max(34, (w - 40) / 6.8));
       top = true;
     }
     speed.build(R);
@@ -243,18 +347,23 @@ export function createGauges({ hud, font, scene }) {
     gearBox.add(layer(new Mesh(roundedRect(boxW, boxH, R * 0.16), RIM), 1));
     gearBox.add(layer(new Mesh(roundedRect(boxW - 4, boxH - 4, R * 0.14), GEAR_FACE), 2));
     const gap = R * 0.22;
-    const cx = w / 2;
+    const plateW = R * 0.82;
+    const plateH = R * 1.5;
+    plate.build(plateW, plateH);
+    // Centre the whole cluster: the plate to the left of the speedometer moves the rest right.
+    const cx = w / 2 + (plateW + gap) / 2;
     const inset = safeInsets();
     const cy = top ? -(Math.max(12, inset.top) + PANEL_BAR + R) : -h + R + 22;
     speed.place(cx - boxW / 2 - gap - R, cy);
+    plate.place(cx - boxW / 2 - 2 * gap - 2 * R - plateW / 2, cy, plateH);
     tach.place(cx + boxW / 2 + gap + R, cy);
     gearBox.position.set(cx, cy, 0);
     gearText.setSize(Math.round(R * 0.6));
     gearText.place(cx, cy + R * 0.02);
     modeText.setSize(Math.max(8, Math.round(R * 0.13)));
     modeText.place(cx, cy + boxH * 0.34);
-    lowText.setSize(Math.max(8, Math.round(R * 0.14)));
-    lowText.place(cx, cy - boxH * 0.34);
+    holdText.setSize(Math.max(8, Math.round(R * 0.14)));
+    holdText.place(cx, cy - boxH * 0.34);
 
     // Camera icon in the gap above the gear box, between the dials.
     const iconW = R * 0.36;
@@ -285,7 +394,9 @@ export function createGauges({ hud, font, scene }) {
   };
 
   // `follow`: the follow camera is on. `perf`: two lines of stats, or null to hide the card.
-  const update = (vehicle, dt, { follow = false, perf = null } = {}) => {
+  // `throttleLock`: the throttle Shift holds (0..1), or null.
+  const update = (vehicle, dt, { follow = false, perf = null, throttleLock = null } = {}) => {
+    holdText.set(throttleLock === null ? '' : `HOLD ${Math.round(throttleLock * 100)}%`);
     followIcon.visible = follow;
     perfCard.visible = !!perf;
     perfLines.forEach((t, i) => {
@@ -303,7 +414,10 @@ export function createGauges({ hud, font, scene }) {
       const g = d.pendingGear ?? d.gear;
       gearText.set(g < 0 ? 'R' : g === 0 ? 'N' : String(g));
       modeText.set(d.params.automatic ? 'AUTO' : 'MANUAL');
-      lowText.set(d.params.low ? 'LOW' : '');
+      const r = vehicle.controller?.rollingRadius?.() ?? 0.43;
+      const v = vehicle.speed ?? 0;
+      const c = vehicle.controller;
+      plate.update(d.params, [0, 1, 2, 3].map((i) => (c?.wheelSpin ? c.wheelSpin(i) * r - v : 0)), dt, d.engaged);
     }
   };
 
