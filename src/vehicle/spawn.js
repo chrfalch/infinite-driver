@@ -115,7 +115,8 @@ function addCarViews(world, { body, controller, gpuTires, soft, drivetrain, posi
 }
 
 function disposeObject(object) {
-  object.traverse((child) => child.geometry?.dispose());
+  // Geometry shared between cars (the engine model) stays.
+  object.traverse((child) => child.userData.sharedGeometry || child.geometry?.dispose());
 }
 
 export function despawnCar(world, car) {
