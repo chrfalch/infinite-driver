@@ -94,15 +94,16 @@ const OUTBOARD = { wheel: 1, lowerBall: 1, upperBall: 1, tieOuter: 1, shockBotto
 // Wheel height with independent suspension. Lowering the wheels (a higher ride, wheelMountY below
 // the design value) uses taller uprights, like lift spindles on an off-road truck: the wheel centre
 // moves down the upright while the arms, ball joints and coil-overs stay where they are, so the car
-// keeps its full suspension travel. Raising the wheels (a lower ride) moves the springs' rest
-// position instead, at most 10 cm so the arms stay clear of their bump stops.
+// keeps its full suspension travel. Raising the wheels (a lower ride) does the opposite, like drop
+// spindles on a lowered truck: the wheel centre moves up the upright, at most 10 cm so the lower
+// ball joint stays inside the rim. (Moving the springs' rest position instead left the arms only
+// about 8 cm of bump travel, and they hit their limits on every bump and in corners: the tyres
+// jittered.) Negative is a drop.
 export const DESIGN_WHEEL_MOUNT_Y = -0.08;
 export const IFS_MAX_LIFT = 0.32;
+export const IFS_MAX_DROP = 0.1;
 export function ifsSpindleLift(car = CAR) {
-  return Math.max(0, Math.min(IFS_MAX_LIFT, DESIGN_WHEEL_MOUNT_Y - car.wheelMountY));
-}
-export function ifsSpringOffset(car = CAR) {
-  return Math.max(0, Math.min(0.1, car.wheelMountY - DESIGN_WHEEL_MOUNT_Y));
+  return Math.max(-IFS_MAX_DROP, Math.min(IFS_MAX_LIFT, DESIGN_WHEEL_MOUNT_Y - car.wheelMountY));
 }
 
 // The double A-arm points of one corner (wheel index 0 FL, 1 FR, 2 RL, 3 RR), chassis-local.
