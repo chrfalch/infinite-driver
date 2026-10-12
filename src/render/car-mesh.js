@@ -81,8 +81,11 @@ export function steeringJointAngles(geo = steeringGeometry()) {
   return { upper: deg(geo.columnAxis, shaft), lower: deg(shaft, input) };
 }
 
-// Where the engine sits: the crank pulley's centre (chassis-local) and the model's scale.
-export const ENGINE = { x: -0.66, y: -0.19, scale: 0.92 };
+// Where the engine sits: the crank pulley's centre (chassis-local, on the 2.7 m frame) and the
+// model's scale. The flywheel face is 0.66 m ahead of the pulleys, at x = -1.03: about half a metre
+// behind the seats for a gearbox. Low enough that the hat clears the cross tube between the rear
+// shock posts.
+export const ENGINE = { x: -1.69, y: -0.17, scale: 0.92 };
 
 // Chassis-local: +x forward, +y up, +z right. Origin is the physics body origin.
 // A sand buggy with no body panels: one welded tube chassis (see tube-chassis.js), bucket seats,
@@ -144,9 +147,9 @@ export function createCarMesh() {
   body.add(box(0.05, 0.05, 0.06, frame, clamp.x, clamp.y, clamp.z));
   car.add(mergeByMaterial(body));
 
-  // Blown V8 in the engine bay behind the seats, pulleys and belt toward the seats; its moving
-  // parts follow the drivetrain each frame (see syncEngine).
-  const engine = createDragsterEngine({ position: new Vector3(ENGINE.x, ENGINE.y, 0), scale: ENGINE.scale });
+  // V8 in the engine bay, flywheel toward the seats with room for a gearbox in front of it, pulleys
+  // and belt at the back; its moving parts follow the drivetrain each frame (see syncEngine).
+  const engine = createDragsterEngine({ position: new Vector3(stretchX(ENGINE.x), ENGINE.y, 0), scale: ENGINE.scale, yaw: Math.PI });
   car.add(engine.object);
   car.userData.engine = engine;
 

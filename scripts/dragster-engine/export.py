@@ -44,13 +44,13 @@ used=set()
 def add(g,o):
     assert o.name not in used,o.name
     used.add(o.name); groups.setdefault(g,[]).append(o)
-# Blower belt: rebuilt in the game.
+# The belt: rebuilt in the game.
 for o in parts:
     if o.name.startswith('Engine_Front') and abs(center(o)[0]+0.45)<0.03 and abs(center(o)[1]+4.84)<0.03 and abs(center(o)[2]+1.48)<0.03:
         used.add(o.name); bpy.data.objects.remove(o)
 parts=[o for o in bpy.data.objects if o.type=='MESH']
 # Pulleys (blender coords: crank along y; x right-ish; z up)
-PULLEYS={'crank':((0.0,-3.68),0.9),'idler':((-1.16,-2.12),0.68),'blower':((0.29,0.96),0.66)}
+PULLEYS={'crank':((0.0,-3.68),0.9),'idler':((-1.16,-2.12),0.68)}
 for name,((cx,cz),r) in PULLEYS.items():
     for o in parts:
         if o.name in used or not (o.name.startswith('Engine_Front') or o.name.startswith('Supercharger_Parts')): continue
@@ -81,6 +81,29 @@ proj=[(v-c).dot(ax) for v in vs]
 endA=c+ax*min(proj); endB=c+ax*max(proj)
 # Rod ends: centres of the two rod-end eyes.
 rodTop=Vector(center(find(T,(2.29,-3.05,3.85)))); rodBot=Vector(center(find(T,(2.29,-2.46,2.55))))
+# No blower: its case, blanket and straps, drive snout, pulley and belt guard, and the hoses over
+# it go. The injector hat (with the throttle parts) comes down onto the intake manifold, and the
+# fuel lines up to it are squashed down to meet it.
+DZ=2.2
+def gone(o):
+    n=o.name; mn,mx=info[n]; c=center(o); i=n.split('.')[-1]
+    if n.startswith('Manifold_And_Supercharger'): return mx[2]>0
+    if n.startswith('Supercharger_Parts'): return True
+    if n.startswith('Engine_Front'): return mn[2]>-0.6 and abs(c[0]-0.29)<1.2
+    if n.startswith('Hoses_and_Pipes'): return i in ('021','023','024','025') or (mn[2]>0.3 and mx[2]<=1.0)
+    return False
+for o in [o for o in bpy.data.objects if o.type=='MESH' and o.name not in used and gone(o)]: bpy.data.objects.remove(o)
+for o in [o for o in bpy.data.objects if o.type=='MESH']:
+    if o.name.startswith('Throttle'):
+        o.matrix_world=Matrix.Translation((0,0,-DZ))@o.matrix_world
+    elif o.name.startswith('Hoses_and_Pipes') and info[o.name][1][2]>1.0 and not o.name.endswith('.048'):
+        mw=o.matrix_world; inv=mw.inverted()
+        for v in o.data.vertices:
+            w=mw@v.co
+            w.z-=DZ*max(0,min(1,(w.z+2.4)/4.6))
+            v.co=inv@w
+down=Vector((0,0,-DZ))
+SHAFT+=down; VALVE+=down; rodTop+=down; rodBot+=down; endA+=down; endB+=down
 # Decimate everything (static dense parts more); then edge split for hard edges.
 def tris(o): return sum(len(p.vertices)-2 for p in o.data.polygons)
 before=sum(tris(o) for o in bpy.data.objects if o.type=='MESH')
@@ -123,7 +146,7 @@ print('TRIS',before,'->',after,{k:tris(v) for k,v in out.items()})
 S=0.085
 ORIGIN=Vector((0,-4.82,-3.68))
 def car(p): p=Vector(p)-ORIGIN; return [round(-p.y*S,5),round(p.z*S,5),round(-p.x*S,5)]
-pivots={'crank':Vector((0,-4.82,-3.68)),'idler':Vector((-1.16,-4.82,-2.12)),'blower':Vector((0.29,-4.82,0.96)),
+pivots={'crank':Vector((0,-4.82,-3.68)),'idler':Vector((-1.16,-4.82,-2.12)),
         'throttle':SHAFT,'valveArm':VALVE,'rod':rodTop,'spring':endB if endB.z>endA.z else endA}
 # Spring: its fixed end is the low one (on the stud).
 fixed=endA if endA.z<endB.z else endB; moving=endB if fixed is endA else endA
@@ -131,7 +154,7 @@ pivots['spring']=fixed
 # Pulley radii from mesh extents (outer, tooth tips)
 def radius(ob,c):
     return max(math.hypot((ob.matrix_world@v.co).x-c.x,(ob.matrix_world@v.co).z-c.z) for v in ob.data.vertices)
-meta={'scale':S,'pulleys':{k:{'center':car(pivots[k]),'radius':round(radius(out[k],pivots[k])*S,5)} for k in ('crank','idler','blower')},
+meta={'scale':S,'pulleys':{k:{'center':car(pivots[k]),'radius':round(radius(out[k],pivots[k])*S,5)} for k in ('crank','idler')},
       'beltY':car((0,-4.84,0))[0],'beltWidth':0.57*S,
       'throttleShaft':car(SHAFT),'valvePivot':car(VALVE),'rodTop':car(rodTop),'rodBottom':car(rodBot),
       'springFixed':car(fixed),'springMoving':car(moving)}
@@ -148,7 +171,7 @@ for ob in out.values():
     ob.matrix_world=Matrix.Translation(R@ob.matrix_world.translation)
     ob.data.update()
 out['static']['belt']={'x':meta['beltY'],'width':round(meta['beltWidth'],5)}
-for k in ('crank','idler','blower'): out[k]['radius']=meta['pulleys'][k]['radius']
+for k in ('crank','idler'): out[k]['radius']=meta['pulleys'][k]['radius']
 out['rod']['bottom']=meta['rodBottom']
 out['spring']['moving']=meta['springMoving']
 print('META',json.dumps(meta))

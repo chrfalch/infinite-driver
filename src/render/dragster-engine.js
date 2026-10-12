@@ -1,8 +1,8 @@
-// A blown Hemi V8 for the engine bay behind the seats (visual only), from the "Dragster Engine"
-// model by its Blend Swap author (blendswap.com/blends/view/84608, CC BY 3.0), converted by
-// scripts/dragster-engine/export.py. Its moving parts follow the drivetrain: the crank, idler and
-// blower pulleys turn with the revs and a toothed belt runs around them; the throttle opens the
-// injector hat's butterflies, whose arm pushes a rod to the fuel barrel valve's arm and stretches
+// A Hemi V8 for the engine bay behind the seats (visual only), from the "Dragster Engine" model by
+// its Blend Swap author (blendswap.com/blends/view/84608, CC BY 3.0), converted with its blower
+// taken off by scripts/dragster-engine/export.py. Its moving parts follow the drivetrain: the
+// crank and idler pulleys turn with the revs and a toothed belt runs around them; the throttle
+// opens the injector hat's butterflies, whose arm pushes a rod to the fuel barrel valve's arm and stretches
 // the return spring; and the engine rocks on its mounts with the torque it makes.
 //
 // Engine-local frame (as exported): chassis axes (x forward, y up, z right), the origin on the
@@ -56,8 +56,8 @@ export const BELT = {
 // ---- Belt path ---------------------------------------------------------------------------------
 // Pulleys as circles in the plane of the drive, 2D (p, q) = chassis (y, z): a positive turn about
 // x carries p toward q, so a belt run counterclockwise in (p, q) moves with pulleys whose
-// rotation.x increases. The belt wraps the pulleys' convex hull (all of them, here), each on its
-// inside, so they all turn the same way.
+// rotation.x increases. The belt wraps the pulleys' convex hull, each on its inside, so they all
+// turn the same way.
 
 // circles: [{ c: Vector2, r }]. Returns { segments, length } with lines and arcs in run order.
 export function beltPath(circles) {
@@ -247,18 +247,20 @@ function loadModel() {
 const Y = new Vector3(0, 1, 0);
 const v3 = (a) => new Vector3(a[0], a[1], a[2]);
 
-// position: chassis-local spot of the crank pulley's centre; scale: of the exported model.
-export function createDragsterEngine({ position = new Vector3(), scale = 1 } = {}) {
+// position: chassis-local spot of the crank pulley's centre; scale: of the exported model; yaw:
+// turn about y (π puts the pulleys at the back and the flywheel toward the seats).
+export function createDragsterEngine({ position = new Vector3(), scale = 1, yaw = 0 } = {}) {
   const object = new Group();
   object.name = 'dragster engine';
   object.position.copy(position);
   object.scale.setScalar(scale);
+  object.rotation.y = yaw;
   // Rocks about the crank on its mounts.
   const mount = new Group();
   object.add(mount);
 
   let parts = null;
-  const state = { crank: 0, belt: 0, rock: 0, rockRate: 0, throttle: 0, valve: 0, time: 0 };
+  const state = { belt: 0, rock: 0, rockRate: 0, throttle: 0, valve: 0, time: 0 };
 
   const build = (scene) => {
     const model = scene.clone(true);
@@ -269,7 +271,7 @@ export function createDragsterEngine({ position = new Vector3(), scale = 1 } = {
       o.castShadow = true;
       o.receiveShadow = true;
     });
-    const pulleys = ['crank', 'idler', 'blower'].map((name) => node(name));
+    const pulleys = ['crank', 'idler', 'blower'].map((name) => node(name)).filter(Boolean);
     const radii = pulleys.map((p) => p.userData.radius);
     const beltInfo = node('static').userData.belt;
     const belt = createBelt(
@@ -326,11 +328,8 @@ export function createDragsterEngine({ position = new Vector3(), scale = 1 } = {
     // The crank turns clockwise seen from the front: negative about +x. The belt and the other
     // pulleys go with it at the same surface speed.
     const turn = -w * dt;
-    const [rc, ri, rb] = parts.radii;
-    const [crank, idler, blower] = parts.pulleys;
-    crank.rotation.x = state.crank = (state.crank + turn) % TWO_PI;
-    idler.rotation.x = (idler.rotation.x + (turn * rc) / ri) % TWO_PI;
-    blower.rotation.x = (blower.rotation.x + (turn * rc) / rb) % TWO_PI;
+    const rc = parts.radii[0];
+    parts.pulleys.forEach((pulley, i) => (pulley.rotation.x = (pulley.rotation.x + (turn * rc) / parts.radii[i]) % TWO_PI));
     state.belt = (state.belt + turn * rc) % parts.belt.path.length;
     parts.belt.update(state.belt);
 

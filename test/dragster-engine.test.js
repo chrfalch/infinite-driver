@@ -10,7 +10,7 @@ function modelNodes() {
   return Object.fromEntries(json.nodes.map((n) => [n.name, { position: n.translation ?? [0, 0, 0], extras: n.extras ?? {} }]));
 }
 const nodes = modelNodes();
-const circles = ['crank', 'idler', 'blower'].map((name) => ({ c: new Vector2(nodes[name].position[1], nodes[name].position[2]), r: nodes[name].extras.radius }));
+const circles = ['crank', 'idler'].map((name) => ({ c: new Vector2(nodes[name].position[1], nodes[name].position[2]), r: nodes[name].extras.radius }));
 const xy = (a) => new Vector2(a[0], a[1]);
 const geo = {
   shaft: xy(nodes.throttle.position),
@@ -22,7 +22,9 @@ const springEnds = { fixed: xy(nodes.spring.position), moving: xy(nodes.spring.e
 
 describe('dragster engine model', () => {
   it('has every moving part with its data', () => {
-    for (const name of ['static', 'crank', 'idler', 'blower', 'throttle', 'rod', 'valveArm', 'spring']) expect(nodes[name]).toBeDefined();
+    for (const name of ['static', 'crank', 'idler', 'throttle', 'rod', 'valveArm', 'spring']) expect(nodes[name]).toBeDefined();
+    // The blower is taken off.
+    expect(nodes.blower).toBeUndefined();
     for (const c of circles) expect(c.r).toBeGreaterThan(0.03);
     expect(nodes.static.extras.belt.width).toBeGreaterThan(0.02);
     // The crank pulley is the engine's origin.
@@ -30,7 +32,7 @@ describe('dragster engine model', () => {
   });
 });
 
-describe('blower belt', () => {
+describe('belt', () => {
   const path = beltPath(circles);
   const p = new Vector2();
   const n = new Vector2();
@@ -54,7 +56,7 @@ describe('blower belt', () => {
     }
     // Each pulley carries part of the belt on its rim.
     const arcs = path.segments.filter((s) => !s.line);
-    expect(arcs).toHaveLength(3);
+    expect(arcs).toHaveLength(circles.length);
     for (const arc of arcs) expect(arc.length).toBeGreaterThan(0.02);
   });
 
