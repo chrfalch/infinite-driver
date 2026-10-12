@@ -19,6 +19,7 @@ import { LUG_HEIGHT, createStaticMtTyre } from './mt-tyre.js';
 import { TIRE } from '../tire/config.js';
 import { torusMesh } from '../tire/soft-tire.js';
 import { createTubeChassis } from './tube-chassis.js';
+import { createDragsterEngine } from './dragster-engine.js';
 import { mergeByMaterial } from './merge-geometry.js';
 import { frameGeometry, ifsRack, suspensionMounts } from '../vehicle/frame-geometry.js';
 import { rimInnerFace } from './wheel-inset.js';
@@ -80,6 +81,12 @@ export function steeringJointAngles(geo = steeringGeometry()) {
   return { upper: deg(geo.columnAxis, shaft), lower: deg(shaft, input) };
 }
 
+// Where the engine sits: the crank pulley's centre (chassis-local, on the 2.7 m frame) and the
+// model's scale. The flywheel face is 0.66 m ahead of the pulleys, at x = -1.12, with the gearbox
+// in front of it. Far enough back that the blower clears the cross tube between the rear shock
+// posts, and high enough that the oil pan clears the rear differential.
+export const ENGINE = { x: -1.78, y: -0.15, scale: 0.92 };
+
 // Chassis-local: +x forward, +y up, +z right. Origin is the physics body origin.
 // A sand buggy with no body panels: one welded tube chassis (see tube-chassis.js), bucket seats,
 // steering, and running gear.
@@ -139,6 +146,12 @@ export function createCarMesh() {
   body.add(bar(clamp, new Vector3(g.dash.x, g.dash.y, clamp.z), 0.012, frame));
   body.add(box(0.05, 0.05, 0.06, frame, clamp.x, clamp.y, clamp.z));
   car.add(mergeByMaterial(body));
+
+  // Blown V8 in the engine bay, flywheel and gearbox toward the seats, pulleys and belt at the back,
+  // the hat's scoop facing forward; its moving parts follow the drivetrain each frame (see syncEngine).
+  const engine = createDragsterEngine({ position: new Vector3(stretchX(ENGINE.x), ENGINE.y, 0), scale: ENGINE.scale, yaw: Math.PI });
+  car.add(engine.object);
+  car.userData.engine = engine;
 
   const axles = createAxleRig();
   car.add(axles.group);

@@ -174,6 +174,12 @@ export function syncAntenna(world) {
   world.query(View).updateEach(([view]) => view.object.userData.antenna?.update(view.object, delta));
 }
 
+// The engine's belt, pulleys, throttle linkage, and rock on its mounts follow the drivetrain.
+export function syncEngine(world) {
+  const delta = world.get(Time).delta;
+  world.query(View, Vehicle).updateEach(([view, vehicle]) => view.object.userData.engine?.update(vehicle.drivetrain, delta));
+}
+
 // Brake lights: dim tail-light glow, bright red while braking (a quick fade, like a filament).
 export function syncBrakeLights(world) {
   const vehicle = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle);

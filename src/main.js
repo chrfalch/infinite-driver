@@ -28,7 +28,7 @@ import { CONTROLS } from './controls.js';
 import { stepPhysics } from './systems/physics.js';
 import { syncBodies } from './systems/draw-sync.js';
 import { streamTerrain } from './systems/terrain.js';
-import { syncAntenna, syncAxles, syncBrakeLights, syncSoftTires, syncViews, syncWheels } from './systems/views.js';
+import { syncAntenna, syncAxles, syncBrakeLights, syncEngine, syncSoftTires, syncViews, syncWheels } from './systems/views.js';
 import { updateTracks } from './systems/tracks.js';
 import { updateSoil } from './systems/soil.js';
 import { updateBushes } from './systems/vegetation.js';
@@ -266,6 +266,7 @@ async function main() {
       timed('sys.syncSoftTires', () => syncSoftTires(world));
       timed('sys.syncBrakeLights', () => syncBrakeLights(world));
       timed('sys.syncAntenna', () => syncAntenna(world));
+      timed('sys.syncEngine', () => syncEngine(world));
       timed('sys.updateTracks', () => updateTracks(world));
       timed('sys.updateSoil', () => updateSoil(world));
       timed('sys.groundSurface', () => updateGroundSurface(world, groundSurface));
