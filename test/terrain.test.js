@@ -230,6 +230,30 @@ describe('dry river terrain', () => {
     }
   });
 
+  it('tops the boulder walls flush with the ground outside the river', () => {
+    const over = [];
+    for (const p of walkBed(2000).filter((_, i) => i % 20 === 0)) {
+      const side = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
+      const ahead = [Math.cos(p.yaw), -Math.sin(p.yaw)];
+      const w = heightAt.bedWidth(p.x, p.z);
+      for (const sgn of [1, -1]) {
+        const at = (d, o = 0) => heightAt(p.x + side[0] * d * sgn + ahead[0] * o, p.z + side[1] * d * sgn + ahead[1] * o);
+        // The ground just outside, a few metres either way (it steps up with the bed's stairs).
+        let land = -Infinity;
+        for (let o = -4; o <= 4; o++) land = Math.max(land, at(w + 10, o));
+        let wall = -Infinity;
+        for (let d = w; d <= w + 6; d += 0.25) wall = Math.max(wall, at(d));
+        over.push(wall - land);
+      }
+    }
+    over.sort((p, q) => p - q);
+    // The wall tops reach the ground level and (bar the odd bend, where the ground's steps fan
+    // out) stay under it.
+    expect(over[over.length >> 1]).toBeGreaterThan(-0.6);
+    expect(over[over.length >> 1]).toBeLessThan(0.1);
+    expect(over[Math.floor(over.length * 0.9)]).toBeLessThan(0.3);
+  });
+
   it('floors the bed with one rock sheet, rising into boulder walls', () => {
     const points = walkBed(600).filter((_, i) => i % 4 === 0);
     let bedMax = 0;

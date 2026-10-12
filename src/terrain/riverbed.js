@@ -322,6 +322,14 @@ export function createRiverField(seed = 4711) {
         soil = level - stone;
         stone = smoothMax(stone, level, 0.02);
       }
+      // The walls top out flush with the ground outside the river (no higher than the bank top
+      // here would stand), so the bed is a gorge cut into level ground.
+      const flush = smoothstep(BED_HALF_WIDTH - 1, BED_HALF_WIDTH + 0.6, dist);
+      if (flush > 0) {
+        const landTop = floorAlong(s + 6, b.k) + bankRise + forest * 0.5 * hill + 0.25 * bankNoise(x * 0.12, z * 0.12);
+        const capped = Math.max(0.04 * zone, -smoothMax(-stone, under - landTop, 0.3));
+        stone += (Math.min(stone, capped) - stone) * flush;
+      }
       h += stone;
     }
     return { h, under, stone, soil, stoneId: top.id, rockZone: zone, road: inBed, rut: channel * inBed, dist, rock, bank, cliff: ridge, bedY: centre };
