@@ -63,6 +63,7 @@ export async function stepPhysics(world, frameDelta = null) {
     for (let j = 0; j < n; j++) {
       for (const vehicle of vehicles) {
         let ta = performance.now();
+        if (vehicle.drivetrain && vehicle.controller.gpu) vehicle.drivetrain.torqueSteps = n;
         applyDriverInput(vehicle, input, physics.step);
         vehicle.controller.updateVehicle(physics.step);
         let tb = performance.now();

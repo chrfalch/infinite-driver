@@ -147,6 +147,12 @@ export class Drivetrain {
     this.engaged = { center: false, front: false, rear: false };
     this.engageTimers = { center: 0, front: 0, rear: 0 };
     this.lockHeld = { center: 0, front: 0, rear: 0 }; // N·m each locker carries steadily
+    // Physics steps the returned torques act for: the GPU tyres take a round trip's drive torques
+    // from its first step and hold them for all of its steps (GPU_TIRE.stepsPerTrip, 4). The lockers
+    // close their share of the speed difference over the whole trip; aiming for it in one step,
+    // they closed it 2.4 times over and swung back and forth, so a locked axle let a wheel spin
+    // several rad/s faster than the other.
+    this.torqueSteps = 1;
     // Spin inertia per wheel, kg·m²: the wheel's own plus its share of the engine's flywheel.
     this.wheelInertia = [0, 0, 0, 0].map(() => params.wheelInertia ?? 3.5);
   }
@@ -471,9 +477,10 @@ export class Drivetrain {
     const p = this.params;
     const pair = (iA * iB) / (iA + iB);
     const max = p.lockMaxTorque;
-    const held = Math.max(-max, Math.min(max, this.lockHeld[key] - (p.lockHold * pair * diff) / dt));
+    const span = dt * Math.max(1, this.torqueSteps);
+    const held = Math.max(-max, Math.min(max, this.lockHeld[key] - (p.lockHold * pair * diff) / span));
     this.lockHeld[key] = held;
-    return Math.max(-max, Math.min(max, held - (p.lockGain * pair * diff) / dt));
+    return Math.max(-max, Math.min(max, held - (p.lockGain * pair * diff) / span));
   }
 
   // Open differential: equal torque both sides. Locked (`lock` names the locker): equal torque

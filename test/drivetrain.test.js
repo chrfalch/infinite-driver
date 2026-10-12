@@ -267,4 +267,26 @@ describe('drivetrain', () => {
     }
     expect(v[3] - v[2]).toBeGreaterThan(10);
   });
+
+  // GPU tyres hold a round trip's drive torques (from its first step) for all of its steps.
+  it('a locked axle holds its wheels together when the torques are held for several steps', () => {
+    const run = (torqueSteps) => {
+      const d = new Drivetrain({ ...DEFAULT_DRIVETRAIN, rearLock: true });
+      Object.assign(d, { gear: 1, clutch: 1, engineW: rpmToRad(1200), torqueSteps });
+      d.engaged.rear = true;
+      const w = [2, 2, 2, 2];
+      const gaps = [];
+      let t = [0, 0, 0, 0];
+      for (let step = 0; step < 240; step++) {
+        const fresh = d.update(DT, { throttle: 1, reverseRequest: false }, w, 0.86, R);
+        if (step % 4 === 0) t = [...fresh];
+        for (let i = 0; i < 4; i++) w[i] += ((t[i] + (i === 3 ? 0 : -300 * (w[i] - 2))) / d.wheelInertia[i]) * DT;
+        gaps.push(w[3] - w[2]);
+      }
+      return Math.max(...gaps.slice(60).map(Math.abs));
+    };
+    expect(run(4)).toBeLessThan(0.6);
+    // Aimed at a single step, the locker overshoots by the trip's length and swings.
+    expect(run(1)).toBeGreaterThan(2);
+  });
 });
