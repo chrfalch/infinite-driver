@@ -114,10 +114,12 @@ export const SURFACE_GRIP = Object.freeze({
   dirt: 0.75,
   rock: 1.0,
   road: 0.72, // graded, compacted road (the canyon's), whatever the soil around it is like
+  asphalt: 1.0, // the town's paved streets and sidewalks (dry asphalt, μ about 1)
   softSoil: 0.5, // share of the dirt grip lost at softness 1
   gravel: 0.25, // share lost at gravel 1
   slideGrip: 0.8, // dirt
   roadSlideGrip: 0.88, // a compacted road holds its surface when a tyre locks on it
+  asphaltSlideGrip: 0.85,
   rockSlideGrip: 0.9,
   slideSpeed: 0.5, // m/s
 });
@@ -145,6 +147,13 @@ export function currentSnow() {
   return snowCover;
 }
 
+// Whether the world's roads are paved (the town's asphalt) rather than graded dirt: they grip like
+// asphalt and carry no loose stones. Set once per page (and per worker) like the snow.
+let pavedRoads = false;
+export function setPavedRoads(paved) {
+  pavedRoads = !!paved;
+}
+
 export function effectiveGpuTire(gpu, performance, ground = GROUND, snow = snowCover) {
   // Loose soil and gravel grip less than packed dirt (see SURFACE_GRIP).
   // Bare rock grips better than dusty ground (rubber on sandstone), and soil does not soften it.
@@ -169,10 +178,11 @@ export function effectiveGpuTire(gpu, performance, ground = GROUND, snow = snowC
         ...gpu,
         soilStiffness: soilStiffness(ground.softness),
         friction: gpu.friction * dirtGrip(ground),
-        roadFriction: gpu.friction * SURFACE_GRIP.road,
+        roadFriction: gpu.friction * (pavedRoads ? SURFACE_GRIP.asphalt : SURFACE_GRIP.road),
         rockFriction: gpu.friction * SURFACE_GRIP.rock,
         slideGrip: SURFACE_GRIP.slideGrip,
-        roadSlideGrip: SURFACE_GRIP.roadSlideGrip,
+        roadSlideGrip: pavedRoads ? SURFACE_GRIP.asphaltSlideGrip : SURFACE_GRIP.roadSlideGrip,
+        roadGravel: pavedRoads ? 0 : 0.5,
         rockSlideGrip: SURFACE_GRIP.rockSlideGrip,
         slideSpeed: SURFACE_GRIP.slideSpeed,
         cohesion: SOIL.cohesionKpa * 1000 * soilShare(ground),

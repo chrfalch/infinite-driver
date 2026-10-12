@@ -161,6 +161,10 @@ export function createTownField(seed = 31) {
   };
   // How deep the water is at a point (m; negative on dry land). The minimap draws it as a lake.
   heightAt.lakeInside = (x, z) => WATER_LEVEL - heightAt(x, z);
+  // The streets and sidewalks are paved: no soil thrown, piled or rutted there (systems/soil.js,
+  // systems/tracks.js), asphalt grip and no loose stones for the tyres (tire/config.js).
+  heightAt.bareAt = (x, z) => heightAt.roadDistance(x, z) < KERB;
+  heightAt.paved = true;
   heightAt.waterLevel = WATER_LEVEL;
   heightAt.wildAt = wildAt;
   heightAt.town = true;

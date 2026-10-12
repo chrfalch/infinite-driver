@@ -34,7 +34,7 @@ import { updateSoil } from './systems/soil.js';
 import { updateBushes } from './systems/vegetation.js';
 import { SoilParticles, createFineParticles } from './render/soil-particles.js';
 import { TireTracks } from './render/tracks.js';
-import { GROUND, setSnowCover } from './tire/config.js';
+import { GROUND, setPavedRoads, setSnowCover } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
 import { worldMode } from './world.js';
@@ -102,6 +102,7 @@ async function main() {
   const water = heightAt.waterLevel !== undefined ? createWater(render.scene, heightAt.waterLevel) : null;
   // The tyres, compaction and spray treat the ground as snow in the snowfield.
   setSnowCover(heightAt.snow);
+  setPavedRoads(heightAt.paved);
   const deformation = new GroundDeformation();
   // The ground near the car, drawn with its ruts: snow on the snowfield, soil elsewhere.
   const groundSurface = heightAt.snow ? new SnowSurface(render.scene, heightAt, deformation) : new GroundSurface(render.scene, heightAt, deformation);
