@@ -40,7 +40,14 @@ export const DEFAULT_DRIVETRAIN = Object.freeze({
   upshiftRpm: 3500,
   downshiftRpm: 1500,
   minShiftInterval: 0.9, // s
-  launchRpm: 2200, // the automatic clutch is fully in by this engine speed when pulling away
+  launchRpm: 2200, // the (manual's) automatic clutch is fully in by this engine speed when pulling away
+  // The automatic pulls away through a torque converter: held at a standstill at full throttle the
+  // engine runs up to stallRpm (near peak torque), and the converter multiplies its torque by
+  // stallTorqueRatio there, less and less as the gearbox catches up, none from couplingRatio of the
+  // engine's speed. A stuck car's wheels get about twice the engine's torque, so they spin and dig.
+  stallRpm: 2300,
+  stallTorqueRatio: 2,
+  couplingRatio: 0.85,
   frontShare: 0.4, // centre differential torque split to the front axle
   centerLock: false,
   frontLock: false,
@@ -321,7 +328,12 @@ export class Drivetrain {
     if (coasting) target = 1;
     else if (this.shiftTimer <= 0 && this.gear !== 0) {
       if (aboveIdle) target = 1;
-      else if (throttle > 0) {
+      else if (throttle > 0 && p.automatic) {
+        // Torque converter: it takes torque with the square of the engine speed, as much as the
+        // engine makes at full throttle when it reaches stallRpm, so a held car stalls it there.
+        const stallNet = engineTorque(p, p.stallRpm) - frictionTorque(p, p.stallRpm);
+        target = Math.min(1, (stallNet / p.clutchTorque) * (this.rpm / p.stallRpm) ** 2);
+      } else if (throttle > 0) {
         // Bite progressively (squared), so the engine can rev into its torque before it is loaded.
         const x = Math.min(1, Math.max(0, (this.rpm - p.idleRpm) / (p.launchRpm - p.idleRpm)));
         target = x * x;
@@ -428,7 +440,15 @@ export class Drivetrain {
     // split it (centre by frontShare, each axle equally); a locked one adds a torque that closes
     // the speed difference across it. Lockers read the raw wheel speeds: smoothed, they lagged and
     // let a wheel run away before they caught it.
-    const shaftT = clutchT * ratio * p.efficiency;
+    // Pulling away through the torque converter (automatic, slipping, on throttle in gear) it
+    // multiplies the torque, most with the gearbox stopped, none from couplingRatio of engine speed.
+    let multiply = 1;
+    if (p.automatic && !locked && !fluid && throttle > 0 && ratio !== 0 && this.shiftTimer <= 0 && clutchT * slipW > 0) {
+      const speedRatio = Math.min(1, Math.abs(gearboxEngineW) / Math.max(1, this.engineW));
+      multiply = 1 + (p.stallTorqueRatio - 1) * Math.max(0, 1 - speedRatio / p.couplingRatio);
+    }
+    this.converterMultiply = multiply;
+    const shaftT = clutchT * multiply * ratio * p.efficiency;
     this.shaftTorque = shaftT;
     const t = this.torques;
     t.fill(0);
