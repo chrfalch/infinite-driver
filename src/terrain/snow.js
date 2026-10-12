@@ -6,7 +6,9 @@
 // asphalt with spots and patches of thin, packed snow; and along both road edges the plough banks
 // ("brøytekanter"), humps of loose snow up to about 80 cm above the snow beside them, deep enough
 // to nearly get stuck in. Beside the road lie a frozen lake (LAKE) and patches of spruce forest
-// (FOREST). The ground under the snow is flat but for a broad, slow swell and the lake's hollow.
+// (FOREST). The ground under the snow rolls like the canyon's valley floors: the road climbs and dips
+// along its length (graded level from side to side), and snowy hills rise off both sides of it; the
+// lake lies level in a hollow of its own.
 // Everything else about snow lives in SNOW below and in the systems that read it (tyre solver,
 // compaction, spray, the snow surface mesh).
 import { createNoise2D } from 'simplex-noise';
@@ -103,6 +105,7 @@ export const LAKE = Object.freeze({
   radius: 34, // mean radius (m); the shoreline swings about 25 % in and out
   drop: 0.45, // m the ice lies below the plain
   shore: 7, // m over which the shore slopes down to the ice
+  flat: 14, // m from the shoreline out to where the hills begin (the lake's hollow; clear of the road)
   thin: 0.03, // m of snow in the spots on the ice
 });
 // Signed distance inside the shoreline (m): positive on the lake, negative on land.
@@ -181,7 +184,30 @@ export function createSnowField(seed = 2024) {
     return { depth, firm, packDepth: SNOW.packRatio * depth * (1 - firm), drag, dist: d, ice, lake };
   }
 
-  const ground = (x, z) => swell(x * 0.006, z * 0.006) * 0.35 - LAKE.drop * smoothstep(-LAKE.shore, 0, lakeInside(x, z));
+  // The road's height along its length: long climbs and dips of a few metres with shorter crests on
+  // top, grades up to about 10 %. Near the road the height is taken at the nearest point of the
+  // centre line (straight across, so the road lies level from side to side); the reach of that is
+  // capped, so the bends cannot fold the hills far out.
+  const roadLevel = (x) => 5 * swell(x * 0.004, 0.5) + 2 * swell(x * 0.013 + 31, 7.5) + 0.4 * swell(x * 0.045 + 3, 13.5);
+  const levelAcross = (x, z) => {
+    const across = Math.max(-20, Math.min(20, roadSide(x, z)));
+    return roadLevel(x + (across * dg(x)) / Math.hypot(1, dg(x)));
+  };
+  // Hills rising off both sides of the road, from gentle banks to rounded rises 3-10 m high.
+  const hills = (x, z, d) => {
+    const bank = smoothstep(8, 16, d);
+    const foot = smoothstep(10, 50, d);
+    return bank * 0.5 + foot * (3 + 7 * (0.5 + 0.5 * swell(x * 0.011 + 50, z * 0.011)));
+  };
+  // The lake lies level below the road beside it, in a hollow that flattens the hills round it.
+  const lakeLevel = roadLevel(LAKE.x) - LAKE.drop;
+  const ground = (x, z) => {
+    const inside = lakeInside(x, z);
+    const land = levelAcross(x, z) + hills(x, z, roadDistance(x, z));
+    if (inside < -LAKE.flat) return land;
+    const shore = lakeLevel + LAKE.drop * (1 - smoothstep(-LAKE.shore, 0, inside));
+    return land + (shore - land) * smoothstep(-LAKE.flat, -LAKE.shore, inside);
+  };
   const heightAt = (x, z) => ground(x, z) + snowAt(x, z).depth;
   heightAt.world = 'snow';
   heightAt.snow = SNOW;

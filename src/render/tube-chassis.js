@@ -212,7 +212,10 @@ function shockTower(b, f, from, { railZ = 0.43, kickY = -0.08 } = {}) {
 const T = 0.031; // 62 mm OD: the chunky tube of the sand buggy
 const T2 = 0.025;
 const plateMat = new MeshStandardMaterial({ color: '#5f6367', roughness: 0.6, metalness: 0.45 });
-const lampMat = new MeshStandardMaterial({ color: '#fff4d6', emissive: '#fff1c2', emissiveIntensity: 0.6, roughness: 0.2 });
+// Headlamp lens: a faint glow with the lights off, bright with them on (set per frame by the game).
+export const headlampMaterial = new MeshStandardMaterial({ color: '#fff4d6', emissive: '#fff1c2', emissiveIntensity: 0.6, roughness: 0.2 });
+// The headlamp lenses' centre (design frame, right side; the builder stretches x), for the lights.
+export const HEADLAMP = Object.freeze({ x: 2.155, y: 0.22, z: 0.32 });
 const lampBody = new MeshStandardMaterial({ color: '#1d1e20', roughness: 0.4, metalness: 0.6 });
 // Tail light lens: a dim red glow while driving, bright when braking (set per frame by the game).
 export const brakeLightMaterial = new MeshStandardMaterial({ color: '#7a1010', emissive: '#ff2a1a', emissiveIntensity: 0.25, roughness: 0.3 });
@@ -325,13 +328,14 @@ const sandBuggy = {
       bracket.position.set(b.x(-2.42), 0.04, s * 0.4);
     }
     // Round lamps on top of the nose box, facing forward.
+    const { y, z } = HEADLAMP;
     for (const s of [1, -1]) {
       const body = b.mesh(new CylinderGeometry(0.075, 0.06, 0.08, 20), lampBody);
       body.rotation.z = Math.PI / 2;
-      body.position.set(b.x(2.11), 0.22, s * 0.32);
-      const lens = b.mesh(new CylinderGeometry(0.066, 0.066, 0.01, 20), lampMat);
+      body.position.set(b.x(HEADLAMP.x - 0.045), y, s * z);
+      const lens = b.mesh(new CylinderGeometry(0.066, 0.066, 0.01, 20), headlampMaterial);
       lens.rotation.z = Math.PI / 2;
-      lens.position.set(b.x(2.155), 0.22, s * 0.32);
+      lens.position.set(b.x(HEADLAMP.x), y, s * z);
       const stem = b.mesh(new CylinderGeometry(0.012, 0.012, 0.08, 8), lampBody);
       stem.position.set(b.x(2.07), 0.16, s * 0.34);
     }

@@ -3,7 +3,7 @@
 // the horizon however far you drive. Drawn without fog (the terrain fog would hide them).
 import { createNoise2D } from 'simplex-noise';
 import { BackSide, DoubleSide, BufferAttribute, BufferGeometry, Color, Group, Mesh, MeshBasicNodeMaterial, MeshLambertMaterial, SphereGeometry } from 'three/webgpu';
-import { mix, normalize, positionLocal, smoothstep, vec3 } from 'three/tsl';
+import { floor, fract, hash, length, mix, normalize, positionLocal, smoothstep, vec3 } from 'three/tsl';
 import { mulberry32 } from '../terrain/height.js';
 
 export const HORIZON = new Color('#e3cfb4');
@@ -14,8 +14,22 @@ const LOOKS = {
   canyon: { horizon: HORIZON, skyTop: SKY_TOP, far: ['#8a3f24', '#e08a52'], near: ['#8a3f24', '#e08a52'], steps: 4, scale: 1 },
   // Dry river: a deeper blue sky, blue-grey forested hills far off and a yellow sandstone escarpment.
   river: { horizon: new Color('#d3dde2'), skyTop: new Color('#2f78cf'), far: ['#56675e', '#8d9c93'], near: ['#5d6148', '#b59a66'], steps: 3, scale: 0.5 },
-  // Snowfield: a pale winter sky over snow-capped ranges, blue-grey rock at their feet.
-  snow: { horizon: new Color('#e6ecf2'), skyTop: new Color('#6f9fd0'), far: ['#aeb8c4', '#f6f8fb'], near: ['#9ea9b6', '#f2f5f8'], steps: 40, scale: 0.8, haze: [0.75, 0.55], glow: 0.45 },
+  // Snowfield, at night: a starry sky, a faint glow low on the horizon, and snow-capped ranges
+  // standing dark against it. `night`: the scene is lit by the moon and the car's headlights;
+  // `fog`: the perspective view's haze (near, far), closer in the dark.
+  snow: {
+    horizon: new Color('#1a2335'),
+    skyTop: new Color('#02040a'),
+    far: ['#0b0f17', '#2c3546'],
+    near: ['#090c13', '#262e3d'],
+    steps: 40,
+    scale: 0.8,
+    haze: [0.6, 0.4],
+    glow: 0.05,
+    stars: true,
+    night: true,
+    fog: [20, 120],
+  },
 };
 export function worldLook(world) {
   return LOOKS[world] ?? LOOKS.canyon;
@@ -76,7 +90,18 @@ export function createBackdrop(scene, world = 'canyon') {
   group.name = 'backdrop';
   const skyMaterial = new MeshBasicNodeMaterial({ side: BackSide, fog: false, depthWrite: false });
   const up = normalize(positionLocal).y;
-  skyMaterial.colorNode = mix(vec3(look.horizon.r, look.horizon.g, look.horizon.b), vec3(look.skyTop.r, look.skyTop.g, look.skyTop.b), smoothstep(-0.02, 0.45, up));
+  let skyColor = mix(vec3(look.horizon.r, look.horizon.g, look.horizon.b), vec3(look.skyTop.r, look.skyTop.g, look.skyTop.b), smoothstep(-0.02, 0.45, up));
+  if (look.stars) {
+    // Stars: one in a few hundred cells of a grid on the sky's directions, a soft dot of random
+    // brightness in its cell, fading out into the haze near the horizon.
+    const dir = normalize(positionLocal).mul(260);
+    const cell = floor(dir).add(400);
+    const pick = hash(cell.x.add(cell.y.mul(800)).add(cell.z.mul(640000)));
+    const dot = smoothstep(0.32, 0.08, length(fract(dir).sub(0.5)));
+    const star = smoothstep(0.9965, 1, pick).mul(dot).mul(smoothstep(0.04, 0.25, up));
+    skyColor = skyColor.add(vec3(0.85, 0.9, 1).mul(star.mul(2.5)));
+  }
+  skyMaterial.colorNode = skyColor;
   const sky = new Mesh(new SphereGeometry(1500, 32, 16), skyMaterial);
   sky.renderOrder = -2;
   group.add(sky);
@@ -89,6 +114,7 @@ export function createBackdrop(scene, world = 'canyon') {
   return {
     group,
     horizon: look.horizon,
+    fog: look.fog ?? [80, 210],
     // Keep the sky centred on the camera and the mountains around the car.
     update(camera, target, visible) {
       group.visible = visible;

@@ -124,6 +124,7 @@ export function readInput(world) {
   // Positive steer turns left.
   input.steer = (pressed('KeyA', 'ArrowLeft') ? 1 : 0) - (pressed('KeyD', 'ArrowRight') ? 1 : 0);
   input.handbrake = pressed('Space');
+  if (tapped('KeyH')) input.headlights = !input.headlights;
   if (tapped('KeyP')) {
     CONTROLS.showPerf = !CONTROLS.showPerf;
     saveControls();
