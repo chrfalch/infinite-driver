@@ -19,10 +19,12 @@ function hash(ix, iz, k) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-// Wall and roof colours, picked per building.
-export const WALLS = ['#eadfc4', '#dcc59c', '#cf7b55', '#b05c43', '#9cc9d8', '#f0eee6', '#bcb6aa', '#e6c46e', '#c9d6b8', '#e7b8a0'];
-export const GLASS_WALLS = ['#5fa8b8', '#6f93b5', '#7fb6c2'];
-export const ROOFS = ['#b5452f', '#a6533a', '#4d525b', '#7a5a44', '#5c9c84', '#3f6d8f'];
+// Wall and roof colours, picked per building (from the reference diorama: cream and sand stone,
+// terracotta and brick, pale yellow, white and grey render, a turquoise block; terracotta, slate and
+// brown roofs, the odd teal one).
+export const WALLS = ['#ecdfc3', '#dcc092', '#e8d48e', '#c96f4a', '#b45a3e', '#efeae0', '#c8c3b8', '#d9a86c', '#a88466', '#e6c7a4'];
+export const GLASS_WALLS = ['#56b6c9', '#4ea4c6', '#6cc0cf'];
+export const ROOFS = ['#c4583b', '#d26a42', '#b04a32', '#5c6068', '#4b4e54', '#6b5040', '#4a9db0'];
 
 // The building on lot (i, j), before checking its neighbours, or null.
 function lotBuilding(heightAt, i, j) {
@@ -37,7 +39,7 @@ function lotBuilding(heightAt, i, j) {
   // Downtown (deep in town) builds taller and closer together.
   const core = smoothstep(0.6, 1, town) * (0.5 + 0.5 * Math.sin(x * 0.011 + 1.3) * Math.cos(z * 0.009 - 0.4));
   const tall = r(4) < 0.18 + 0.55 * core;
-  const storeys = tall ? 4 + Math.floor(r(5) * (3 + 9 * core)) : 1 + Math.floor(r(5) * 3);
+  const storeys = tall ? 3 + Math.floor(r(5) * (2 + 3 * core)) : 1 + Math.floor(r(5) * 2.5);
   // Width along the street, depth away from it.
   let w = 6.5 + r(6) * 5;
   let d = 7 + r(7) * 5;
@@ -54,8 +56,9 @@ function lotBuilding(heightAt, i, j) {
   }
   let roof;
   const pick = r(9);
-  if (tall) roof = pick < 0.06 ? 'spire' : pick < 0.14 ? 'dome' : 'flat';
-  else roof = pick < 0.45 ? 'gable' : pick < 0.8 ? 'hip' : 'flat';
+  // Mostly pitched tile roofs, as in the reference; flat roofs on some of the blocks.
+  if (tall) roof = pick < 0.06 ? 'spire' : pick < 0.14 ? 'dome' : pick < 0.42 ? 'hip' : pick < 0.62 ? 'gable' : 'flat';
+  else roof = pick < 0.5 ? 'gable' : pick < 0.88 ? 'hip' : 'flat';
   // Spires and domes crown narrower towers.
   if (roof === 'spire' || roof === 'dome') {
     w = d = 7 + r(6) * 2;

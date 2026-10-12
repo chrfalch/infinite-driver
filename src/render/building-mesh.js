@@ -62,8 +62,9 @@ class Builder {
 const tmp = new Color();
 const wallColor = new Color();
 const roofColor = new Color();
-const FLAT_ROOF = new Color('#9b978f');
-const COPPER = new Color('#6fae94');
+const FLAT_ROOF = new Color('#a7a39a');
+const COPPER = new Color('#4f9a62'); // green copper (or sky blue, below)
+const BLUE_DOME = new Color('#5aa9d6');
 const ROOFTOP = new Color('#c9c5bc');
 const pickColor = (list, t, out) => out.set(list[Math.floor(t * list.length) % list.length]);
 
@@ -167,7 +168,7 @@ function addBuilding(out, b) {
     };
     for (let k = 0; k < rings; k++) {
       for (let i = 0; i < segments; i++) {
-        const color = tmp.copy(COPPER).multiplyScalar(i % 2 ? 0.92 : 1);
+        const color = tmp.copy(b.extra < 0.5 ? COPPER : BLUE_DOME).multiplyScalar(i % 2 ? 0.92 : 1);
         if (k === rings - 1) out.tri(at(i, k), at(i + 1, k), at(0, rings), color, plain, plain, plain, centre);
         else out.quad(at(i, k), at(i + 1, k), at(i + 1, k + 1), at(i, k + 1), color, plain, plain, plain, plain, centre);
       }
@@ -178,7 +179,7 @@ function addBuilding(out, b) {
     box(0, 0, hw + 0.2, hd + 0.2, eaves, eaves + 0.5, tmp.copy(wallColor).multiplyScalar(0.82), PLAIN, FLAT_ROOF);
     const y0 = eaves + 0.5;
     box(0, 0, hw * 0.7, hd * 0.7, y0, y0 + 4, wallColor, WINDOWS, null);
-    const top = P(0, y0 + 4 + b.w * 1.9, 0);
+    const top = P(0, y0 + 4 + b.w * 1.2, 0);
     const c = [P(-hw * 0.78, y0 + 4, -hd * 0.78), P(hw * 0.78, y0 + 4, -hd * 0.78), P(hw * 0.78, y0 + 4, hd * 0.78), P(-hw * 0.78, y0 + 4, hd * 0.78)];
     const centre = P(0, y0 + 5, 0);
     for (let k = 0; k < 4; k++) out.tri(c[k], c[(k + 1) % 4], top, roofColor, plain, plain, plain, centre);

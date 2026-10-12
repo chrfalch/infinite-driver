@@ -89,7 +89,10 @@ describe('isometric town', () => {
     // A mix of roofs and heights.
     const roofs = new Set(all.map((r) => r.building.roof));
     expect(roofs.size).toBeGreaterThanOrEqual(3);
-    expect(Math.max(...all.map((r) => r.building.storeys))).toBeGreaterThan(6);
+    // Low-rise, as in a diorama town: up to seven storeys.
+    const storeys = all.map((r) => r.building.storeys);
+    expect(Math.max(...storeys)).toBeGreaterThan(4);
+    expect(Math.max(...storeys)).toBeLessThanOrEqual(7);
   });
 
   it('gives buildings to the rocks (solid) and draws them apart from the rocks', () => {
