@@ -231,8 +231,7 @@ export function followCamera(world) {
     persp.lookAt(state.x, state.y + 0.6, state.z);
     render.activeCamera = persp;
     render.scene.fog.color.copy(backdrop.horizon);
-    render.scene.fog.near = 80;
-    render.scene.fog.far = 210;
+    [render.scene.fog.near, render.scene.fog.far] = backdrop.fog;
     render.scene.background = backdrop.horizon;
   } else {
     render.activeCamera = camera;

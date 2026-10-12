@@ -28,7 +28,7 @@ import { CONTROLS } from './controls.js';
 import { stepPhysics } from './systems/physics.js';
 import { syncBodies } from './systems/draw-sync.js';
 import { streamTerrain } from './systems/terrain.js';
-import { syncAntenna, syncAxles, syncBrakeLights, syncEngine, syncSoftTires, syncViews, syncWheels } from './systems/views.js';
+import { syncAntenna, syncAxles, syncLights, syncEngine, syncSoftTires, syncViews, syncWheels } from './systems/views.js';
 import { updateTracks } from './systems/tracks.js';
 import { updateSoil } from './systems/soil.js';
 import { updateBushes } from './systems/vegetation.js';
@@ -40,6 +40,8 @@ import { createHeightField } from './terrain/height.js';
 import { worldMode } from './world.js';
 import { setGroundPatch, setTerrainWorld } from './render/terrain-mesh.js';
 import { SNOW_PATCH_N, SnowSurface } from './render/snow-surface.js';
+import { worldLook } from './render/backdrop.js';
+import { setHeadlightBeams } from './render/headlights.js';
 import { GroundSurface, PATCH_N } from './render/ground-surface.js';
 import { showRutsOnSheet } from './render/rock-surface.js';
 import { DEFORM_CELL } from './terrain/deformation.js';
@@ -74,17 +76,22 @@ async function main() {
     render.scene.background.set('#e4e1d6');
     render.scene.fog.color.set('#e4e1d6');
   }
-  // The snowfield: an overcast-bright winter haze, and light thrown back up off the snow.
-  if (mode === 'snow') {
-    render.scene.background.set('#e6ecf2');
-    render.scene.fog.color.set('#e6ecf2');
+  // Night worlds (the snowfield): a dark blue haze, faint moonlight from the same direction as the
+  // sun (so it still casts the shadows), a little skylight thrown back off the snow, and the car's
+  // headlights on.
+  const night = !!worldLook(mode).night;
+  if (night) {
+    render.scene.background.set('#0b111c');
+    render.scene.fog.color.set('#0b111c');
     render.scene.traverse((o) => {
       if (o.isHemisphereLight) {
-        o.color.set('#eef4ff');
-        o.groundColor.set('#d5dee9');
+        o.color.set('#41557c');
+        o.groundColor.set('#1d2638');
+        o.intensity = 0.13;
       }
     });
-    render.sun.color.set('#fffaf2');
+    render.sun.color.set('#a9bde6');
+    render.sun.intensity = 0.15;
   }
   const heightAt = createHeightField({ mode });
   // The tyres, compaction and spray treat the ground as snow in the snowfield.
@@ -126,6 +133,8 @@ async function main() {
   }
 
   world.add(Time, Input, TerrainStreaming);
+  world.get(Input).headlights = night;
+  setHeadlightBeams(night);
   world.add(Physics({ rapier: RAPIER, world: physicsWorld, remote, accumulator: 0, step: 1 / 120, stepMs: 0, simTime: 0, displayTime: 0 }));
   // Main-thread physics writes the audio feed itself; worker physics writes it in the worker.
   if (!remote) world.get(Physics).audioFeed = audioFeed;
@@ -138,7 +147,7 @@ async function main() {
   // Sand and dust grains on soil (not on snow: the powder spray is already fine).
   world.add(
     Soil({
-      particles: new SoilParticles(render.scene, heightAt.snow ? { drag: 3, powder: true } : undefined),
+      particles: new SoilParticles(render.scene, heightAt.snow ? { drag: 3, powder: true, night } : undefined),
       fines: heightAt.snow ? null : createFineParticles(render.scene),
       carry: [0, 0, 0, 0],
       spin: [0, 0, 0, 0],
@@ -264,7 +273,7 @@ async function main() {
       timed('sys.syncWheels', () => syncWheels(world));
       timed('sys.syncAxles', () => syncAxles(world));
       timed('sys.syncSoftTires', () => syncSoftTires(world));
-      timed('sys.syncBrakeLights', () => syncBrakeLights(world));
+      timed('sys.syncLights', () => syncLights(world));
       timed('sys.syncAntenna', () => syncAntenna(world));
       timed('sys.syncEngine', () => syncEngine(world));
       timed('sys.updateTracks', () => updateTracks(world));

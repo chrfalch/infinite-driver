@@ -9,7 +9,7 @@ import { updateGpuGround } from '../src/tire/gpu-tires.js';
 const snowField = createHeightField({ mode: 'snow' });
 
 describe('snowfield', () => {
-  it('is a plain of fresh snow on nearly flat ground', () => {
+  it('is fresh snow over rolling ground, with hills rising off the road', () => {
     expect(snowField.world).toBe('snow');
     expect(snowField.snow).toBe(SNOW);
     let lo = Infinity;
@@ -24,9 +24,38 @@ describe('snowfield', () => {
         expect(snowField.snowAt(x, z).firm).toBe(0);
       }
     }
-    expect(hi - lo).toBeLessThan(1.2); // the swell, and the slope down to the lake
+    expect(hi - lo).toBeGreaterThan(8);
+    expect(hi - lo).toBeLessThan(30);
     // The same world on every load (and in every worker).
     expect(createHeightField({ mode: 'snow' })(123.4, -56.7)).toBe(snowField(123.4, -56.7));
+  });
+
+  it('has a road that climbs and dips along its length but lies level from side to side', () => {
+    let x = 0;
+    let z = 0;
+    const grades = [];
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < 1500; i++) {
+      const yaw = snowField.roadHeading(x, z);
+      const h = snowField(x, z);
+      lo = Math.min(lo, h);
+      hi = Math.max(hi, h);
+      // Across the road: the wheel tracks of both lanes at the same height (bar the snow spots).
+      const side = (off) => snowField(x + Math.sin(yaw) * off, z + Math.cos(yaw) * off);
+      expect(Math.abs(side(2.25) - side(-2.25))).toBeLessThan(0.06);
+      const nx = x + Math.cos(yaw) * 2;
+      const nz = z - Math.sin(yaw) * 2;
+      grades.push(Math.abs(snowField(nx, nz) - h) / 2);
+      x = nx;
+      z = nz;
+    }
+    grades.sort((a, b) => a - b);
+    const deg = (p) => (Math.atan(grades[Math.floor(p * (grades.length - 1))]) * 180) / Math.PI;
+    expect(hi - lo).toBeGreaterThan(5); // climbs and dips of several metres over 3 km
+    expect(deg(0.5)).toBeGreaterThan(1);
+    expect(deg(0.9)).toBeGreaterThan(4);
+    expect(deg(1)).toBeLessThan(16);
   });
 
   it('has a ploughed road through the origin: bare asphalt with spots of packed snow', () => {
@@ -117,7 +146,8 @@ describe('snowfield', () => {
         expect(crest.depth).toBeGreaterThan(0.3);
         expect(crest.firm).toBeLessThanOrEqual(ROAD.bankFirmness);
         expect(crest.drag).toBeGreaterThan(0);
-        rise += (snowField(...at(ROAD.bankCentre)) - snowField(...at(12))) / 20;
+        // Snow depth, not height: the hills begin to rise beyond the bank.
+        rise += (crest.depth - snowField.snowAt(...at(12)).depth) / 20;
         x += Math.cos(yaw) * 2;
         z -= Math.sin(yaw) * 2;
       }

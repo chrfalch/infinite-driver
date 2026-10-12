@@ -1,8 +1,9 @@
 import { Quaternion, Vector3 } from 'three/webgpu';
-import { AxleRig, HeightField, IsPlayer, SoftTireView, SteeringWheel, Time, Transform, Vehicle, View, WheelOf, WheelRig } from '../ecs/traits.js';
+import { AxleRig, HeightField, Input, IsPlayer, SoftTireView, SteeringWheel, Time, Transform, Vehicle, View, WheelOf, WheelRig } from '../ecs/traits.js';
 import { updateAxleRig } from '../render/axles.js';
 import { steeringGeometry } from '../render/car-mesh.js';
 import { brakeLightMaterial } from '../render/tube-chassis.js';
+import { updateHeadlights } from '../render/headlights.js';
 import { DRIVETRAIN } from '../vehicle/config.js';
 import { updateGpuTireMesh, updateSoftTireMesh } from '../render/soft-tire-mesh.js';
 import { setTyreGround, setTyreSheet } from '../render/mt-tyre.js';
@@ -181,12 +182,16 @@ export function syncEngine(world) {
 }
 
 // Brake lights: dim tail-light glow, bright red while braking (a quick fade, like a filament).
-export function syncBrakeLights(world) {
-  const vehicle = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle);
-  if (!vehicle) return;
-  const target = vehicle.braking ? 3.2 : 0.25;
-  const k = Math.min(1, world.get(Time).delta / 0.06);
+// Headlights: on and off with H (Input.headlights).
+export function syncLights(world) {
+  const car = world.queryFirst(IsPlayer, Vehicle);
+  if (!car) return;
+  const delta = world.get(Time).delta;
+  const target = car.get(Vehicle).braking ? 3.2 : 0.25;
+  const k = Math.min(1, delta / 0.06);
   brakeLightMaterial.emissiveIntensity += (target - brakeLightMaterial.emissiveIntensity) * k;
+  const headlights = car.get(View)?.object.userData.headlights;
+  if (headlights) updateHeadlights(headlights, world.get(Input).headlights, delta);
 }
 
 export function syncSoftTires(world) {

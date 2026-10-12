@@ -353,6 +353,7 @@ const KEYS = [
   ['R', 'Respawn'],
   ['C', 'Follow camera on / off (tap)'],
   ['C + arrows', 'Turn and tilt the camera'],
+  ['H', 'Headlights on / off'],
   ['P', 'Perf stats on / off'],
   ['M', 'Sound on / off'],
   ['Drag', 'Turn the camera; double-click resets'],

@@ -21,6 +21,7 @@ import { torusMesh } from '../tire/soft-tire.js';
 import { createTubeChassis } from './tube-chassis.js';
 import { createDragsterEngine } from './dragster-engine.js';
 import { mergeByMaterial } from './merge-geometry.js';
+import { createHeadlights } from './headlights.js';
 import { frameGeometry, ifsRack, suspensionMounts } from '../vehicle/frame-geometry.js';
 import { rimInnerFace } from './wheel-inset.js';
 
@@ -160,6 +161,11 @@ export function createCarMesh() {
   const antenna = createAntenna();
   car.add(antenna.object);
   car.userData.antenna = antenna;
+
+  // Headlights in the nose lamps (switched by H, see syncLights).
+  const headlights = createHeadlights();
+  car.add(headlights);
+  car.userData.headlights = headlights;
 
   return { object: car, steeringWheel, axles, antenna };
 }
