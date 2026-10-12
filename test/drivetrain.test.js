@@ -87,7 +87,29 @@ describe('drivetrain', () => {
     d.clutch = 1;
     d.engineW = rpmToRad(300);
     d.update(DT, { throttle: 1, reverseRequest: false }, [0, 0, 0, 0], 0, R);
-    expect(Math.abs(d.shaftTorque)).toBeLessThanOrEqual(engineTorque(DEFAULT_DRIVETRAIN, 300) * d.ratio(1) * DEFAULT_DRIVETRAIN.efficiency + 1e-6);
+    // (The automatic's torque converter multiplies what the engine gives on top.)
+    expect(Math.abs(d.shaftTorque)).toBeLessThanOrEqual(engineTorque(DEFAULT_DRIVETRAIN, 300) * d.converterMultiply * d.ratio(1) * DEFAULT_DRIVETRAIN.efficiency + 1e-6);
+  });
+
+  it('held at a standstill at full throttle, the automatic stalls its converter near peak torque and doubles it', () => {
+    const d = new Drivetrain({ ...DEFAULT_DRIVETRAIN });
+    d.shiftTo(1);
+    // The wheels are held (a car stuck in its ruts): they do not turn.
+    for (let t = 0; t < 3; t += DT) d.update(DT, { throttle: 1, reverseRequest: false }, [0, 0, 0, 0], 0, R);
+    expect(d.rpm).toBeGreaterThan(2150);
+    expect(d.rpm).toBeLessThan(2450);
+    expect(d.converterMultiply).toBeCloseTo(2, 5);
+    // About twice the engine's full-load torque reaches the gearbox output.
+    const engine = engineTorque(DEFAULT_DRIVETRAIN, d.rpm);
+    expect(d.shaftTorque).toBeGreaterThan(1.5 * engine * d.ratio(1) * DEFAULT_DRIVETRAIN.efficiency);
+  });
+
+  it('a manual gearbox pulls away on its clutch, with no torque multiplication', () => {
+    const d = new Drivetrain({ ...DEFAULT_DRIVETRAIN, automatic: false });
+    d.shiftTo(1);
+    for (let t = 0; t < 3; t += DT) d.update(DT, { throttle: 1, reverseRequest: false }, [0, 0, 0, 0], 0, R);
+    expect(d.converterMultiply).toBe(1);
+    expect(d.shaftTorque).toBeLessThanOrEqual(engineTorque(DEFAULT_DRIVETRAIN, d.rpm) * d.ratio(1) * DEFAULT_DRIVETRAIN.efficiency + 1e-6);
   });
 
   it('low 4th stalls on a 35° hill that low 2nd climbs', () => {
