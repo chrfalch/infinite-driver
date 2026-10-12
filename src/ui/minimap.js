@@ -20,7 +20,8 @@ const PALETTES = {
   canyon: { ground: [201, 138, 92], high: [176, 98, 66], road: [243, 231, 205], edge: [128, 92, 70], relief: 1.1 },
   river: { ground: [164, 152, 112], high: [140, 128, 92], road: [236, 218, 170], edge: [118, 104, 76], relief: 1 },
   snow: { ground: [243, 246, 250], high: [222, 230, 240], road: [132, 132, 134], edge: [190, 198, 210], relief: 0.8 },
-  town: { ground: [134, 183, 90], high: [150, 150, 140], road: [70, 72, 76], edge: [205, 200, 190], relief: 1.1 },
+  // The town at night: dark lawns and hills, the streets a little lighter.
+  town: { ground: [44, 62, 46], high: [70, 76, 80], road: [120, 122, 128], edge: [26, 32, 30], relief: 0.9 },
   plain: { ground: [180, 173, 132], high: [150, 150, 108], road: [236, 226, 200], edge: [120, 110, 90], relief: 1 },
 };
 const LAKE = [160, 194, 216];

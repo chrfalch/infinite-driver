@@ -42,7 +42,7 @@ import { setGroundPatch, setTerrainWorld } from './render/terrain-mesh.js';
 import { SNOW_PATCH_N, SnowSurface } from './render/snow-surface.js';
 import { worldLook } from './render/backdrop.js';
 import { createWater } from './render/water.js';
-import { setBuildingCutaway } from './render/building-mesh.js';
+import { setBuildingCutaway, setBuildingNight } from './render/building-mesh.js';
 import { setHeadlightBeams } from './render/headlights.js';
 import { GroundSurface, PATCH_N } from './render/ground-surface.js';
 import { showRutsOnSheet } from './render/rock-surface.js';
@@ -78,12 +78,7 @@ async function main() {
     render.scene.background.set('#e4e1d6');
     render.scene.fog.color.set('#e4e1d6');
   }
-  // The isometric town: a cool, clear haze.
-  if (mode === 'town') {
-    render.scene.background.set('#dfe7e6');
-    render.scene.fog.color.set('#dfe7e6');
-  }
-  // Night worlds (the snowfield): a dark blue haze, faint moonlight from the same direction as the
+  // Night worlds (the snowfield, the town): a dark blue haze, faint moonlight from the same direction as the
   // sun (so it still casts the shadows), a little skylight thrown back off the snow, and the car's
   // headlights on.
   const night = !!worldLook(mode).night;
@@ -99,6 +94,8 @@ async function main() {
     });
     render.sun.color.set('#a9bde6');
     render.sun.intensity = 0.15;
+    // The town's windows light up.
+    setBuildingNight(true);
   }
   const heightAt = createHeightField({ mode });
   // The town's river and ponds.

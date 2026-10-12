@@ -243,6 +243,14 @@ export const buildingMaterial = new MeshStandardNodeMaterial({ roughness: 0.85, 
 buildingMaterial.colorNode = vec4(mix(wall, glassColor, pane), 1);
 buildingMaterial.roughnessNode = mix(float(0.85), float(0.15), pane);
 buildingMaterial.metalnessNode = pane.mul(0.3);
+// At night about half the windows are lit, warm and of varying brightness; the rest stay dark.
+const night = uniform(0);
+const litPick = hash(floor(bay).mul(13.1).add(floor(storey).mul(7.7)).add(positionWorld.z.floor().mul(0.31)));
+const lit = step(0.5, litPick).mul(litPick.mul(0.8).add(0.4));
+buildingMaterial.emissiveNode = vec3(1, 0.7, 0.38).mul(pane).mul(lit).mul(night).mul(mix(float(0.75), float(0.45), isGlass));
+export function setBuildingNight(on) {
+  night.value = on ? 1 : 0;
+}
 buildingMaterial.maskNode = hole.lessThan(dither.mul(0.98).add(0.01));
 // The shadows stay whole.
 buildingMaterial.maskShadowNode = float(1).greaterThan(0);
