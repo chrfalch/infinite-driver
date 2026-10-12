@@ -68,7 +68,7 @@ function generateRiverPlants(heightAt, cx, cz) {
       const turn = rand() * Math.PI * 2;
       const shade = rand();
       if (roll > 0.3) continue;
-      const dist = heightAt.roadDistance(x, z);
+      const dist = heightAt.bankDistance(x, z);
       if (dist < ROCK_REACH) continue; // the bed's rock sheet and its walls
       const slope = Math.abs(heightAt(x + 0.8, z) - heightAt(x - 0.8, z)) / 1.6 + Math.abs(heightAt(x, z + 0.8) - heightAt(x, z - 0.8)) / 1.6;
       if (slope > 0.7) continue;

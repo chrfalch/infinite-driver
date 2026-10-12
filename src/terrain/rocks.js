@@ -128,7 +128,7 @@ function generateRiverRocks(heightAt, cx, cz, { seed, count }) {
     const z = (cz + bedRand()) * CHUNK_SIZE;
     const keep = bedRand();
     const size = 0.15 + 0.35 * bedRand() * bedRand();
-    const dist = heightAt.roadDistance(x, z);
+    const dist = heightAt.bankDistance(x, z);
     if (dist > ROCK_EDGE - 0.5 || keep > (dist < BED_HALF_WIDTH + 0.5 ? 0.9 : 0.35)) continue;
     if (Math.hypot(x, z) < 3.5) continue;
     const rock = makeRock(restingGround(heightAt, size * 0.4), x, z, size, bedRand, noise);
@@ -140,7 +140,7 @@ function generateRiverRocks(heightAt, cx, cz, { seed, count }) {
     const z = (cz + rand()) * CHUNK_SIZE;
     const keep = rand();
     const size = 0.3 + rand() * rand() * 1.2;
-    const dist = heightAt.roadDistance(x, z);
+    const dist = heightAt.bankDistance(x, z);
     if (dist < ROCK_REACH + 1.5 || keep > (dist < 30 ? 0.15 : 0.05)) continue;
     if (Math.abs(heightAt(x + 1, z) - heightAt(x - 1, z)) + Math.abs(heightAt(x, z + 1) - heightAt(x, z - 1)) > 1.2) continue;
     const rock = makeRock(heightAt, x, z, size, rand, noise);
@@ -163,7 +163,7 @@ export function generatePebbles(heightAt, cx, cz, { seed = 99 } = {}) {
     const z = (cz + rand()) * CHUNK_SIZE;
     const keep = rand();
     const size = 0.025 + 0.06 * rand() * rand(); // radius
-    if (keep > 0.8 || heightAt.roadDistance(x, z) > ROCK_EDGE) continue;
+    if (keep > 0.8 || heightAt.bankDistance(x, z) > ROCK_EDGE) continue;
     // More in the creases (the sheet is lower than around it), few on the humps.
     const h = heightAt(x, z);
     const around = (heightAt(x + 0.3, z) + heightAt(x - 0.3, z) + heightAt(x, z + 0.3) + heightAt(x, z - 0.3)) / 4 - h;

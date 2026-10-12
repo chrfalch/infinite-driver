@@ -122,7 +122,7 @@ export function drawnSurface(heightAt, coarse = false) {
     let c = covered.get(key);
     if (c === undefined) {
       if (covered.size > MAX_CACHED) covered.clear();
-      c = heightAt.roadDistance(mx + 0.5, mz + 0.5) <= ROCK_REACH + 0.75;
+      c = heightAt.bankDistance(mx + 0.5, mz + 0.5) <= ROCK_REACH + 0.75;
       covered.set(key, c);
     }
     return c;

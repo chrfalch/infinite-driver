@@ -124,44 +124,134 @@ describe('dry river terrain', () => {
     expect(heightAt.sample(0, 0).road).toBe(1);
   });
 
-  it('keeps the bed drivable along its length: under 20° over any 10 m (the ground under the rock)', () => {
-    const points = walkBed(2000);
-    let steepest = 0;
-    for (let i = 20; i < points.length; i++) {
-      const under = (p) => heightAt.sample(p.x, p.z).under;
-      steepest = Math.max(steepest, Math.abs(under(points[i]) - under(points[i - 20])) / 10);
-      expect(heightAt.roadDistance(points[i].x, points[i].z)).toBeLessThan(1.5);
+  it('only climbs, toward +x (the way the car starts facing)', () => {
+    expect(Math.cos(heightAt.roadHeading(0, 0))).toBeGreaterThan(0);
+    const points = walkBed(3000);
+    let prev = heightAt.sample(points[0].x, points[0].z).bedY;
+    for (const p of points) {
+      expect(p.x).toBeGreaterThan(-1);
+      const y = heightAt.sample(p.x, p.z).bedY;
+      expect(y).toBeGreaterThanOrEqual(prev - 1e-6);
+      prev = y;
     }
-    expect(Math.atan(steepest)).toBeLessThan((20 * Math.PI) / 180);
-    // ...but it takes work: the median grade over 10 m is over 4°.
-    const grades = [];
-    for (let i = 20; i < points.length; i++) grades.push(Math.abs(heightAt.sample(points[i].x, points[i].z).under - heightAt.sample(points[i - 20].x, points[i - 20].z).under) / 10);
-    grades.sort((p, q) => p - q);
-    expect(Math.atan(grades[grades.length >> 1])).toBeGreaterThan((4 * Math.PI) / 180);
+    expect(prev - heightAt.sample(points[0].x, points[0].z).bedY).toBeGreaterThan(200);
   });
 
-  it('goes up and down along the bed', () => {
-    const hs = walkBed(3000).filter((_, i) => i % 10 === 0).map((p) => p.h);
-    expect(Math.max(...hs) - Math.min(...hs)).toBeGreaterThan(6);
-    // Both climbs and descents of at least 3 m.
-    let climb = 0;
-    let descent = 0;
-    for (let i = 20; i < hs.length; i++) {
-      climb = Math.max(climb, hs[i] - hs[i - 20]);
-      descent = Math.max(descent, hs[i - 20] - hs[i]);
+  it('climbs in a staircase: level shelves of 5-10 m between short, steep risers of 2-3 m, all varied', () => {
+    const step = 0.25;
+    const ys = walkBed(2000, step).map((p) => heightAt.sample(p.x, p.z).bedY);
+    // Runs of level and of climbing ground along the centre line.
+    const runs = [];
+    for (let i = 1; i < ys.length; i++) {
+      const flat = (ys[i] - ys[i - 1]) / step < 0.03;
+      if (runs.length && runs[runs.length - 1].flat === flat) {
+        const r = runs[runs.length - 1];
+        r.len += step;
+        r.rise += ys[i] - ys[i - 1];
+        r.peak = Math.max(r.peak, (ys[i] - ys[i - 1]) / step);
+      } else runs.push({ flat, len: step, rise: ys[i] - ys[i - 1], peak: (ys[i] - ys[i - 1]) / step });
     }
-    expect(climb).toBeGreaterThan(3);
-    expect(descent).toBeGreaterThan(3);
+    const inner = runs.slice(1, -1);
+    const shelves = inner.filter((r) => r.flat).map((r) => r.len).sort((p, q) => p - q);
+    const risers = inner.filter((r) => !r.flat);
+    const deg = (g) => Math.atan(g) * (180 / Math.PI);
+    const median = (v) => v[v.length >> 1];
+    expect(risers.length).toBeGreaterThan(120);
+    // Shelves 5-10 m (a little longer where the bed bends), varied.
+    expect(median(shelves)).toBeGreaterThan(5.5);
+    expect(median(shelves)).toBeLessThan(10);
+    expect(shelves[Math.floor(shelves.length * 0.05)]).toBeGreaterThan(4);
+    expect(shelves[Math.floor(shelves.length * 0.95)]).toBeLessThan(12);
+    expect(shelves[Math.floor(shelves.length * 0.9)] - shelves[Math.floor(shelves.length * 0.1)]).toBeGreaterThan(3);
+    // Risers 2-3 m long, rising 0.6-2 m: some gentle-ish, some very steep, none past ~38°.
+    const lens = risers.map((r) => r.len).sort((p, q) => p - q);
+    expect(median(lens)).toBeGreaterThan(2);
+    expect(median(lens)).toBeLessThan(3.3);
+    expect(lens[lens.length - 1]).toBeLessThan(4);
+    const grades = risers.map((r) => deg(r.rise / r.len)).sort((p, q) => p - q);
+    expect(grades[Math.floor(grades.length * 0.1)]).toBeLessThan(24);
+    expect(grades[Math.floor(grades.length * 0.9)]).toBeGreaterThan(27);
+    expect(deg(Math.max(...risers.map((r) => r.peak)))).toBeLessThan(38);
+  });
+
+  it('narrows and widens along its length: tight gaps between the walls and wide open stretches', () => {
+    const points = walkBed(3000).filter((_, i) => i % 10 === 0);
+    const widths = points.map((p) => heightAt.bedWidth(p.x, p.z));
+    expect(Math.min(...widths)).toBeLessThan(1.6);
+    expect(Math.max(...widths)).toBeGreaterThan(6.5);
+    // Several separate narrow and wide stretches.
+    const stretches = (test) => widths.filter((w, i) => test(w) && !(i > 0 && test(widths[i - 1]))).length;
+    expect(stretches((w) => w < 2)).toBeGreaterThanOrEqual(3);
+    expect(stretches((w) => w > 5.5)).toBeGreaterThanOrEqual(3);
+    // Where it is narrow, the boulder walls close in just past the bed, but a lane for the car
+    // (2.4 m over the tyres) stays low enough to drive.
+    let wallSum = 0;
+    let walls = 0;
+    for (const p of points.filter((_, i) => widths[i] < 1.8)) {
+      const side = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
+      const w = heightAt.bedWidth(p.x, p.z);
+      for (const sgn of [1, -1]) {
+        let wall = 0;
+        for (let d = w + 1.5; d <= w + 3; d += 0.25) wall = Math.max(wall, heightAt.sample(p.x + side[0] * d * sgn, p.z + side[1] * d * sgn).stone);
+        wallSum += wall;
+        walls++;
+        expect(heightAt.sample(p.x + side[0] * 1.2 * sgn, p.z + side[1] * 1.2 * sgn).stone).toBeLessThan(0.8);
+      }
+      expect(heightAt.sample(p.x, p.z).road).toBeGreaterThan(0.9);
+    }
+    expect(walls).toBeGreaterThan(20);
+    expect(wallSum / walls).toBeGreaterThan(1);
   });
 
   it('has banks either side of the bed', () => {
     for (const p of walkBed(400).filter((_, i) => i % 40 === 0)) {
       const side = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
       for (const s of [1, -1]) {
-        const bank = heightAt(p.x + side[0] * 10 * s, p.z + side[1] * 10 * s);
+        const out = heightAt.bedWidth(p.x, p.z) + 6;
+        const bank = heightAt(p.x + side[0] * out * s, p.z + side[1] * out * s);
         expect(bank).toBeGreaterThan(p.h + 0.2);
       }
     }
+  });
+
+  it('keeps the land outside the river level with the bank tops', () => {
+    for (const p of walkBed(2000).filter((_, i) => i % 50 === 0)) {
+      const side = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
+      const w = heightAt.bedWidth(p.x, p.z);
+      for (const sgn of [1, -1]) {
+        // From the bank top out into the forest, the ground stands 0.6-1.5 m over the bed beside
+        // it (up to a riser more where it is beside one, plus small bumps): no hills over it.
+        for (const d of [w + 7, w + 12, w + 25, w + 45]) {
+          const s = heightAt.sample(p.x + side[0] * d * sgn, p.z + side[1] * d * sgn);
+          expect(s.h - s.bedY).toBeGreaterThan(0.4);
+          expect(s.h - s.bedY).toBeLessThan(4.5);
+        }
+      }
+    }
+  });
+
+  it('tops the boulder walls flush with the ground outside the river', () => {
+    const over = [];
+    for (const p of walkBed(2000).filter((_, i) => i % 20 === 0)) {
+      const side = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
+      const ahead = [Math.cos(p.yaw), -Math.sin(p.yaw)];
+      const w = heightAt.bedWidth(p.x, p.z);
+      for (const sgn of [1, -1]) {
+        const at = (d, o = 0) => heightAt(p.x + side[0] * d * sgn + ahead[0] * o, p.z + side[1] * d * sgn + ahead[1] * o);
+        // The ground just outside, a few metres either way (it steps up with the bed's stairs).
+        let land = -Infinity;
+        for (let o = -4; o <= 4; o++) land = Math.max(land, at(w + 10, o));
+        let wall = -Infinity;
+        for (let d = w; d <= w + 6; d += 0.25) wall = Math.max(wall, at(d));
+        over.push(wall - land);
+      }
+    }
+    over.sort((p, q) => p - q);
+    // The wall tops reach the ground level and (bar the odd bend, where the ground's steps fan
+    // out) stay under it.
+    expect(over[over.length >> 1]).toBeGreaterThan(-0.6);
+    expect(over[over.length >> 1]).toBeLessThan(0.1);
+    expect(over[Math.floor(over.length * 0.9)]).toBeLessThan(0.3);
   });
 
   it('floors the bed with one rock sheet, rising into boulder walls', () => {
@@ -173,7 +263,8 @@ describe('dry river terrain', () => {
     let walls = 0;
     for (const p of points) {
       const side = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
-      for (let d = -3.5; d <= 3.5; d += 0.5) {
+      const w = heightAt.bedWidth(p.x, p.z);
+      for (let d = -(w - 0.5); d <= w - 0.5; d += 0.5) {
         const s = heightAt.sample(p.x + side[0] * d, p.z + side[1] * d);
         // Rock or soil pockets, no ground showing between the humps; bare rock for the tyres except
         // in the pockets (soft, they take ruts), which are shallow.
@@ -188,7 +279,7 @@ describe('dry river terrain', () => {
       }
       for (const sgn of [1, -1]) {
         let top = 0;
-        for (let d = 5; d <= 8; d += 0.25) top = Math.max(top, heightAt.sample(p.x + side[0] * d * sgn, p.z + side[1] * d * sgn).stone);
+        for (let d = w + 1; d <= w + 4; d += 0.25) top = Math.max(top, heightAt.sample(p.x + side[0] * d * sgn, p.z + side[1] * d * sgn).stone);
         wallSum += top;
         walls++;
       }
@@ -215,7 +306,7 @@ describe('dry river terrain', () => {
       if (soil > 0.05) {
         if (!heightAt.rockAt(x, z)) deepSoft++;
         deep++;
-      } else if (soil === 0 && heightAt.roadDistance(x, z) < 4) {
+      } else if (soil === 0 && heightAt.bankDistance(x, z) < 4) {
         rockChecked++;
         if (heightAt.rockAt(x, z)) shallowRock++;
       }
@@ -256,7 +347,7 @@ describe('dry river terrain', () => {
   it('scatters small loose rocks and pebbles over the rock sheet', async () => {
     const { generatePebbles, PEBBLE_STRIDE } = await import('../src/terrain/rocks.js');
     const rocks = generateRocks(heightAt, 0, -1);
-    const onBed = rocks.filter((r) => heightAt.roadDistance(r.x, r.z) < ROCK_EDGE);
+    const onBed = rocks.filter((r) => heightAt.bankDistance(r.x, r.z) < ROCK_EDGE);
     expect(onBed.length).toBeGreaterThan(40);
     // Small enough to drive over (the car's belly is 0.62 m up), and none on the spawn point.
     for (const r of onBed) {
@@ -280,6 +371,6 @@ describe('dry river terrain', () => {
     for (let cx = -2; cx < 2; cx++) for (let cz = -2; cz < 2; cz++) plants.push(...generatePlants(heightAt, cx, cz));
     const trees = plants.filter((p) => p.kind === 'tree');
     expect(trees.length).toBeGreaterThan(50);
-    for (const t of trees) expect(heightAt.roadDistance(t.x, t.z)).toBeGreaterThan(10);
+    for (const t of trees) expect(heightAt.bankDistance(t.x, t.z)).toBeGreaterThan(10);
   });
 });

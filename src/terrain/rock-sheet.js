@@ -71,7 +71,7 @@ function sampleSheet(heightAt, cx, cz, step, rows = [0, CHUNK_SIZE], jitter = 0)
   for (let mz = rows[0]; mz < rows[1]; mz++) {
     for (let mx = 0; mx < CHUNK_SIZE; mx++) {
       // The metre cell is in if its centre is within the sheet's reach (plus the cell's half-diagonal).
-      if (heightAt.roadDistance(x0 + mx + 0.5, z0 + mz + 0.5) > ROCK_REACH + 0.75) continue;
+      if (heightAt.bankDistance(x0 + mx + 0.5, z0 + mz + 0.5) > ROCK_REACH + 0.75) continue;
       for (let j = 0; j < per; j++) {
         for (let i = 0; i < per; i++) {
           const gx = mx * per + i;
