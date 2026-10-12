@@ -124,20 +124,22 @@ describe('dry river terrain', () => {
     expect(heightAt.sample(0, 0).road).toBe(1);
   });
 
-  it('keeps the bed drivable along its length: under 20° over any 10 m (the ground under the rock)', () => {
-    const points = walkBed(2000);
-    let steepest = 0;
+  it('makes the bed steep and hard to drive, but still climbable in low range (the ground under the rock)', () => {
+    const points = walkBed(3000);
+    const under = (p) => heightAt.sample(p.x, p.z).under;
+    const grades = [];
     for (let i = 20; i < points.length; i++) {
-      const under = (p) => heightAt.sample(p.x, p.z).under;
-      steepest = Math.max(steepest, Math.abs(under(points[i]) - under(points[i - 20])) / 10);
+      grades.push(Math.atan(Math.abs(under(points[i]) - under(points[i - 20])) / 10) * (180 / Math.PI));
       expect(heightAt.roadDistance(points[i].x, points[i].z)).toBeLessThan(1.5);
     }
-    expect(Math.atan(steepest)).toBeLessThan((20 * Math.PI) / 180);
-    // ...but it takes work: the median grade over 10 m is over 4°.
-    const grades = [];
-    for (let i = 20; i < points.length; i++) grades.push(Math.abs(heightAt.sample(points[i].x, points[i].z).under - heightAt.sample(points[i - 20].x, points[i - 20].z).under) / 10);
     grades.sort((p, q) => p - q);
-    expect(Math.atan(grades[grades.length >> 1])).toBeGreaterThan((4 * Math.PI) / 180);
+    const at = (f) => grades[Math.floor(f * (grades.length - 1))];
+    // Over 10 m: a median grade over 10°, a tenth of it steeper than 20°, the steepest pitches
+    // near 30° (the car climbs a 30° ramp in low range: scripts/traction-check.mjs) but not past 36°.
+    expect(at(0.5)).toBeGreaterThan(10);
+    expect(at(0.9)).toBeGreaterThan(20);
+    expect(at(0.99)).toBeGreaterThan(27);
+    expect(at(1)).toBeLessThan(36);
   });
 
   it('goes up and down along the bed', () => {

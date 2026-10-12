@@ -1,6 +1,6 @@
 // Dry river country: a winding, dry river bed floored with one continuous sheet of faceted sandstone
 // that rises into walls of tall boulders along its banks, with open gum forest either side and
-// rolling hills beyond. The bed climbs and dips gently along its length. Like the canyon, everything comes from one deterministic height
+// rolling hills beyond. The bed climbs and dips steeply along its length. Like the canyon, everything comes from one deterministic height
 // function, so physics colliders, the GPU tyre ground grid, tracks, soil and the render mesh agree.
 //
 // The beds are the zero lines of one warped periodic field (one family only, so they never cross);
@@ -15,7 +15,8 @@
 // the drawn rock mesh (render/rock-surface.js) their shape. Toward the banks the domes grow tall and
 // steep into boulder walls the car cannot climb.
 //
-// Kept drivable: the bed floor stays under about 19° over any 10 m, the humps stand 15-45 cm over
+// Hard but drivable: the bed floor stays under about 33° over any 10 m (the car climbs 30° in low
+// range), with a median grade near 11°; the humps stand 15-45 cm over
 // the creases between them, and bedrock ledges are at most ~20 cm.
 import { createNoise2D } from 'simplex-noise';
 import { mulberry32 } from './height.js';
@@ -131,9 +132,9 @@ export function createRiverField(seed = 4711) {
     return { d: (a - k * SPACING) / g, gx: gx / g, gz: gz / g, k };
   }
 
-  // Bed floor height along the bed: climbs and dips that take some work (a median grade of about
-  // 5.5°, one tenth steeper than 11°, the steepest 10 m about 19°).
-  const floorAt = (px, pz) => 12 * floorNoise(px * 0.0042, pz * 0.0042) + 1.8 * floorNoise(px * 0.013 + 5, pz * 0.013 + 3);
+  // Bed floor height along the bed: steep climbs and dips that are hard work (a median grade of
+  // about 11°, one tenth steeper than 21°, the steepest 10 m about 33°).
+  const floorAt = (px, pz) => 24 * floorNoise(px * 0.0042, pz * 0.0042) + 3.6 * floorNoise(px * 0.013 + 5, pz * 0.013 + 3);
 
   // Everything the renderer needs at a point; heightAt uses only .h.
   function sample(x, z) {
@@ -154,9 +155,9 @@ export function createRiverField(seed = 4711) {
     const inBed = 1 - smoothstep(BED_HALF_WIDTH - 0.5, BED_HALF_WIDTH + 2.5, dist);
     let ledge = 0;
     if (inBed > 0) {
-      // Where the bed is already steep the ramps would get too steep, so the ledges fade out there.
+      // Where the bed is already very steep the ramps would get too steep, so the ledges fade out there.
       const grade = Math.abs(floorAt(cxl - b.gz, czl + b.gx) - floorAt(cxl + b.gz, czl - b.gx)) / 2;
-      const strength = inBed * (1 - smoothstep(0.07, 0.12, grade));
+      const strength = inBed * (1 - smoothstep(0.14, 0.24, grade));
       if (strength > 0) {
         const v = centre + 0.08 * ledgeNoise(x * 0.35, z * 0.35);
         const f = v / LEDGE_STEP;
