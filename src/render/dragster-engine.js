@@ -8,18 +8,23 @@
 // Engine-local frame (as exported): chassis axes (x forward, y up, z right), the origin on the
 // crank axis at the pulley plane, the crankshaft along x and the pulleys facing forward.
 import {
+  Box3,
+  BoxGeometry,
   BufferAttribute,
   BufferGeometry,
+  CylinderGeometry,
   DoubleSide,
   Group,
   Mesh,
   MeshStandardMaterial,
   Quaternion,
   Sphere,
+  TorusGeometry,
   Vector2,
   Vector3,
 } from 'three/webgpu';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { mergeByMaterial } from './merge-geometry.js';
 
 const TWO_PI = Math.PI * 2;
 
@@ -228,6 +233,65 @@ export function throttleTravel(geo, springEnd, limit = (70 * Math.PI) / 180) {
   return sign * a * 0.92;
 }
 
+// ---- Gearbox ----------------------------------------------------------------------------------
+// A plain manual gearbox bolted to the back of the block (engine-local units, crank along x): a
+// bellhousing flaring out to the block, a ribbed case, and a tail housing with the output flange.
+// face: x of the block's flywheel face; the gearbox runs toward -x from there.
+const castAlloy = std('#9a9da0', 0.55, 0.5);
+const steel = std('#3a3c3f', 0.45, 0.7);
+export const GEARBOX = { bell: 0.16, caseLength: 0.25, tail: 0.09 };
+
+export function createGearbox(face) {
+  const group = new Group();
+  group.name = 'gearbox';
+  const along = (geometry, material, x) => {
+    const m = new Mesh(geometry, material);
+    m.rotation.z = Math.PI / 2; // cylinder axis y → x
+    m.position.x = x;
+    m.castShadow = m.receiveShadow = true;
+    group.add(m);
+    return m;
+  };
+  const { bell, caseLength, tail } = GEARBOX;
+  // Bellhousing: wide at the block, with a bolt flange.
+  along(new CylinderGeometry(0.125, 0.19, bell, 20), castAlloy, face - bell / 2);
+  along(new CylinderGeometry(0.2, 0.2, 0.015, 20), castAlloy, face - 0.0075);
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const bolt = along(new CylinderGeometry(0.008, 0.008, 0.025, 6), steel, face - 0.02);
+    bolt.position.y = Math.cos(a) * 0.185;
+    bolt.position.z = Math.sin(a) * 0.185;
+  }
+  // Case: a box with ribs round it, and the shifter turret on top.
+  const c0 = face - bell;
+  const box = new Mesh(new BoxGeometry(caseLength, 0.19, 0.17), castAlloy);
+  box.position.x = c0 - caseLength / 2;
+  box.castShadow = box.receiveShadow = true;
+  group.add(box);
+  for (let i = 0; i < 4; i++) {
+    const rib = new Mesh(new BoxGeometry(0.012, 0.205, 0.185), castAlloy);
+    rib.position.x = c0 - 0.03 - (i * (caseLength - 0.06)) / 3;
+    rib.castShadow = true;
+    group.add(rib);
+  }
+  const turret = new Mesh(new CylinderGeometry(0.035, 0.04, 0.05, 12), castAlloy);
+  turret.position.set(c0 - caseLength * 0.35, 0.12, 0);
+  group.add(turret);
+  const lever = new Mesh(new CylinderGeometry(0.008, 0.008, 0.16, 8), steel);
+  lever.position.set(c0 - caseLength * 0.35 + 0.02, 0.21, 0);
+  lever.rotation.z = -0.25;
+  group.add(lever);
+  // Tail housing and output flange.
+  const t0 = c0 - caseLength;
+  along(new CylinderGeometry(0.05, 0.065, tail, 14), castAlloy, t0 - tail / 2);
+  along(new CylinderGeometry(0.045, 0.045, 0.02, 14), steel, t0 - tail - 0.01);
+  const ring = new Mesh(new TorusGeometry(0.19, 0.006, 6, 24), steel);
+  ring.rotation.y = Math.PI / 2;
+  ring.position.x = face - 0.016;
+  group.add(ring);
+  return mergeByMaterial(group);
+}
+
 // ---- The engine --------------------------------------------------------------------------------
 
 const MODEL_URL = () => `${(typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL) || '/'}models/dragster-engine.glb`;
@@ -310,6 +374,9 @@ export function createDragsterEngine({ position = new Vector3(), scale = 1, yaw 
     const travel = throttleTravel(geo, { fixed: xy(springFixed), moving: xy(springMoving) });
 
     mount.add(model);
+    // The gearbox hangs off the flywheel face (the back of the block, the static mesh's -x end).
+    model.updateMatrixWorld(true);
+    mount.add(createGearbox(new Box3().setFromObject(node('static')).min.x));
     parts = { pulleys, radii, belt, throttle, valveArm, rod, geo, rodRest, spring, springFixed, springMoving, springRest, travel };
   };
   const loading = loadModel();
