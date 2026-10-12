@@ -1,6 +1,8 @@
 // Dry river country: a winding, dry river bed floored with one continuous sheet of faceted sandstone
-// that rises into walls of tall boulders along its banks, with open gum forest either side and
-// rolling hills beyond. The bed climbs and dips steeply along its length. Like the canyon, everything comes from one deterministic height
+// that rises into walls of tall boulders along its banks, with open gum forest either side, on
+// ground level with the bank tops. The bed only climbs (toward +x), in a staircase of level rock shelves and
+// short steep risers, and it narrows to a tight gap between the walls and opens out again along its
+// length. Like the canyon, everything comes from one deterministic height
 // function, so physics colliders, the GPU tyre ground grid, tracks, soil and the render mesh agree.
 //
 // The beds are the zero lines of one warped periodic field (one family only, so they never cross);
@@ -15,19 +17,31 @@
 // the drawn rock mesh (render/rock-surface.js) their shape. Toward the banks the domes grow tall and
 // steep into boulder walls the car cannot climb.
 //
-// Hard but drivable: the bed floor stays under about 33° over any 10 m (the car climbs 30° in low
-// range), with a median grade near 11°; the humps stand 15-45 cm over
-// the creases between them, and bedrock ledges are at most ~20 cm.
+// Hard but drivable: shelves 5-10 m long, risers 2-3 m long climbing 0.6-2 m (about 15-35°, the
+// car climbs 30° in low range); the humps stand 15-45 cm over the creases between them. The bed is
+// 1.3-7.5 m either side of its centre line; its walls and banks move
+// with it, so everything shaped by the distance from the bed uses bankDistance: the distance as
+// if the bed were the usual BED_HALF_WIDTH.
 import { createNoise2D } from 'simplex-noise';
 import { mulberry32 } from './height.js';
 
-export const BED_HALF_WIDTH = 4; // m, the flat bed either side of the centre line
-// The rock sheet covers the bed and its walls out to ROCK_REACH (m from the centre line), fading
+export const BED_HALF_WIDTH = 4; // m, the flat bed either side of the centre line, at its usual width
+// The rock sheet covers the bed and its walls out to ROCK_REACH (m of bankDistance), fading
 // into the banks from ROCK_EDGE.
 export const ROCK_EDGE = 8.2;
 export const ROCK_REACH = 9.4;
 const SPACING = 360; // m between neighbouring beds
-const LEDGE_STEP = 0.18; // m, height of a bedrock ledge across the bed
+const WIDTH_RANGE = [1.3, 7.5]; // m, the bed's half-width along its length
+// The staircase: a riser every STEP_PERIOD m (give or take STEP_JITTER), climbing STEP_RISE m
+// (give or take STEP_VARY) over 2-3 m, then a level shelf up to the next.
+const STEP_PERIOD = 10;
+const STEP_JITTER = 1.5;
+const STEP_RISE = 1.3;
+const STEP_VARY = 0.35;
+const RISER_LENGTH = [2, 3];
+const RISER_ANGLE = [22, 32]; // degrees: picks the riser's length for its rise (within RISER_LENGTH)
+const ARC_STEP = 1; // m of x per slice when measuring the way along a bed
+const RISER_ROUND = 0.12; // share of a riser's length its top and bottom edges are rounded over
 const SIDES = 7; // side planes per boulder
 // Soil pockets: firm earth fills the bed's creases and hollows up to a level that wanders between
 // none and about 1.3 x SOIL_LEVEL over the ground beneath, so the rock humps stand out of flat patches of soil.
@@ -106,14 +120,15 @@ export function createRiverField(seed = 4711) {
   const rand = mulberry32(seed);
   const warpA = createNoise2D(rand);
   const warpB = createNoise2D(rand);
-  const floorNoise = createNoise2D(rand);
+  createNoise2D(rand); // (was the floor noise: kept so the noises after it stay the same)
   const hillNoise = createNoise2D(rand);
-  const ledgeNoise = createNoise2D(rand);
+  const wanderNoise = createNoise2D(rand);
   const sizeNoise = createNoise2D(rand);
   const bankNoise = createNoise2D(rand);
   const ridgeNoise = createNoise2D(rand);
   const chipNoise = createNoise2D(rand);
   const soilNoise = createNoise2D(rand);
+  const widthNoise = createNoise2D(rand);
 
   // Warped coordinate across the beds; a bed is where it is a multiple of the spacing. Long gentle
   // bends plus shorter wiggles.
@@ -132,44 +147,113 @@ export function createRiverField(seed = 4711) {
     return { d: (a - k * SPACING) / g, gx: gx / g, gz: gz / g, k };
   }
 
-  // Bed floor height along the bed: steep climbs and dips that are hard work (a median grade of
-  // about 11°, one tenth steeper than 21°, the steepest 10 m about 33°).
-  const floorAt = (px, pz) => 24 * floorNoise(px * 0.0042, pz * 0.0042) + 3.6 * floorNoise(px * 0.013 + 5, pz * 0.013 + 3);
+  // The way along a bed: its length from x = 0 to the centre line's x (x always grows along a
+  // bed: the field's slope across it never turns over). Summed over ARC_STEP m slices of x from 0
+  // outward, in order, so every thread gets the same sums; cached per bed.
+  const arcs = new Map();
+  const centreZ = (x, k, z) => {
+    for (let i = 0; i < 6; i++) z -= (across(x, z) - k * SPACING) / ((across(x, z + 0.25) - across(x, z - 0.25)) / 0.5);
+    return z;
+  };
+  // Metres along the bed per metre of x at (x, z) on its centre line.
+  const stretch = (x, z) => Math.hypot(1, (across(x + 0.25, z) - across(x - 0.25, z)) / (across(x, z + 0.25) - across(x, z - 0.25)));
+  let lastK = NaN;
+  let lastBed = null;
+  function arcAt(i, k) {
+    let b = k === lastK ? lastBed : arcs.get(k);
+    if (!b) {
+      const z = centreZ(0, k, k * SPACING);
+      const r = stretch(0, z);
+      b = { pos: { s: [0], z, r }, neg: { s: [0], z, r } };
+      arcs.set(k, b);
+    }
+    lastK = k;
+    lastBed = b;
+    const side = i >= 0 ? b.pos : b.neg;
+    const n = Math.abs(i);
+    if (n < side.s.length) return side.s[n];
+    const dir = i >= 0 ? 1 : -1;
+    while (side.s.length <= n) {
+      const x = dir * side.s.length * ARC_STEP;
+      side.z = centreZ(x, k, side.z);
+      const r = stretch(x, side.z);
+      side.s.push(side.s[side.s.length - 1] + dir * 0.5 * (side.r + r) * ARC_STEP);
+      side.r = r;
+    }
+    return side.s[n];
+  }
+  function along(cx, k) {
+    const f = cx / ARC_STEP;
+    const i = Math.floor(f);
+    const a = arcAt(i, k);
+    return a + (arcAt(i + 1, k) - a) * (f - i);
+  }
+
+  // The bed's half-width at `s` along it: stretches of a hundred metres or so that wander between
+  // a tight gap and wide open rock.
+  // Each bed (k) has its own.
+  const widthAt = (s, k) =>
+    Math.min(WIDTH_RANGE[1], Math.max(WIDTH_RANGE[0], BED_HALF_WIDTH + 4.4 * widthNoise(s * 0.0105, 0.5 + 9 * k) + 1.2 * widthNoise(s * 0.043, 7.5 + 9 * k)));
+
+  // The staircase. Riser i starts at edge(i) and climbs from shelf i - 1 to shelf i; the shelves
+  // stand at shelf(i), a steady climb plus a bounded wobble, so every riser goes up. Each bed (k)
+  // has its own.
+  const edge = (i, k) => i * STEP_PERIOD + STEP_JITTER * (2 * hash2(i, k, 501) - 1);
+  const shelf = (i, k) => i * STEP_RISE + STEP_VARY * (2 * hash2(i, k, 502) - 1);
+  const riser = (i, k) => {
+    const rise = shelf(i, k) - shelf(i - 1, k);
+    const angle = (RISER_ANGLE[0] + (RISER_ANGLE[1] - RISER_ANGLE[0]) * hash2(i, k, 503)) * (Math.PI / 180);
+    return Math.min(RISER_LENGTH[1], Math.max(RISER_LENGTH[0], rise / Math.tan(angle)));
+  };
+  // A riser's climb over t = 0..1 of its length: a straight ramp with its edges rounded over.
+  const c = RISER_ROUND;
+  const ramp = (t) => {
+    const m = 1 / (1 - c); // the ramp's slope between the rounded edges
+    if (t <= 0) return 0;
+    if (t >= 1) return 1;
+    if (t < c) return (m * t * t) / (2 * c);
+    if (t > 1 - c) return 1 - (m * (1 - t) * (1 - t)) / (2 * c);
+    return m * (t - c / 2);
+  };
+  // Bed floor height at `s` along the bed.
+  function floorAlong(s, k) {
+    let i = Math.floor(s / STEP_PERIOD) + 1;
+    while (edge(i, k) > s) i--;
+    const t = (s - edge(i, k)) / riser(i, k);
+    return shelf(i - 1, k) + (shelf(i, k) - shelf(i - 1, k)) * ramp(t);
+  }
+  // The land far from the beds: their mean climb, blended between the two either side.
+  function landAt(px, pz) {
+    const f = across(px, pz) / SPACING;
+    const k = Math.floor(f);
+    const climb = (kk) => (along(px, kk) * STEP_RISE) / STEP_PERIOD;
+    return climb(k) + (climb(k + 1) - climb(k)) * smoothstep(0, 1, f - k);
+  }
+
 
   // Everything the renderer needs at a point; heightAt uses only .h.
   function sample(x, z) {
     const b = bed(x, z);
-    const dist = Math.abs(b.d);
-    // The bed is level side to side: its floor is taken at the centre line, then blends into the
-    // local height further out.
+    // The bed is level side to side: its floor is taken at the centre line (so the risers run
+    // straight across it), and so is the land either side, out to where the next bed takes over.
     const cxl = x - b.gx * b.d;
     const czl = z - b.gz * b.d;
-    const centre = floorAt(cxl, czl);
-    const level = 1 - smoothstep(BED_HALF_WIDTH + 2, 26, dist);
-    // A river bed is the low line of its valley: the land either side never drops below it.
-    const floor = centre * level + smoothMax(floorAt(x, z), centre, 3) * (1 - level);
-
-    // Bedrock ledges across the bed: the floor is terraced into shelves joined by short ramps. On
-    // the level stretches there are none; where the bed climbs or dips there is one every few
-    // metres of height. The ledge line wiggles across the bed.
+    const s = along(cxl, b.k);
+    // Distance from the bed as if it were BED_HALF_WIDTH wide: the walls and banks move with it.
+    const dist = Math.abs(b.d) - (widthAt(s, b.k) - BED_HALF_WIDTH);
+    const centre = floorAlong(s, b.k);
+    // The land is level with the bank tops: the bed is a channel cut into it, and it steps up with
+    // the bed's stairs. Past the bed's edge it goes by the floor a few metres further up (the floor
+    // only climbs), so the banks beside a riser stand over the shelf at its top as well as the one
+    // at its foot. Far out it eases onto the mean climb, blended with the next bed's.
+    const ahead = floorAlong(s + 6 * smoothstep(BED_HALF_WIDTH + 0.5, BED_HALF_WIDTH + 4.5, dist), b.k);
+    const far = smoothstep(120, 170, dist);
+    const floor = far > 0 ? ahead + (landAt(x, z) - ahead) * far : ahead;
     const inBed = 1 - smoothstep(BED_HALF_WIDTH - 0.5, BED_HALF_WIDTH + 2.5, dist);
-    let ledge = 0;
-    if (inBed > 0) {
-      // Where the bed is already very steep the ramps would get too steep, so the ledges fade out there.
-      const grade = Math.abs(floorAt(cxl - b.gz, czl + b.gx) - floorAt(cxl + b.gz, czl - b.gx)) / 2;
-      const strength = inBed * (1 - smoothstep(0.14, 0.24, grade));
-      if (strength > 0) {
-        const v = centre + 0.08 * ledgeNoise(x * 0.35, z * 0.35);
-        const f = v / LEDGE_STEP;
-        const k = Math.floor(f);
-        // Flat for 60 % of each step, then a ramp up to the next shelf.
-        ledge = ((k + smoothstep(0.6, 1, f - k)) * LEDGE_STEP - v) * strength;
-      }
-    }
 
-    let h = floor + ledge;
+    let h = floor;
     // A shallow, meandering low channel down the bed (the last water ran there).
-    const wander = 1.4 * ledgeNoise(cxl * 0.02 + 11, czl * 0.02);
+    const wander = 1.4 * wanderNoise(cxl * 0.02 + 11, czl * 0.02);
     const ch = b.d - wander;
     const channel = Math.exp(-(ch * ch) / 2.2);
     h -= 0.12 * channel;
@@ -177,10 +261,10 @@ export function createRiverField(seed = 4711) {
     const bankRise = 0.6 + 0.9 * (0.5 + 0.5 * bankNoise(x * 0.018, z * 0.018));
     const bank = smoothstep(BED_HALF_WIDTH, BED_HALF_WIDTH + 4.5, dist);
     h += bank * bankRise;
-    // Forest floor: rolling ground, with small bumps.
+    // Forest floor: level with the bank tops, with small bumps and a gentle swell.
     const forest = smoothstep(8, 40, dist);
     const hill = 0.5 + 0.5 * hillNoise(x * 0.011, z * 0.011);
-    h += forest * (2 + 7 * hill) + bank * 0.25 * bankNoise(x * 0.12, z * 0.12);
+    h += forest * 0.5 * hill + bank * 0.25 * bankNoise(x * 0.12, z * 0.12);
     // A low sandstone ridge far from the bed, between neighbours.
     const ridge = smoothstep(90, 150, dist);
     let rock = 0;
@@ -274,7 +358,17 @@ export function createRiverField(seed = 4711) {
     return a + (b - a) * fz;
   };
   // Bare rock (grippy, hard, no ruts) where the sheet is, except in its soil pockets.
-  heightAt.rockAt = (x, z) => Math.abs(bed(x, z).d) < (ROCK_EDGE + ROCK_REACH) / 2 && heightAt.soilAt(x, z) <= SOIL_MIN;
+  // The bed's half-width through a point, and the distance from it as if it were BED_HALF_WIDTH
+  // wide (what the walls, banks, rocks and trees go by).
+  heightAt.bedWidth = (x, z) => {
+    const b = bed(x, z);
+    return widthAt(along(x - b.gx * b.d, b.k), b.k);
+  };
+  heightAt.bankDistance = (x, z) => {
+    const b = bed(x, z);
+    return Math.abs(b.d) - (widthAt(along(x - b.gx * b.d, b.k), b.k) - BED_HALF_WIDTH);
+  };
+  heightAt.rockAt = (x, z) => heightAt.bankDistance(x, z) < (ROCK_EDGE + ROCK_REACH) / 2 && heightAt.soilAt(x, z) <= SOIL_MIN;
   heightAt.sample = sample;
   heightAt.roadDistance = (x, z) => Math.abs(bed(x, z).d);
   // Heading (radians about +y, 0 = +x) along the bed through a point.
