@@ -102,7 +102,7 @@ async function main() {
   groundSurface.onMove = setGroundPatch;
   // The dry river's rock sheet shows the ruts in its soil pockets from the same texture.
   const ruts = heightAt.snow
-    ? { deform: groundSurface.texture, origin: groundSurface.origin, n: SNOW_PATCH_N, cell: DEFORM_CELL, absolute: true }
+    ? { origin: groundSurface.origin, n: SNOW_PATCH_N, cell: DEFORM_CELL, absolute: true, read: (ix, iz) => groundSurface.heightNode(ix, iz) }
     : { deform: groundSurface.deform, origin: groundSurface.origin, n: PATCH_N, cell: DEFORM_CELL };
   if (heightAt.rockAt) showRutsOnSheet(ruts);
 
