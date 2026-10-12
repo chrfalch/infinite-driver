@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GroundDeformation, compactSoil } from '../src/terrain/deformation.js';
+import { GroundDeformation, compactSoil, digPatch } from '../src/terrain/deformation.js';
 
 describe('ground deformation', () => {
   it('stores offsets across tiles and interpolates between cells', () => {
@@ -101,5 +101,30 @@ describe('ground deformation', () => {
     expect(d.changedSince(d.version - 1)).toBe(null);
     expect(d.tiles.size).toBe(0);
     expect(d.cellValue(0, 0)).toBe(0);
+  });
+
+  it('digs out the whole patch, not a hole at its centre, and keeps deepening it to the limit', () => {
+    const d = new GroundDeformation(0.125);
+    const limit = () => 0.4;
+    // A tyre spinning in place: the same patch, frame after frame.
+    for (let i = 0; i < 2000; i++) digPatch(d, 2, 2, 1, 0, 0.16, 0.15, 0.0005, limit);
+    const centre = -d.at(2, 2);
+    // Across the tread (z) and along it (x), the rut is as deep near the edges as at the centre.
+    expect(centre).toBeCloseTo(0.4, 3);
+    expect(-d.at(2, 2.125)).toBeGreaterThan(0.3);
+    expect(-d.at(2.125, 2)).toBeGreaterThan(0.3);
+    // Nothing is dug outside the patch.
+    expect(d.at(2, 2.4)).toBe(0);
+    expect(d.at(2.4, 2)).toBe(0);
+  });
+
+  it('digs the volume it is given and skips hard ground', () => {
+    const d = new GroundDeformation(0.125);
+    const hardAt = (x, z) => z > 2;
+    digPatch(d, 2, 2, 1, 0, 0.16, 0.15, 0.002, () => 0.4, hardAt);
+    let volume = 0;
+    for (let iz = 10; iz <= 22; iz++) for (let ix = 10; ix <= 22; ix++) volume -= d.cellValue(ix, iz) * 0.125 * 0.125;
+    expect(volume).toBeCloseTo(0.002, 6);
+    expect(d.at(2, 2.125)).toBe(0);
   });
 });

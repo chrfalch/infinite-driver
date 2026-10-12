@@ -1,7 +1,8 @@
 import { Color } from 'three/webgpu';
 import { Deformation, HeightField, IsPlayer, Soil, Time, Tracks, Vehicle } from '../ecs/traits.js';
 import { terrainColorAt } from '../render/terrain-mesh.js';
-import { GROUND, currentSnow } from '../tire/config.js';
+import { GROUND, TIRE, currentSnow } from '../tire/config.js';
+import { digPatch } from '../terrain/deformation.js';
 import { CAR } from '../vehicle/config.js';
 import { surfaceAt as groundAt } from '../audio/wheels.js';
 
@@ -18,6 +19,7 @@ function soundEvent(soil, e) {
 
 const tmp = new Color();
 const MAX_DIG = 0.4; // m, deepest hole spinning tyres can dig
+const PATCH_HALF_LENGTH = 0.16; // m, half the length of ground a spinning tyre digs out
 
 // Share of the ground that is fine soil or sand (dust and grains) rather than gravel or rock.
 function fineShare(heightAt, x, z) {
@@ -116,6 +118,7 @@ export function updateSoil(world) {
       soil.carry[i] = 0;
       continue;
     }
+    let dug = 0; // m³ the clumps from this wheel carry away this frame
     // Sand and dust go up even from firm ground; gravel and rock have little of it.
     const fine = fines ? fineShare(heightAt, contact.x, contact.z) * (0.4 + softness) : 0;
     soil.carryFine ??= [0, 0, 0, 0];
@@ -164,9 +167,7 @@ export function updateSoil(world) {
           color,
         );
         if (emitted) soundEvent(soil, { kind: 'throw', size, speed: throwSpeed });
-        if (emitted && deformation && deformation.at(contact.x, contact.z) > -maxDig(contact.x, contact.z)) {
-          deformation.add(contact.x, contact.z, -(size * size * size * 2 * soilPerClump * digShare) / cellArea);
-        }
+        if (emitted) dug += size * size * size * 2 * soilPerClump * digShare;
       }
     }
 
@@ -178,6 +179,7 @@ export function updateSoil(world) {
     if (Math.abs(tread) < 1.2) {
       soil.carry[i] = 0;
       soil.carryFine[i] = 0;
+      if (deformation) digPatch(deformation, contact.x, contact.z, fx, fz, PATCH_HALF_LENGTH, TIRE.width * 0.45, dug, maxDig, hardAt);
       continue;
     }
     const slip = tread - ground;
@@ -219,10 +221,10 @@ export function updateSoil(world) {
         color,
       );
       if (emitted) soundEvent(soil, { kind: 'throw', size, speed: throwSpeed });
-      // Dig at the tyre what the clump carries away (down to a limit).
-      if (emitted && deformation && deformation.at(contact.x, contact.z) > -maxDig(contact.x, contact.z)) {
-        deformation.add(contact.x, contact.z, -(size * size * size * 2 * soilPerClump * digShare) / cellArea);
-      }
+      // Dig at the tyre what the clump carries away.
+      if (emitted) dug += size * size * size * 2 * soilPerClump * digShare;
     }
+    // Out of the whole patch (each cell down to a limit), so a tyre spinning in place sinks in.
+    if (deformation) digPatch(deformation, contact.x, contact.z, fx, fz, PATCH_HALF_LENGTH, TIRE.width * 0.45, dug, maxDig, hardAt);
   }
 }
