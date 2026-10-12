@@ -225,3 +225,37 @@ export function compactSoil(deformation, contacts, { softness, dt, right, bermOf
     }
   }
 }
+
+// Digs `volume` m³ out of the ground under a tyre's contact patch: a rectangle centred on (x, z),
+// `halfLength` m along the unit direction (fx, fz) and `halfWidth` m across it, deepest in the
+// middle and shallower toward the edges, so a tyre spinning in place sinks into a rut as wide as
+// its tread instead of drilling a narrow hole under the patch centre. A cell stops giving soil at
+// `limitAt(x, z)` m deep and on hard ground (`hardAt`); the rest of the patch takes its share.
+export function digPatch(deformation, x, z, fx, fz, halfLength, halfWidth, volume, limitAt, hardAt = null) {
+  if (volume <= 0) return;
+  const cell = deformation.cell;
+  const reach = Math.hypot(halfLength, halfWidth);
+  const ix0 = Math.ceil((x - reach) / cell);
+  const ix1 = Math.floor((x + reach) / cell);
+  const iz0 = Math.ceil((z - reach) / cell);
+  const iz1 = Math.floor((z + reach) / cell);
+  const cells = [];
+  let total = 0;
+  for (let iz = iz0; iz <= iz1; iz++) {
+    for (let ix = ix0; ix <= ix1; ix++) {
+      const cx = ix * cell;
+      const cz = iz * cell;
+      const along = ((cx - x) * fx + (cz - z) * fz) / halfLength;
+      const across = ((cz - z) * fx - (cx - x) * fz) / halfWidth;
+      if (Math.abs(along) > 1 || Math.abs(across) > 1) continue;
+      const room = limitAt(cx, cz) + deformation.cellValue(ix, iz);
+      if (room <= 0 || hardAt?.(cx, cz)) continue;
+      const w = (1 - 0.5 * along * along) * (1 - 0.5 * across * across);
+      cells.push(ix, iz, w, room);
+      total += w;
+    }
+  }
+  if (total <= 0) return;
+  const depth = volume / (cell * cell * total);
+  for (let k = 0; k < cells.length; k += 4) deformation.addCell(cells[k], cells[k + 1], -Math.min(cells[k + 3], depth * cells[k + 2]));
+}
