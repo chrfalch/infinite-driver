@@ -24,7 +24,7 @@ const pick = fract(layer.floor().mul(0.618));
 const redStrata = mix(mix(vec3(0.78, 0.36, 0.19), vec3(0.88, 0.53, 0.29), smoothstep(0, 0.5, pick)), vec3(0.94, 0.77, 0.6), smoothstep(0.55, 1, pick));
 // Dry river: yellow and ochre sandstone instead of red.
 const yellowStrata = mix(mix(vec3(0.78, 0.55, 0.28), vec3(0.88, 0.72, 0.45), smoothstep(0, 0.5, pick)), vec3(0.93, 0.85, 0.68), smoothstep(0.55, 1, pick));
-// Isometric town: grey granite.
+// Dark town: grey granite.
 const greyStrata = mix(mix(vec3(0.34, 0.35, 0.37), vec3(0.45, 0.46, 0.48), smoothstep(0, 0.5, pick)), vec3(0.56, 0.57, 0.58), smoothstep(0.55, 1, pick));
 const sandstone = uniform(0);
 const granite = uniform(0);
@@ -320,7 +320,7 @@ function snowColor(h, x, z, out) {
   return out;
 }
 
-// Isometric town palette: lush lawns and parks, paler paving in the busy streets' front yards,
+// Dark town palette: lush lawns and parks, paler paving in the busy streets' front yards,
 // sand along the water and a darkening bed under it, meadows and grey granite up the mountains with
 // snow on the highest peaks.
 const LAWN = new Color('#86b75a');

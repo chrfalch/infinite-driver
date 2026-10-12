@@ -16,7 +16,7 @@ const RED_DARK = new Color('#8f4a2d');
 const SAND_LIGHT = new Color('#d8c08e');
 const SAND_DARK = new Color('#8f7a55');
 const SAND_GREY = new Color('#a09a8e');
-// Grey granite for the isometric town.
+// Grey granite for the dark town.
 const GRANITE_LIGHT = new Color('#b9b6ae');
 const GRANITE_DARK = new Color('#77746f');
 const tmp = new Color();

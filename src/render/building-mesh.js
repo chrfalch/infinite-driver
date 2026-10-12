@@ -1,4 +1,4 @@
-// The isometric town's buildings (terrain/buildings.js), all of a chunk's merged into one
+// The dark town's buildings (terrain/buildings.js), all of a chunk's merged into one
 // flat-shaded mesh: a body with windows drawn per pixel from a facade attribute, and a roof (gable,
 // hip, flat with a cornice and a rooftop block, a copper dome, or a spire).
 //

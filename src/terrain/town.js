@@ -1,4 +1,4 @@
-// Isometric town: a diorama-like world of winding asphalt streets with sidewalks, rows of houses
+// Dark town: a diorama-like world of winding asphalt streets with sidewalks, rows of houses
 // and towers along them (terrain/buildings.js), parks and ponds in the blocks, a river through the
 // lowlands, and wild districts where forested hills rise into grey granite mountains. Everything
 // comes from one deterministic height function, so physics, tyres, tracks and the render mesh agree.

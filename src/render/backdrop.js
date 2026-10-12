@@ -14,7 +14,7 @@ const LOOKS = {
   canyon: { horizon: HORIZON, skyTop: SKY_TOP, far: ['#8a3f24', '#e08a52'], near: ['#8a3f24', '#e08a52'], steps: 4, scale: 1 },
   // Dry river: a deeper blue sky, blue-grey forested hills far off and a yellow sandstone escarpment.
   river: { horizon: new Color('#d3dde2'), skyTop: new Color('#2f78cf'), far: ['#56675e', '#8d9c93'], near: ['#5d6148', '#b59a66'], steps: 3, scale: 0.5 },
-  // Isometric town, at night: a starry sky with a faint glow low on the horizon, dark wooded hills
+  // Dark town, at night: a starry sky with a faint glow low on the horizon, dark wooded hills
   // and mountains against it (lit like the snowfield, by the moon and the car's headlights).
   town: {
     horizon: new Color('#18222f'),

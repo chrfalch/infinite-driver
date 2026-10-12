@@ -1,4 +1,4 @@
-// The isometric town's buildings (terrain/town.js): houses, apartment blocks and towers lining the
+// The dark town's buildings (terrain/town.js): houses, apartment blocks and towers lining the
 // streets, each turned to face its street. They come from a fixed grid of lots, so every chunk (and
 // every worker) agrees on them. A lot's building is dropped where it would overlap a neighbour
 // with a higher priority, the street, the water or a steep slope, which leaves gardens and gaps.

@@ -122,7 +122,7 @@ function generateSpruces(heightAt, cx, cz) {
   return plants;
 }
 
-// Isometric town: street trees along the sidewalks, round broadleaf trees and flowering shrubs in
+// Dark town: street trees along the sidewalks, round broadleaf trees and flowering shrubs in
 // the gardens and parks, reeds and willows by the water, mixed forest in the wild districts turning
 // to pines up the mountains, none on the bare granite. Broadleaf trees are 'tree' plants with
 // `leafy` set, pines with `pine` set; both have solid trunks. Nothing grows inside a building.

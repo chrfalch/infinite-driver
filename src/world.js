@@ -1,6 +1,6 @@
 // Which world to drive in. The panel's world picker saves the choice and reloads the page;
 // ?terrain=<mode> overrides it (tests use ?terrain=flat).
-export const WORLDS = { 'Red-rock canyon': 'canyon', 'Dry river': 'river', Snowfield: 'snow', 'Isometric town': 'town' };
+export const WORLDS = { 'Red-rock canyon': 'canyon', 'Dry river': 'river', Snowfield: 'snow', 'Dark town': 'town' };
 export const DEFAULT_WORLD = 'canyon';
 const WORLD_KEY = 'drift.world';
 

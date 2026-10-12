@@ -111,7 +111,7 @@ export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) 
   return rocks;
 }
 
-// Isometric town: the buildings (solid boxes, terrain/buildings.js), then grey granite boulders on
+// Dark town: the buildings (solid boxes, terrain/buildings.js), then grey granite boulders on
 // the mountains and the terraces' faces, along the river banks and pond shores, and a few in the
 // wild; none on the streets and sidewalks or in the town's gardens.
 function generateTownRocks(heightAt, cx, cz, { seed, count }) {

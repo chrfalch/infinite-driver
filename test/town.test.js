@@ -9,7 +9,7 @@ import { rocksMeshData } from '../src/render/rock-mesh.js';
 
 const town = createHeightField({ mode: 'town' });
 
-describe('isometric town', () => {
+describe('dark town', () => {
   it('starts on a street that lies level from side to side, the same on every load', () => {
     expect(town.world).toBe('town');
     expect(town.roadDistance(0, 0)).toBeLessThan(0.01);
