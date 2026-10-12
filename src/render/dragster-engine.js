@@ -1,7 +1,7 @@
-// A Hemi V8 for the engine bay behind the seats (visual only), from the "Dragster Engine" model by
-// its Blend Swap author (blendswap.com/blends/view/84608, CC BY 3.0), converted with its blower
-// taken off by scripts/dragster-engine/export.py. Its moving parts follow the drivetrain: the
-// crank and idler pulleys turn with the revs and a toothed belt runs around them; the throttle
+// A blown Hemi V8 for the engine bay behind the seats (visual only), from the "Dragster Engine"
+// model by its Blend Swap author (blendswap.com/blends/view/84608, CC BY 3.0), converted with its
+// injector hat turned round by scripts/dragster-engine/export.py. Its moving parts follow the
+// drivetrain: the crank, idler and blower pulleys turn with the revs and a toothed belt runs around them; the throttle
 // opens the injector hat's butterflies, whose arm pushes a rod to the fuel barrel valve's arm and stretches
 // the return spring; and the engine rocks on its mounts with the torque it makes.
 //
