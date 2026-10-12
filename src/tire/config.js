@@ -104,19 +104,35 @@ export function effectiveTire(tire, performance) {
   if (!performance) return tire;
   return { ...tire, pgsIterations: 1, substeps: 1, segmentsAround: 20, segmentsAcross: 6 };
 }
-// Grip on dry ground, as multiples of the tyre's friction setting (1.1 by default, so packed dirt
-// is about μ 0.8 and clean sandstone about 1.1). Loose soil and gravel take grip off the dirt: the
-// top layer shears and the stones roll under the tread. Once the tread slides it grips less than it
-// held (slideGrip, falling over slideSpeed m/s of slip), so a wheel that breaks loose keeps spinning
-// until the driver lifts.
+// Grip on dry ground, as multiples of the tyre's friction setting (1.1 by default). Measured μ for
+// a tyre on: a graded, compacted dirt road about 0.75–0.8 (0.65–0.7 sliding), loose desert soil
+// about 0.5–0.6, clean sandstone about 1. Loose soil and gravel take grip off the dirt: the top
+// layer shears and the stones roll under the tread. Once the tread slides it grips less than it
+// held (slideGrip, falling over slideSpeed m/s of slip), so a wheel that breaks loose keeps
+// spinning until the driver lifts.
 export const SURFACE_GRIP = Object.freeze({
   dirt: 0.75,
   rock: 1.0,
-  softSoil: 0.35, // share of the dirt grip lost at softness 1
+  road: 0.72, // graded, compacted road (the canyon's), whatever the soil around it is like
+  softSoil: 0.5, // share of the dirt grip lost at softness 1
   gravel: 0.25, // share lost at gravel 1
   slideGrip: 0.8, // dirt
+  roadSlideGrip: 0.88, // a compacted road holds its surface when a tyre locks on it
   rockSlideGrip: 0.9,
   slideSpeed: 0.5, // m/s
+});
+
+// Loose soil off the road (Bekker / Janosi soil mechanics, simplified). Soil resists a tyre two
+// ways rubber on a hard surface does not:
+//   cohesion  the soil's own shear strength, kPa over the contact patch, added to μ·N: a bigger
+//             patch (lower pressure) pulls and stops harder;
+//   plough    the tread sinks and keeps pushing soil ahead of it (motion resistance), about
+//             plough·√(sinkage / diameter) of the load against the travel, so tall tyres and low
+//             pressures (shallow sinkage) roll easier, and a locked wheel builds a wedge of soil.
+// Both are scaled by the ground's softness relative to DEFAULT_GROUND.softness.
+export const SOIL = Object.freeze({
+  cohesionKpa: 3, // dry sandy loam
+  plough: 0.8,
 });
 
 // The world's snow (terrain/snow.js), or null on soil. Set once per page (and per worker) from the
@@ -153,10 +169,14 @@ export function effectiveGpuTire(gpu, performance, ground = GROUND, snow = snowC
         ...gpu,
         soilStiffness: soilStiffness(ground.softness),
         friction: gpu.friction * dirtGrip(ground),
+        roadFriction: gpu.friction * SURFACE_GRIP.road,
         rockFriction: gpu.friction * SURFACE_GRIP.rock,
         slideGrip: SURFACE_GRIP.slideGrip,
+        roadSlideGrip: SURFACE_GRIP.roadSlideGrip,
         rockSlideGrip: SURFACE_GRIP.rockSlideGrip,
         slideSpeed: SURFACE_GRIP.slideSpeed,
+        cohesion: SOIL.cohesionKpa * 1000 * soilShare(ground),
+        plough: SOIL.plough * soilShare(ground),
         gravel: ground.gravel,
       };
   if (!performance) return withSoil;
@@ -169,9 +189,16 @@ export function dirtGrip(ground) {
   return g.dirt * (1 - g.softSoil * ground.softness) * (1 - g.gravel * ground.gravel);
 }
 
-// Ground settings shared by the tyres and the track renderer.
+// How strongly the soil's cohesion and plough act, from the softness: none on hard ground, as
+// SOIL says at the default softness.
+export function soilShare(ground) {
+  return Math.max(0, ground.softness) / DEFAULT_GROUND.softness;
+}
+
+// Ground settings shared by the tyres and the track renderer. Softness is the loose soil off the
+// roads (and the dry river's sand); the canyon's graded roads are hard whatever it is.
 export const DEFAULT_GROUND = Object.freeze({
-  softness: 0.15, // 0 = hard, 1 = very soft soil
+  softness: 0.4, // 0 = hard, 1 = very soft soil
   gravel: 0.6, // 0 = smooth, 1 = coarse loose gravel the tread rolls over
   tracks: true,
   trackLength: 1500, // segments kept per wheel
@@ -190,7 +217,9 @@ export function resetGround() {
   saveGround();
 }
 
-// Soil spring stiffness per tyre particle for a softness in 0..1 (0 = hard ground, no spring).
+// Soil spring stiffness per tyre particle of the default tyre for a softness in 0..1 (0 = hard
+// ground, no spring). The solver scales it by each particle's tread area, so it is really a
+// stiffness per square metre and other tyre sizes and mesh resolutions sink alike at one pressure.
 export function soilStiffness(softness) {
   if (softness <= 0) return 0;
   return 30000 * (1 - softness) ** 2 + 1500;

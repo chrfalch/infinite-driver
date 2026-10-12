@@ -1,7 +1,7 @@
 import { Deformation, HeightField, IsPlayer, Time, Tracks, Vehicle } from '../ecs/traits.js';
 import { compactSoil } from '../terrain/deformation.js';
 import { GPU_TIRE, GROUND, TIRE, currentSnow } from '../tire/config.js';
-import { gpuGroundHeight } from '../tire/gpu-tires.js';
+import { gpuGroundHeight, gpuGroundKind } from '../tire/gpu-tires.js';
 import { CAR } from '../vehicle/config.js';
 import { count, sample } from '../perf.js';
 let lastC0 = null;
@@ -119,7 +119,15 @@ export function updateTracks(world) {
     const strength = Math.min(1, 0.25 + contact.depth * 5 + softness * 0.5);
     if (GROUND.tracks) tracks.add(i, heightAt, contact, right, width, strength, maxGap);
   }
-  const soilPressed = hardAt ? pressed.filter((p) => !hardAt(p.x, p.z)) : pressed;
+  // The canyon's graded roads and sandstone are compacted hard: tracks, but no ruts.
+  const ground = { road: 0, rock: 0 };
+  const firmAt = heightAt.groundAt
+    ? (x, z) => {
+        if (!(solver && gpuGroundKind(solver, x, z, ground))) heightAt.groundAt(x, z, ground);
+        return ground.road > 0.5 || ground.rock > 0.5;
+      }
+    : hardAt;
+  const soilPressed = firmAt ? pressed.filter((p) => !firmAt(p.x, p.z)) : pressed;
   if (deformation && soilPressed.length) {
     compactSoil(deformation, soilPressed, {
       softness,
@@ -131,7 +139,7 @@ export function updateTracks(world) {
       pressureKpa: solver ? GPU_TIRE.pressureKpa : 100,
       hardAt,
       // The dry river's soil pockets rut a little deeper (about 5 cm at the default softness).
-      ...(heightAt.soilAt ? { maxRut: 0.35 } : {}),
+      ...(heightAt.soilAt ? { maxRut: 0.13 } : {}),
     });
   }
   tracks.update(delta);

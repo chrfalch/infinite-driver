@@ -150,6 +150,14 @@ export function createCanyonField(seed = 2024) {
 
   const heightAt = (x, z) => sample(x, z).h;
   heightAt.sample = sample;
+  // What the tyres stand on, as weights into `out`: road (the graded, compacted road) and rock
+  // (bare sandstone where the formations rise); the rest is loose soil.
+  heightAt.groundAt = (x, z, out = { road: 0, rock: 0 }) => {
+    const s = sample(x, z);
+    out.road = s.road;
+    out.rock = smoothstep(0.3, 1.5, s.rock) * (1 - s.road);
+    return out;
+  };
   heightAt.roadDistance = (x, z) => Math.abs(road(x, z).d);
   // Heading (radians about +y, 0 = +x) along the road through a point.
   heightAt.roadHeading = (x, z) => {
