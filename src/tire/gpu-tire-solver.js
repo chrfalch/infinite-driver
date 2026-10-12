@@ -71,6 +71,7 @@ const Params = d.struct({
   maxSink: d.f32,
   rockFloor: d.f32, // how far below bare rock (m) a particle may be pushed before it is stopped
   gravel: d.f32, // 0..1: amount of loose gravel stones on the ground (see terrain/gravel.js)
+  roadGravel: d.f32, // share of the stones left on the road (0.5 graded dirt, 0 asphalt)
   groundOriginX: d.f32,
   groundOriginZ: d.f32,
   groundCell: d.f32,
@@ -222,9 +223,9 @@ export class GpuTireSolver {
       let fz = gz - f32(iz);
       let n = ${GROUND_N}u;
       // No loose gravel on bare rock, and half as much on a graded road (the grader drags the stones
-      // to the verges).
+      // to the verges), none on asphalt (roadGravel).
       let roadHere = select(ground[2u * n * n + iz * n + ix], 0.0, params.snow > 0.5);
-      let stonesHere = stones * (1.0 - ground[n * n + iz * n + ix]) * (1.0 - 0.5 * roadHere);
+      let stonesHere = stones * (1.0 - ground[n * n + iz * n + ix]) * (1.0 - (1.0 - params.roadGravel) * roadHere);
       let h00 = ground[iz * n + ix];
       let h10 = ground[iz * n + ix + 1u];
       let h01 = ground[(iz + 1u) * n + ix];
@@ -831,6 +832,7 @@ export class GpuTireSolver {
       maxSink: s.maxSink ?? 0.25,
       rockFloor: s.rockFloor ?? 0.06,
       gravel: s.gravel ?? 0,
+      roadGravel: s.roadGravel ?? 0.5,
       groundOriginX: this.groundOrigin.x,
       groundOriginZ: this.groundOrigin.z,
       groundCell: this.groundCell,

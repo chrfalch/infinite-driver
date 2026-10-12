@@ -34,13 +34,15 @@ import { updateSoil } from './systems/soil.js';
 import { updateBushes } from './systems/vegetation.js';
 import { SoilParticles, createFineParticles } from './render/soil-particles.js';
 import { TireTracks } from './render/tracks.js';
-import { GROUND, setSnowCover } from './tire/config.js';
+import { GROUND, setPavedRoads, setSnowCover } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
 import { worldMode } from './world.js';
 import { setGroundPatch, setTerrainWorld } from './render/terrain-mesh.js';
 import { SNOW_PATCH_N, SnowSurface } from './render/snow-surface.js';
 import { worldLook } from './render/backdrop.js';
+import { createWater } from './render/water.js';
+import { setBuildingCutaway, setBuildingNight } from './render/building-mesh.js';
 import { setHeadlightBeams } from './render/headlights.js';
 import { GroundSurface, PATCH_N } from './render/ground-surface.js';
 import { showRutsOnSheet } from './render/rock-surface.js';
@@ -76,7 +78,7 @@ async function main() {
     render.scene.background.set('#e4e1d6');
     render.scene.fog.color.set('#e4e1d6');
   }
-  // Night worlds (the snowfield): a dark blue haze, faint moonlight from the same direction as the
+  // Night worlds (the snowfield, the town): a dark blue haze, faint moonlight from the same direction as the
   // sun (so it still casts the shadows), a little skylight thrown back off the snow, and the car's
   // headlights on.
   const night = !!worldLook(mode).night;
@@ -92,10 +94,15 @@ async function main() {
     });
     render.sun.color.set('#a9bde6');
     render.sun.intensity = 0.15;
+    // The town's windows light up.
+    setBuildingNight(true);
   }
   const heightAt = createHeightField({ mode });
+  // The town's river and ponds.
+  const water = heightAt.waterLevel !== undefined ? createWater(render.scene, heightAt.waterLevel) : null;
   // The tyres, compaction and spray treat the ground as snow in the snowfield.
   setSnowCover(heightAt.snow);
+  setPavedRoads(heightAt.paved);
   const deformation = new GroundDeformation();
   // The ground near the car, drawn with its ruts: snow on the snowfield, soil elsewhere.
   const groundSurface = heightAt.snow ? new SnowSurface(render.scene, heightAt, deformation) : new GroundSurface(render.scene, heightAt, deformation);
@@ -283,6 +290,11 @@ async function main() {
       orbitCamera(readCameraKeys(), time.delta);
       timed('sys.followCamera', () => followCamera(world));
       const player = world.queryFirst(IsPlayer, Vehicle);
+      if (player && heightAt.town) {
+        const p = player.get(Vehicle).body.translation();
+        water?.update(p.x, p.z);
+        setBuildingCutaway(p, render.activeCamera);
+      }
       if (player) {
         const canvas = render.renderer.domElement;
         gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible(), minimap?.root.offsetWidth ?? 0);

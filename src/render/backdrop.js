@@ -14,6 +14,21 @@ const LOOKS = {
   canyon: { horizon: HORIZON, skyTop: SKY_TOP, far: ['#8a3f24', '#e08a52'], near: ['#8a3f24', '#e08a52'], steps: 4, scale: 1 },
   // Dry river: a deeper blue sky, blue-grey forested hills far off and a yellow sandstone escarpment.
   river: { horizon: new Color('#d3dde2'), skyTop: new Color('#2f78cf'), far: ['#56675e', '#8d9c93'], near: ['#5d6148', '#b59a66'], steps: 3, scale: 0.5 },
+  // Dark town, at night: a starry sky with a faint glow low on the horizon, dark wooded hills
+  // and mountains against it (lit like the snowfield, by the moon and the car's headlights).
+  town: {
+    horizon: new Color('#18222f'),
+    skyTop: new Color('#02040a'),
+    far: ['#090d12', '#1f2a2e'],
+    near: ['#070a0d', '#1a2421'],
+    steps: 8,
+    scale: 0.75,
+    haze: [0.6, 0.4],
+    glow: 0.03,
+    stars: true,
+    night: true,
+    fog: [20, 120],
+  },
   // Snowfield, at night: a starry sky, a faint glow low on the horizon, and snow-capped ranges
   // standing dark against it. `night`: the scene is lit by the moon and the car's headlights;
   // `fog`: the perspective view's haze (near, far), closer in the dark.

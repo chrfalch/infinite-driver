@@ -38,6 +38,7 @@ const smoothstep = (a, b, x) => {
 //   dry river: the rock sheet, else a sandy bed with pebbles;
 //   canyon: the gravel road, bare rock where the rock formations rise, else dirt with gravel;
 //   snowfield: snow, no stones;
+//   town: hard asphalt and paving on the streets (as rock), grass and soil elsewhere, granite up high;
 //   test worlds: dirt with some gravel.
 export function surfaceAt(heightAt, x, z, out = { rock: 0, gravel: 0, sand: 0, snow: 0 }) {
   out.sand = 0;
@@ -51,6 +52,10 @@ export function surfaceAt(heightAt, x, z, out = { rock: 0, gravel: 0, sand: 0, s
     out.rock = rock;
     out.gravel = (1 - rock) * 0.5;
     out.sand = (1 - rock) * 0.5;
+  } else if (heightAt?.town && heightAt.groundAt) {
+    const g = heightAt.groundAt(x, z);
+    out.rock = Math.max(g.road, g.rock);
+    out.gravel = 0.15 * (1 - out.rock);
   } else if (heightAt?.world === 'canyon' && heightAt.sample) {
     const s = heightAt.sample(x, z);
     out.rock = smoothstep(0.3, 1.5, s.rock ?? 0) * (1 - s.road);

@@ -1,7 +1,8 @@
 // The camera view the player last left (angle around the car, tilt, zoom, follow mode), restored on
 // the next visit. This is state, not a setting: it is saved whole, often, and the physics worker
 // does not need it, so it bypasses settings-store's save listeners.
-const STORAGE_KEY = 'drift.camera.v1';
+// v2: follow mode became the default, so views saved before start over once.
+const STORAGE_KEY = 'drift.camera.v2';
 
 const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 
