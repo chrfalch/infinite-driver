@@ -4,6 +4,8 @@ import { CHUNK_SIZE } from './chunk.js';
 import { mulberry32 } from './height.js';
 import { ROAD_HALF_WIDTH } from './canyon.js';
 import { ROCK_REACH } from './riverbed.js';
+import { buildingsAround, insideBuilding } from './buildings.js';
+import { KERB } from './town.js';
 
 const CELL = 3; // m, jittered candidate grid
 
@@ -14,6 +16,7 @@ function chunkSeed(cx, cz) {
 }
 
 export function generatePlants(heightAt, cx, cz) {
+  if (heightAt.town) return generateTownPlants(heightAt, cx, cz);
   if (heightAt.forestAt) return generateSpruces(heightAt, cx, cz);
   if (!heightAt.sample) return [];
   if (heightAt.world === 'river') return generateRiverPlants(heightAt, cx, cz);
@@ -114,6 +117,62 @@ function generateSpruces(heightAt, cx, cz) {
       // Taller in the middle of a patch.
       const height = 3.5 + 5 * density * (0.6 + 0.4 * size);
       plants.push({ kind: 'tree', spruce: true, x, y: heightAt(x, z), z, height, trunk: 0.02 * height, turn, shade });
+    }
+  }
+  return plants;
+}
+
+// Isometric town: street trees along the sidewalks, round broadleaf trees and flowering shrubs in
+// the gardens and parks, reeds and willows by the water, mixed forest in the wild districts turning
+// to pines up the mountains, none on the bare granite. Broadleaf trees are 'tree' plants with
+// `leafy` set, pines with `pine` set; both have solid trunks. Nothing grows inside a building.
+function generateTownPlants(heightAt, cx, cz) {
+  const buildings = buildingsAround(heightAt, cx, cz);
+  const rand = mulberry32(chunkSeed(cx, cz) ^ 0x68e31da4);
+  const plants = [];
+  const n = CHUNK_SIZE / CELL;
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const x = (cx * n + i + 0.1 + rand() * 0.8) * CELL;
+      const z = (cz * n + j + 0.1 + rand() * 0.8) * CELL;
+      const roll = rand();
+      const kindRoll = rand();
+      const size = rand();
+      const turn = rand() * Math.PI * 2;
+      const shade = rand();
+      if (roll > 0.45) continue;
+      const s = heightAt.sample(x, z);
+      if (s.dist < KERB + 0.4 || s.h < 0.15) continue;
+      const slope = Math.abs(heightAt(x + 0.8, z) - heightAt(x - 0.8, z)) / 1.6 + Math.abs(heightAt(x, z + 0.8) - heightAt(x, z - 0.8)) / 1.6;
+      if (slope > 0.8) continue;
+      const town = 1 - s.wild;
+      const shore = s.h < 1.1;
+      let pTree;
+      let pBush;
+      // Street trees in a line just behind the sidewalk (thinned where the trunk would hit a house).
+      if (s.dist < KERB + 1.6) [pTree, pBush] = [town * 0.22, 0.08];
+      else if (shore) [pTree, pBush] = [0.05, 0.3];
+      else if (s.mountain > 6) [pTree, pBush] = [slope < 0.5 ? 0.05 : 0, 0.03];
+      else [pTree, pBush] = [0.035 + 0.12 * s.wild, 0.06 + 0.04 * town];
+      if (roll >= pTree + pBush) continue;
+      const tree = roll < pTree;
+      if (insideBuilding(buildings, x, z, tree ? 1.6 : 0.6)) continue;
+      const y = s.h;
+      if (tree) {
+        // Pines up the mountains and among the forest; broadleaf trees in town and along the water.
+        const pine = s.mountain > 2 || (s.wild > 0.5 && kindRoll < 0.45);
+        if (pine) {
+          const height = 5 + size * 6;
+          plants.push({ kind: 'tree', pine: true, x, y, z, height, trunk: 0.025 * height, turn, shade });
+        } else {
+          const height = (s.dist < KERB + 1.6 ? 4.5 : 4 + size * 4) * (shore ? 1.2 : 1);
+          plants.push({ kind: 'tree', leafy: true, x, y, z, height, trunk: 0.035 * height, turn, shade });
+        }
+      } else {
+        // Flowering shrubs in town gardens; plain green ones elsewhere.
+        const flower = town > 0.5 && !shore && kindRoll < 0.4 ? 1 + Math.floor(kindRoll * 10) % 4 : 0;
+        plants.push({ kind: 'bush', x, y, z, size: 0.5 + size * 0.8, turn, shade, flower });
+      }
     }
   }
   return plants;

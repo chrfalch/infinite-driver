@@ -8,6 +8,7 @@ import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
 import { CANYON_PBR, RIVER_PBR, canyonDirtDetail, canyonGravelDetail, canyonNormal, canyonRockDetail, forestFloorColor, forestFloorNormal } from './river-ground.js';
 import { SOIL_MIN } from '../terrain/riverbed.js';
 import { COVER_DEPTH, LAKE, ROAD as SNOW_ROAD } from '../terrain/snow.js';
+import { KERB as TOWN_KERB, ROAD_HALF_WIDTH as TOWN_ROAD, WATER_LEVEL } from '../terrain/town.js';
 
 // Ground colour from the vertex colours, with the gravel stones drawn on top (the same stones the
 // GPU tyres roll over; see terrain/gravel.js).
@@ -23,8 +24,11 @@ const pick = fract(layer.floor().mul(0.618));
 const redStrata = mix(mix(vec3(0.78, 0.36, 0.19), vec3(0.88, 0.53, 0.29), smoothstep(0, 0.5, pick)), vec3(0.94, 0.77, 0.6), smoothstep(0.55, 1, pick));
 // Dry river: yellow and ochre sandstone instead of red.
 const yellowStrata = mix(mix(vec3(0.78, 0.55, 0.28), vec3(0.88, 0.72, 0.45), smoothstep(0, 0.5, pick)), vec3(0.93, 0.85, 0.68), smoothstep(0.55, 1, pick));
+// Isometric town: grey granite.
+const greyStrata = mix(mix(vec3(0.34, 0.35, 0.37), vec3(0.45, 0.46, 0.48), smoothstep(0, 0.5, pick)), vec3(0.56, 0.57, 0.58), smoothstep(0.55, 1, pick));
 const sandstone = uniform(0);
-const strata = mix(redStrata, yellowStrata, sandstone);
+const granite = uniform(0);
+const strata = mix(mix(redStrata, yellowStrata, sandstone), greyStrata, granite);
 const seam = smoothstep(0.86, 0.97, fract(layer)).mul(0.25);
 const rock = strata.mul(seam.oneMinus());
 // Fresh snow, per pixel: bright, faintly blue, with wind ripples and a fine sparkle of grains. The
@@ -106,6 +110,30 @@ export function snowGroundRoughness(side, packed, inside) {
   return mix(land, mix(float(0.08), float(0.8), lakeCover(inside)), step(0, inside));
 }
 const snowWorld = uniform(0);
+const townWorld = uniform(0);
+
+// The town's streets, per pixel: dark asphalt with white edge lines and a double yellow centre line,
+// a kerb, and a paved sidewalk out to KERB. `dist`: m from the centre line; `side`: the same, signed
+// (only good away from junctions, where it may jump); `marks`: 0 at junctions (no centre line).
+// Returns the colour (rgb) and how much of the pixel is street or sidewalk (a).
+function townStreet(dist, side, marks) {
+  const hashCell = (cell) => fract(sin(dot(cell, vec2(12.9898, 78.233))).mul(43758.5453));
+  const grit = hashCell(positionWorld.xz.div(0.12).floor());
+  const patches = sin(positionWorld.x.mul(0.31).add(sin(positionWorld.z.mul(0.27)).mul(2))).mul(sin(positionWorld.z.mul(0.29).add(positionWorld.x.mul(0.08)))).mul(0.06).add(1);
+  const asphalt = vec3(0.25, 0.255, 0.27).mul(grit.mul(0.16).add(0.92)).mul(patches);
+  const line = (centre, half) => smoothstep(half + 0.02, half - 0.02, dist.sub(centre).abs());
+  const edgeLine = line(TOWN_ROAD - 0.35, 0.06);
+  const centreLine = smoothstep(0.12, 0.08, side.abs().sub(0.13).abs()).mul(marks);
+  const painted = mix(mix(asphalt, vec3(0.9, 0.9, 0.86), edgeLine.mul(0.9)), vec3(0.93, 0.74, 0.22), centreLine.mul(0.9));
+  // Sidewalk: pale concrete slabs (1.2 m) behind a lighter kerb stone.
+  const slab = fract(positionWorld.xz.div(1.2));
+  const seam = max(smoothstep(0.04, 0.0, slab.x.min(slab.x.oneMinus())), smoothstep(0.04, 0.0, slab.y.min(slab.y.oneMinus())));
+  const paving = vec3(0.72, 0.7, 0.66).mul(hashCell(positionWorld.xz.div(1.2).floor()).mul(0.08).add(0.96)).mul(seam.mul(0.12).oneMinus());
+  const kerb = line(TOWN_ROAD + 0.12, 0.12);
+  const walk = mix(paving, vec3(0.82, 0.81, 0.78), kerb);
+  const color = mix(painted, walk, smoothstep(TOWN_ROAD - 0.02, TOWN_ROAD + 0.02, dist));
+  return vec4(color, smoothstep(TOWN_KERB + 0.05, TOWN_KERB - 0.05, dist));
+}
 
 // Dry river with the photo-textured bed (?ground=pbr): the ground outside the bed gets a forest-floor
 // detail texture too (render/river-ground.js).
@@ -157,10 +185,17 @@ export function groundShading({ color, steep, gravel, roadDist, lake, normal }) 
   const dirt = FOREST_DETAIL ? forestFloorColor(color, steep) : CANYON_DETAIL ? color.mul(mix(vec3(1), canyonDirtDetail(), 0.85)) : color;
   const ground = mix(dirt, CANYON_DETAIL ? rock.mul(mix(vec3(1), canyonRockDetail(normal), 0.8)) : rock, steep);
   const snowFar = snowGroundColor(roadDist, gravel, lake);
+  // In town 'lake' is the signed distance to the street and 'gravel' where its centre line shows.
+  const street = townStreet(roadDist, lake, gravel);
+  const town = mix(ground, street.rgb, street.a);
   return {
     color: vec4(
       mix(
-        mix(ground, roadColor, roadMask).mul(mix(vec3(1), gravelShade(), gravelAmount.clamp(0, 1).sqrt().mul(gravel))),
+        mix(
+          mix(ground, roadColor, roadMask).mul(mix(vec3(1), gravelShade(), gravelAmount.clamp(0, 1).sqrt().mul(gravel))),
+          town,
+          townWorld,
+        ),
         snowFar,
         snowWorld,
       ),
@@ -187,6 +222,8 @@ if (FOREST_DETAIL || CANYON_DETAIL) {
 export function setTerrainWorld(world) {
   sandstone.value = world === 'river' ? 1 : 0;
   snowWorld.value = world === 'snow' ? 1 : 0;
+  townWorld.value = world === 'town' ? 1 : 0;
+  granite.value = world === 'town' ? 1 : 0;
 }
 
 // Near the car a fine patch draws the ground with its ruts: the snow surface on snow
@@ -283,6 +320,41 @@ function snowColor(h, x, z, out) {
   return out;
 }
 
+// Isometric town palette: lush lawns and parks, paler paving in the busy streets' front yards,
+// sand along the water and a darkening bed under it, meadows and grey granite up the mountains with
+// snow on the highest peaks.
+const LAWN = new Color('#86b75a');
+const LAWN_DARK = new Color('#679d45');
+const MEADOW = new Color('#a6b96a');
+const YARD = new Color('#cdc5b2');
+const SHORE = new Color('#d8c99c');
+const DEEP = new Color('#3f6f6a');
+const ALPINE = new Color('#8f9a6b');
+const GRANITE = new Color('#9b978e');
+const SNOWCAP = new Color('#f1f2ef');
+const TOWN_ASPHALT = new Color('#45474b'); // matches the street shader (tracks use these)
+const TOWN_PAVING = new Color('#b8b4ab');
+
+function townColor(s, slope, x, z, out) {
+  const p = patchNoise(x * 0.045, z * 0.045) * 0.6 + patchNoise(x * 0.14, z * 0.14) * 0.4;
+  out.copy(LAWN).lerp(LAWN_DARK, Math.min(1, Math.max(0, p * 0.7 + 0.35)));
+  out.lerp(MEADOW, s.wild * Math.max(0, patchNoise(x * 0.02 + 5, z * 0.02)) * 0.8);
+  // Paved front yards and squares along the town's streets.
+  const yard = (1 - s.wild) * (1 - smoothstepJs(TOWN_KERB + 1, TOWN_KERB + 7, s.dist)) * smoothstepJs(-0.1, 0.4, patchNoise(x * 0.06 + 2, z * 0.06));
+  out.lerp(YARD, yard * 0.8);
+  // Mountains: grassy ledges between the granite faces (the shader draws those), turning to alpine
+  // meadow and bare granite higher up, snow on the highest tops.
+  out.lerp(ALPINE, smoothstepJs(6, 20, s.mountain) * 0.7);
+  out.lerp(GRANITE, smoothstepJs(22, 36, s.mountain) * 0.75);
+  out.lerp(SNOWCAP, smoothstepJs(44, 50, s.h + patchNoise(x * 0.08, z * 0.08) * 3));
+  // Sand along the water, the bed darkening with depth.
+  const depth = WATER_LEVEL - s.h;
+  out.lerp(SHORE, smoothstepJs(1.3, 0.5, s.h) * (1 - smoothstepJs(4, 9, s.mountain)));
+  if (depth > 0) out.lerp(DEEP, Math.min(1, depth / 1.4) * 0.85);
+  out.offsetHSL(0, 0, fineNoise(x * 0.6, z * 0.6) * 0.02);
+  return out;
+}
+
 function smoothstepJs(a, b, x) {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
@@ -300,6 +372,12 @@ export function terrainColorAt(heightAt, x, z, out = new Color()) {
   if (heightAt.world === 'snow') return snowColor(heightAt(x, z), x, z, out);
   const slope = slopeAt(heightAt, x, z);
   if (heightAt.world === 'river') return riverColor(heightAt.sample(x, z), slope, x, z, out);
+  if (heightAt.world === 'town') {
+    const s = heightAt.sample(x, z);
+    townColor(s, slope, x, z, out);
+    if (s.dist < TOWN_KERB) out.copy(s.dist < TOWN_ROAD ? TOWN_ASPHALT : TOWN_PAVING);
+    return out;
+  }
   if (heightAt.sample) {
     const s = heightAt.sample(x, z);
     canyonColor(s, slope, x, z, out);
@@ -355,10 +433,18 @@ export function groundMeshData(heightAt, heights, x0, z0, step, resX, resZ = res
       const len = Math.hypot(dx, 1, dz);
       normals.set([-dx / len, 1 / len, -dz / len], i * 3);
       const slope = Math.hypot(dx, dz);
+      let marks = 0;
       if (heightAt.world === 'snow') {
         snowColor(h, x, z, tmp);
         lake[i] = heightAt.lakeInside(x, z);
         roadDist[i] = heightAt.roadSide(x, z); // signed (see snowCover)
+      }
+      else if (heightAt.world === 'town') {
+        const s = heightAt.sample(x, z);
+        townColor(s, slope, x, z, tmp);
+        roadDist[i] = s.dist;
+        lake[i] = s.side; // signed, for the centre line (see townStreet)
+        marks = smoothstepJs(s.dist + 3, s.dist + 8, s.other);
       }
       else if (heightAt.world === 'river') {
         // No gravel road paint in the river bed (roadDist stays far): the sand is in the colours.
@@ -371,6 +457,8 @@ export function groundMeshData(heightAt, heights, x0, z0, step, resX, resZ = res
       colors.set([tmp.r, tmp.g, tmp.b], i * 3);
       // No stones under snow: there the attribute is how packed the snow is (see snowFar).
       gravel[i] = heightAt.snowAt ? smoothstepJs(0.05, 0.9, heightAt.snowAt(x, z).firm) : 1 - Math.min(1, Math.max(0, (slope - 0.4) / 0.4));
+      // In town: where the street's centre line shows (not at junctions, where `side` may jump).
+      if (heightAt.town) gravel[i] = marks;
       if (heightAt.sample) steep[i] = Math.min(1, Math.max(0, (slope - 0.55) / 0.5));
     }
   }

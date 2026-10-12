@@ -4,8 +4,8 @@ import { CameraTarget, HeightField, Render, Time, Transform, Vehicle } from '../
 import { createBackdrop } from '../render/backdrop.js';
 import { VIEW_HEIGHT } from '../render/scene.js';
 
-// True isometric by default: the camera looks down the (-1, -1, -1) diagonal (azimuth 45°,
-// elevation 35.3°). ?az=<degrees> starts the view turned around the car. Dragging with the mouse
+// Isometric by default: the camera looks down at 35.3° (the isometric elevation), following behind
+// the car (follow mode, C toggles it; off, it looks down the (-1, -1, -1) diagonal, azimuth 45°). ?az=<degrees> starts the view turned around the car. Dragging with the mouse
 // (or twisting two fingers) orbits; double-click resets. The last view (angle, tilt, zoom, follow
 // mode) is saved and restored on the next visit; ?az and ?zoom override it.
 const params = new URLSearchParams(globalThis.location?.search ?? '');
@@ -20,7 +20,8 @@ const MAX_ZOOM = 4;
 const defaultZoom = globalThis.innerHeight < 500 ? 1.7 : 1;
 const saved = restoreCameraView(
   loadCameraView(),
-  { azimuth: ISO_AZIMUTH, elevation: ISO_ELEVATION, zoom: defaultZoom, follow: false, followRelative: 0 },
+  // Follow mode is on at first, from behind the car.
+  { azimuth: ISO_AZIMUTH, elevation: ISO_ELEVATION, zoom: defaultZoom, follow: true, followRelative: Math.PI },
   { minElevation: MIN_ELEVATION, maxElevation: MAX_ELEVATION, minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM },
 );
 // ?az asks for a fixed angle, so it also starts with follow mode off.
@@ -146,9 +147,12 @@ export function attachZoom(target = window) {
   target.addEventListener('pointerup', endDrag);
   target.addEventListener('pointercancel', endDrag);
   target.addEventListener('contextmenu', (e) => e.preventDefault());
+  // Double-click: back to the default view, following from behind at the isometric elevation.
   target.addEventListener('dblclick', () => {
-    follow.on = false;
-    view.azimuth = ISO_AZIMUTH;
+    follow.on = true;
+    follow.relative = Math.PI;
+    follow.heading = carAzimuth;
+    view.azimuth = carAzimuth + Math.PI;
     view.elevation = ISO_ELEVATION;
     updateOffset();
     rememberView();

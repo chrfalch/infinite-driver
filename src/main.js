@@ -41,6 +41,8 @@ import { worldMode } from './world.js';
 import { setGroundPatch, setTerrainWorld } from './render/terrain-mesh.js';
 import { SNOW_PATCH_N, SnowSurface } from './render/snow-surface.js';
 import { worldLook } from './render/backdrop.js';
+import { createWater } from './render/water.js';
+import { setBuildingCutaway } from './render/building-mesh.js';
 import { setHeadlightBeams } from './render/headlights.js';
 import { GroundSurface, PATCH_N } from './render/ground-surface.js';
 import { showRutsOnSheet } from './render/rock-surface.js';
@@ -76,6 +78,11 @@ async function main() {
     render.scene.background.set('#e4e1d6');
     render.scene.fog.color.set('#e4e1d6');
   }
+  // The isometric town: a cool, clear haze.
+  if (mode === 'town') {
+    render.scene.background.set('#dfe7e6');
+    render.scene.fog.color.set('#dfe7e6');
+  }
   // Night worlds (the snowfield): a dark blue haze, faint moonlight from the same direction as the
   // sun (so it still casts the shadows), a little skylight thrown back off the snow, and the car's
   // headlights on.
@@ -94,6 +101,8 @@ async function main() {
     render.sun.intensity = 0.15;
   }
   const heightAt = createHeightField({ mode });
+  // The town's river and ponds.
+  const water = heightAt.waterLevel !== undefined ? createWater(render.scene, heightAt.waterLevel) : null;
   // The tyres, compaction and spray treat the ground as snow in the snowfield.
   setSnowCover(heightAt.snow);
   const deformation = new GroundDeformation();
@@ -283,6 +292,11 @@ async function main() {
       orbitCamera(readCameraKeys(), time.delta);
       timed('sys.followCamera', () => followCamera(world));
       const player = world.queryFirst(IsPlayer, Vehicle);
+      if (player && heightAt.town) {
+        const p = player.get(Vehicle).body.translation();
+        water?.update(p.x, p.z);
+        setBuildingCutaway(p, render.activeCamera);
+      }
       if (player) {
         const canvas = render.renderer.domElement;
         gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible(), minimap?.root.offsetWidth ?? 0);

@@ -2,6 +2,8 @@ import { createNoise3D } from 'simplex-noise';
 import { mulberry32 } from './height.js';
 import { CHUNK_SIZE } from './chunk.js';
 import { BED_HALF_WIDTH, ROCK_EDGE, ROCK_REACH } from './riverbed.js';
+import { buildingsAround, generateBuildings, insideBuilding } from './buildings.js';
+import { KERB } from './town.js';
 
 const SPAWN_CLEAR_RADIUS = 10;
 
@@ -90,6 +92,7 @@ export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) 
   if (heightAt.world === 'river') return generateRiverRocks(heightAt, cx, cz, { seed, count });
   // The snowfield is open snow for now.
   if (heightAt.world === 'snow') return [];
+  if (heightAt.world === 'town') return generateTownRocks(heightAt, cx, cz, { seed, count });
   const rand = mulberry32(hashChunk(seed, cx, cz));
   const noise = createNoise3D(rand);
   const rocks = [];
@@ -106,6 +109,34 @@ export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) 
     rocks.push(rock);
   }
   return rocks;
+}
+
+// Isometric town: the buildings (solid boxes, terrain/buildings.js), then grey granite boulders on
+// the mountains and the terraces' faces, along the river banks and pond shores, and a few in the
+// wild; none on the streets and sidewalks or in the town's gardens.
+function generateTownRocks(heightAt, cx, cz, { seed, count }) {
+  const buildings = generateBuildings(heightAt, cx, cz);
+  const around = buildingsAround(heightAt, cx, cz);
+  const rand = mulberry32(hashChunk(seed + 3, cx, cz));
+  const noise = createNoise3D(rand);
+  const rocks = [];
+  for (let n = 0; n < count * 2; n++) {
+    const x = (cx + rand()) * CHUNK_SIZE;
+    const z = (cz + rand()) * CHUNK_SIZE;
+    const keep = rand();
+    const size = pickSize(0.62 + rand() * 0.38) * 1.3;
+    if (Math.hypot(x, z) < SPAWN_CLEAR_RADIUS + size) continue;
+    const s = heightAt.sample(x, z);
+    if (s.dist < KERB + 1.5 + size) continue;
+    const shore = s.h < 1.2 && s.h > -0.6;
+    const p = s.mountain > 2 ? 0.5 : s.townHill > 0.5 ? 0.25 : shore ? 0.4 : 0.04 * s.wild;
+    if (keep > p) continue;
+    if (insideBuilding(around, x, z, size + 0.5)) continue;
+    const rock = makeRock(heightAt, x, z, size, rand, noise);
+    rock.granite = true;
+    rocks.push(rock);
+  }
+  return [...buildings, ...rocks];
 }
 
 // The lowest of the rock sheet under a loose rock's footprint, so it rests in the sheet instead of

@@ -11,6 +11,7 @@ import {
   View,
 } from '../ecs/traits.js';
 import { createRocksMesh, createRocksMeshFromData } from '../render/rock-mesh.js';
+import { createBuildingsMesh, createBuildingsMeshFromData } from '../render/building-mesh.js';
 import { createChunkMesh, createChunkMeshFromData } from '../render/terrain-mesh.js';
 import { CHUNK_RES, CHUNK_SIZE, chunkKey, sampleChunk } from '../terrain/chunk.js';
 import { generatePebbles, generateRocks } from '../terrain/rocks.js';
@@ -328,14 +329,17 @@ function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, ne
   scene.add(object);
   const entity = world.spawn(TerrainChunk(chunk), RockField(field), View({ object }));
   // The worker's chunk comes with its rock mesh data and plants, so it is finished right away.
-  if (data) buildRocksMesh(entity, field, data.rocksMesh);
+  if (data) buildRocksMesh(entity, field, data.rocksMesh, data.buildingsMesh);
   else if (rocks) buildRocksMesh(entity, field);
 }
 
-function buildRocksMesh(entity, field, rocksMeshData) {
+function buildRocksMesh(entity, field, rocksMeshData, buildingsMeshData) {
   field.meshBuilt = true;
   const rocksMesh = rocksMeshData !== undefined ? createRocksMeshFromData(rocksMeshData) : timed('terrain.rockMeshGeo', () => createRocksMesh(field.rocks));
   if (rocksMesh) entity.get(View).object.add(rocksMesh);
+  // The town's buildings are among its rocks (solid boxes); they are drawn on their own.
+  const buildings = buildingsMeshData !== undefined ? createBuildingsMeshFromData(buildingsMeshData) : createBuildingsMesh(field.rocks);
+  if (buildings) entity.get(View).object.add(buildings);
   const plants = timed('terrain.plants', () => createVegetationMesh(plantsOf(field)));
   if (plants) {
     entity.get(View).object.add(plants);

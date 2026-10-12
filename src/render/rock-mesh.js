@@ -16,6 +16,9 @@ const RED_DARK = new Color('#8f4a2d');
 const SAND_LIGHT = new Color('#d8c08e');
 const SAND_DARK = new Color('#8f7a55');
 const SAND_GREY = new Color('#a09a8e');
+// Grey granite for the isometric town.
+const GRANITE_LIGHT = new Color('#b9b6ae');
+const GRANITE_DARK = new Color('#77746f');
 const tmp = new Color();
 
 // All rocks of a chunk merged into one flat-shaded mesh.
@@ -37,7 +40,8 @@ export function rocksMeshData(rocks) {
   let o = 0;
   for (const rock of rocks) {
     const match = rock.sand && (rock.tint * 13.7) % 1 < 0.5 ? 0.75 + 0.5 * ((rock.tint * 29.3) % 1) : 0;
-    if (rock.red) tmp.copy(RED_DARK).lerp(RED_LIGHT, rock.tint);
+    if (rock.granite) tmp.copy(GRANITE_DARK).lerp(GRANITE_LIGHT, rock.tint);
+    else if (rock.red) tmp.copy(RED_DARK).lerp(RED_LIGHT, rock.tint);
     else if (rock.sand) tmp.copy(SAND_DARK).lerp(SAND_LIGHT, rock.tint).lerp(SAND_GREY, ((rock.tint * 7.3) % 1) * 0.55);
     else tmp.copy(DARK).lerp(LIGHT, rock.tint);
     const v = rock.vertices;

@@ -92,6 +92,25 @@ function spruceSnowGeometry() {
   // them and hangs over at its edge.
   return mergeGeometries(SPRUCE_TIERS.map(([y, r, h]) => new ConeGeometry(r * 0.8, h * 0.72, 7).translate(0, y + h - (h * 0.72) / 2 + 0.01, 0).toNonIndexed()));
 }
+// Broadleaf tree, unit height: a straight trunk under a full, round crown of big leaf lumps.
+function leafyCrownGeometry() {
+  const parts = [
+    [0, 0.66, 0, 0.3],
+    [0.2, 0.58, 0.08, 0.22],
+    [-0.18, 0.6, -0.1, 0.23],
+    [0.06, 0.6, -0.2, 0.2],
+    [-0.06, 0.58, 0.2, 0.2],
+    [0.1, 0.82, 0.04, 0.22],
+    [-0.08, 0.86, -0.04, 0.2],
+  ].map(([x, y, z, r]) => new IcosahedronGeometry(r, 1).translate(x, y, z));
+  return mergeGeometries(parts);
+}
+const LEAFY_CROWN = leafyCrownGeometry();
+const LEAFY_TRUNK = new CylinderGeometry(0.03, 0.045, 0.5, 6).translate(0, 0.25, 0);
+const LEAFY_GREENS = ['#5f9a3c', '#73ad45', '#4f8a38', '#86b84e', '#689f3f', '#9cc25a'].map((c) => new Color(c));
+const PINE_GREENS = ['#3d6440', '#467046', '#355a3b', '#4f7a4a'].map((c) => new Color(c));
+// Flowering shrubs in town: pink, yellow, white and lilac blossom.
+const FLOWERS = ['#e48aa8', '#e9c94f', '#f1ece2', '#b394d6'].map((c) => new Color(c));
 const SPRUCE_TRUNK = new CylinderGeometry(0.018, 0.03, 0.3, 6).translate(0, 0.15, 0);
 const SPRUCE_NEEDLES = spruceNeedleGeometry();
 const SPRUCE_SNOW = spruceSnowGeometry();
@@ -182,7 +201,9 @@ const col = new Color();
 export function createVegetationMesh(plants) {
   if (!plants.length) return null;
   const bushes = plants.filter((p) => p.kind === 'bush');
-  const trees = plants.filter((p) => p.kind === 'tree' && !p.gum && !p.spruce);
+  const trees = plants.filter((p) => p.kind === 'tree' && !p.gum && !p.spruce && !p.leafy && !p.pine);
+  const leafy = plants.filter((p) => p.leafy);
+  const pines = plants.filter((p) => p.pine);
   const spruces = plants.filter((p) => p.spruce);
   const gums = plants.filter((p) => p.gum);
   const group = new Group();
@@ -197,6 +218,7 @@ export function createVegetationMesh(plants) {
     const greens = p.gum || p.grey ? GUM_GREENS : GREENS;
     col.copy(greens[Math.floor(p.shade * greens.length) % greens.length]);
     if (p.shade > 0.85) col.lerp(DRY, 0.5);
+    if (p.flower) col.lerp(FLOWERS[p.flower - 1], 0.75);
     mesh.setColorAt(i, col);
   };
   if (bushes.length) {
@@ -230,6 +252,29 @@ export function createVegetationMesh(plants) {
       crowns.setMatrixAt(i, m);
       trunks.setColorAt(i, GUM_BARK[Math.floor(p.shade * 7) % GUM_BARK.length]);
       colour(p, i, crowns);
+    });
+  }
+  if (leafy.length) {
+    const trunks = instanced(LEAFY_TRUNK, bark, leafy.length);
+    const crowns = instanced(LEAFY_CROWN, leaves, leafy.length);
+    leafy.forEach((p, i) => {
+      q.setFromAxisAngle(up, p.turn);
+      const wide = p.height * (0.85 + p.shade * 0.3);
+      m.compose(pos.set(p.x, p.y - 0.1, p.z), q, scl.set(wide, p.height, wide));
+      trunks.setMatrixAt(i, m);
+      crowns.setMatrixAt(i, m);
+      crowns.setColorAt(i, LEAFY_GREENS[Math.floor(p.shade * 11) % LEAFY_GREENS.length]);
+    });
+  }
+  if (pines.length) {
+    const trunks = instanced(SPRUCE_TRUNK, bark, pines.length);
+    const crowns = instanced(SPRUCE_NEEDLES, needles, pines.length);
+    pines.forEach((p, i) => {
+      q.setFromAxisAngle(up, p.turn);
+      m.compose(pos.set(p.x, p.y - 0.15, p.z), q, scl.set(p.height * (0.8 + p.shade * 0.25), p.height, p.height * (0.8 + p.shade * 0.25)));
+      trunks.setMatrixAt(i, m);
+      crowns.setMatrixAt(i, m);
+      crowns.setColorAt(i, PINE_GREENS[Math.floor(p.shade * 7) % PINE_GREENS.length]);
     });
   }
   if (spruces.length) {
