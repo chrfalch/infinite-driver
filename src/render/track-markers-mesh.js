@@ -29,8 +29,8 @@ import { generateTrackMarkers } from '../terrain/track-markers.js';
 
 const RADIUS = 3; // chunks each way of the car's
 const CAPACITY = 1500;
-const POLE = 3.2; // m
-const CLOTH = { width: 1.25, height: 0.8 };
+const POLE = 2.1; // m
+const CLOTH = { width: 0.62, height: 0.4 };
 const FLAG_COLOURS = { 1: new Color('#d42a26'), [-1]: new Color('#f3c316') }; // left bank, right bank
 const BOARD = { width: 1.5, height: 0.75, foot: 0.9 }; // m, its underside above the ground
 const TYRE = { radius: 0.32, tube: 0.13 };
@@ -48,15 +48,15 @@ const painted = (geometry, hex) => {
 // A flag pole standing on its foot: white, with a red band at the bottom and a ball on top.
 function poleGeometry() {
   return mergeGeometries([
-    painted(new CylinderGeometry(0.028, 0.035, POLE, 8).translate(0, POLE / 2, 0), '#ecebe6'),
-    painted(new CylinderGeometry(0.037, 0.037, 0.35, 8).translate(0, 0.3, 0), '#c8251f'),
-    painted(new SphereGeometry(0.05, 8, 6).translate(0, POLE + 0.03, 0), '#d9d9d4'),
+    painted(new CylinderGeometry(0.02, 0.026, POLE, 8).translate(0, POLE / 2, 0), '#ecebe6'),
+    painted(new CylinderGeometry(0.028, 0.028, 0.25, 8).translate(0, 0.27, 0), '#c8251f'),
+    painted(new SphereGeometry(0.035, 8, 6).translate(0, POLE + 0.02, 0), '#d9d9d4'),
   ]);
 }
 
 // The flag's cloth, from the pole (x = 0) out along +x, at the top of the pole.
 function clothGeometry() {
-  return new PlaneGeometry(CLOTH.width, CLOTH.height, 10, 4).translate(CLOTH.width / 2, POLE - 0.08 - CLOTH.height / 2, 0);
+  return new PlaneGeometry(CLOTH.width, CLOTH.height, 10, 4).translate(CLOTH.width / 2, POLE - 0.05 - CLOTH.height / 2, 0);
 }
 
 // Waves the cloth: travelling ripples that grow from the pole to the free end, which also droops a
@@ -68,8 +68,8 @@ function clothMaterial() {
   const x = positionGeometry.x;
   const out = x.div(CLOTH.width);
   const t = time.mul(6.5).add(instanceIndex.toFloat().mul(1.93));
-  const wave = sin(t.sub(x.mul(5.5))).mul(0.11).add(sin(t.mul(0.53).sub(x.mul(2.4)).add(1.3)).mul(0.06));
-  material.positionNode = positionLocal.add(normalLocal.mul(wave.mul(out))).add(vec3(0, out.mul(out).mul(-0.07), 0));
+  const wave = sin(t.sub(x.mul(9))).mul(0.06).add(sin(t.mul(0.53).sub(x.mul(4)).add(1.3)).mul(0.03));
+  material.positionNode = positionLocal.add(normalLocal.mul(wave.mul(out))).add(vec3(0, out.mul(out).mul(-0.04), 0));
   return material;
 }
 
