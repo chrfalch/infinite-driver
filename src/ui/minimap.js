@@ -12,7 +12,12 @@
 //
 // Where the car has been is tinted blue: cells of VISIT_CELL m within VISIT_RADIUS of its path,
 // kept for the session and painted into a layer over the tile.
+//
+// In the towns the buildings are drawn on top of the tile, crisp at any zoom (their footprints,
+// turned to their streets); they are placed a chunk's worth per frame once the tile is done.
 import { funPlaces } from '../terrain/fun.js';
+import { generateBuildings } from '../terrain/buildings.js';
+import { CHUNK_SIZE } from '../terrain/chunk.js';
 
 export const VIEW_RADIUS = 140; // m, from the middle of the map to its rim
 export const TILE_HALF = 280; // m, half the tile's side
@@ -223,6 +228,60 @@ function drawPlace(ctx, kind, x, y, r, alpha) {
   ctx.restore();
 }
 
+// The buildings of the chunks under a tile, a chunk per step (they take a few ms each to place):
+// step(budgetMs) returns them all once done, null until then.
+export function tileBuildings(heightAt, cx, cz, half, now = () => performance.now()) {
+  if (!heightAt.town) return { step: () => [] };
+  const chunks = [];
+  for (let i = Math.floor((cx - half) / CHUNK_SIZE); i <= Math.floor((cx + half) / CHUNK_SIZE); i++) {
+    for (let j = Math.floor((cz - half) / CHUNK_SIZE); j <= Math.floor((cz + half) / CHUNK_SIZE); j++) chunks.push([i, j]);
+  }
+  const out = [];
+  let k = 0;
+  return {
+    step(budgetMs = 2) {
+      const start = now();
+      while (k < chunks.length) {
+        for (const rock of generateBuildings(heightAt, chunks[k][0], chunks[k][1])) out.push(rock.building);
+        k++;
+        if (now() - start > budgetMs) break;
+      }
+      return k < chunks.length ? null : out;
+    },
+  };
+}
+
+// Draws the buildings within `reach` m of (x, z), in world metres (the map's transform applied).
+function drawBuildings(ctx, buildings, x, z, reach, night, lineWidth) {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = lineWidth;
+  for (const b of buildings) {
+    if (Math.abs(b.x - x) > reach || Math.abs(b.z - z) > reach) continue;
+    if (b.kit === 'Kit_Fountain') {
+      // A fountain's paved plaza.
+      ctx.beginPath();
+      ctx.arc(b.x, b.z, 8, 0, Math.PI * 2);
+      ctx.fillStyle = night ? 'rgb(96, 100, 106)' : 'rgb(214, 208, 192)';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(b.x, b.z, 3.4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgb(86, 160, 196)';
+      ctx.fill();
+      continue;
+    }
+    const corner = (a, c) => [b.x + b.ux * a * b.w * 0.5 + b.nx * c * b.d * 0.5, b.z + b.uz * a * b.w * 0.5 + b.nz * c * b.d * 0.5];
+    ctx.beginPath();
+    for (const [a, c] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) ctx.lineTo(...corner(a, c));
+    ctx.closePath();
+    ctx.fillStyle = night ? 'rgb(132, 120, 108)' : 'rgb(196, 112, 82)';
+    ctx.strokeStyle = night ? 'rgb(40, 38, 36)' : 'rgb(118, 62, 46)';
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 export function createMinimap(heightAt) {
   const root = document.createElement('div');
   root.className = 'minimap';
@@ -238,6 +297,8 @@ export function createMinimap(heightAt) {
   let building = null;
   let places = []; // fun places around the tile
   let finding = null;
+  let housing = null; // the tile's buildings, being placed
+  let buildings = [];
   const visited = new Set(); // 'ix,iz' cells the car has been near
   let visits = null; // { canvas, ctx, cx, cz, half }: the visited cells over the current tile
   let lastVisit = null;
@@ -283,6 +344,7 @@ export function createMinimap(heightAt) {
   const startTile = (x, z) => {
     building = createTileBuilder(heightAt, x, z);
     finding = funPlaces(heightAt, x, z, TILE_HALF);
+    housing = tileBuildings(heightAt, x, z, TILE_HALF);
   };
   const finishTile = () => {
     const c = document.createElement('canvas');
@@ -300,7 +362,13 @@ export function createMinimap(heightAt) {
     // A new tile around the car before it reaches the old one's edge (the old one stays up meanwhile).
     if (!building && (!tile || Math.max(Math.abs(x - tile.cx), Math.abs(z - tile.cz)) > REBUILD_AT)) startTile(x, z);
     if (building?.step()) finishTile();
-    else if (!building && finding) {
+    else if (!building && housing) {
+      const found = housing.step(2);
+      if (found) {
+        buildings = found;
+        housing = null;
+      }
+    } else if (!building && finding) {
       const found = finding.step(1);
       if (found) {
         places = found;
@@ -354,6 +422,7 @@ export function createMinimap(heightAt) {
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(tile.canvas, tile.cx - tile.half, tile.cz - tile.half, tile.half * 2, tile.half * 2);
     }
+    drawBuildings(ctx, buildings, x, z, VIEW_RADIUS * 1.45, heightAt.world === 'town', 1.2 / scale);
     if (visits) {
       ctx.globalAlpha = 0.42;
       ctx.drawImage(visits.canvas, visits.cx - visits.half, visits.cz - visits.half, visits.half * 2, visits.half * 2);

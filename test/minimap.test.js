@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createHeightField } from '../src/terrain/height.js';
-import { createTileBuilder, forwardOf, headingUpAngle } from '../src/ui/minimap.js';
+import { createTileBuilder, forwardOf, headingUpAngle, tileBuildings } from '../src/ui/minimap.js';
 
 const turn = (a, x, y) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) });
 
@@ -13,6 +13,21 @@ describe('minimap', () => {
       expect(up.x).toBeCloseTo(0, 6);
       expect(up.y).toBeCloseTo(-1, 6);
     }
+  });
+
+  it('finds the buildings under a tile in the towns, a chunk at a time', () => {
+    const town = createHeightField({ mode: 'daytown' });
+    const finder = tileBuildings(town, 0, 0, 100);
+    let found = null;
+    let steps = 0;
+    while (!found) {
+      found = finder.step(0);
+      steps++;
+    }
+    expect(steps).toBeGreaterThan(4);
+    expect(found.length).toBeGreaterThan(20);
+    for (const b of found) expect(Math.max(Math.abs(b.x), Math.abs(b.z))).toBeLessThan(100 + 64);
+    expect(tileBuildings(createHeightField({ mode: 'canyon' }), 0, 0, 100).step()).toEqual([]);
   });
 
   it('finds the forward axis (+x) of an unturned car', () => {
