@@ -389,7 +389,7 @@ export function createGauges({ hud, font, scene }) {
     speed.place(cx - boxW / 2 - gap - R, cy);
     // Headlight tell-tale in the speedometer, between the hub and the readout.
     lightsIcon.clear();
-    lightsIcon.add(headlightIcon(R * 0.3, lampMaterial));
+    lightsIcon.add(headlightIcon(R * 0.2, lampMaterial));
     lightsIcon.position.set(cx - boxW / 2 - gap - R, cy - R * 0.3, 0);
     plate.place(cx - boxW / 2 - 2 * gap - 2 * R - plateW / 2, cy, plateH);
     tach.place(cx + boxW / 2 + gap + R, cy);
