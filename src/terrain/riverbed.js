@@ -570,6 +570,21 @@ export function createRiverField(seed = 4711) {
     const dz = r.gx;
     return dx >= 0 ? Math.atan2(-dz, dx) : Math.atan2(dz, -dx);
   };
+  // The beds' centre lines, for what is set out along them (terrain/track-markers.js): bed k's
+  // centre line crosses x at z = centre(x, k) (`guess` near it, e.g. the last one, converges
+  // faster), `along(x, k)` m along it from x = 0, and `width(s, k)` its half-width there.
+  heightAt.beds = {
+    spacing: SPACING,
+    across,
+    centre: (x, k, guess = k * SPACING) => {
+      let z = guess;
+      for (let i = 0; i < 4; i++) z = centreZ(x, k, z);
+      return z;
+    },
+    along,
+    width: widthAt,
+    floor: (s, k) => floorAlong(s, k, 0),
+  };
   heightAt.world = 'river';
   return heightAt;
 }
