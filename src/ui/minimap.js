@@ -5,6 +5,14 @@
 // The ground is sampled from the height field into a square tile around the car, a few rows per
 // frame so building it never stalls a frame; the tile is redrawn around the car before it drives
 // out of it. Each frame only draws that tile, rotated, into the round canvas.
+//
+// In the sunny town the fun places are marked on top (terrain/fun.js), upright: stunt parks as
+// orange stars, street jumps as yellow triangles, river gap jumps as blue badges; a park or gap
+// just off the map sits on its rim, pointing the way.
+//
+// Where the car has been is tinted blue: cells of VISIT_CELL m within VISIT_RADIUS of its path,
+// kept for the session and painted into a layer over the tile.
+import { funPlaces } from '../terrain/fun.js';
 
 export const VIEW_RADIUS = 140; // m, from the middle of the map to its rim
 export const TILE_HALF = 280; // m, half the tile's side
@@ -13,6 +21,9 @@ const REBUILD_AT = TILE_HALF - VIEW_RADIUS - 30; // m from the tile's centre
 const BUILD_BUDGET = 2; // ms of sampling per frame
 const TRAIL_STEP = 4; // m between trail points
 const TRAIL_POINTS = 120;
+const VISIT_CELL = 4; // m
+const VISIT_RADIUS = 10; // m either side of the car's path
+const VISITED = [64, 92, 228]; // RGB: a deeper blue than the lakes
 
 // Map colours per world (RGB 0..255): the ground, the road (or river bed), and how strongly the
 // relief is shaded.
@@ -160,6 +171,58 @@ export function createTileBuilder(heightAt, cx, cz, { half = TILE_HALF, px = TIL
   };
 }
 
+// One fun place's marker at (x, y), `r` about its radius.
+function drawPlace(ctx, kind, x, y, r, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(1.2, r * 0.28);
+  ctx.strokeStyle = 'rgba(31, 29, 25, 0.85)';
+  if (kind === 'jump') {
+    // A small yellow warning triangle.
+    const a = r * 0.75;
+    ctx.beginPath();
+    ctx.moveTo(0, -a);
+    ctx.lineTo(a * 0.95, a * 0.7);
+    ctx.lineTo(-a * 0.95, a * 0.7);
+    ctx.closePath();
+    ctx.fillStyle = '#f5c518';
+    ctx.stroke();
+    ctx.fill();
+  } else {
+    // A round badge: an orange one with a star for a stunt park, a blue one with two chevrons
+    // (up and over) for a river gap.
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = kind === 'park' ? '#ef7d22' : '#2f8fd0';
+    ctx.stroke();
+    ctx.fill();
+    ctx.fillStyle = ctx.strokeStyle = '#fff6e2';
+    if (kind === 'park') {
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const t = -Math.PI / 2 + (i * Math.PI) / 5;
+        const rr = i % 2 ? r * 0.32 : r * 0.7;
+        ctx.lineTo(Math.cos(t) * rr, Math.sin(t) * rr);
+      }
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.lineWidth = Math.max(1.2, r * 0.22);
+      ctx.lineCap = 'round';
+      for (const dy of [-0.18, 0.22]) {
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.45, (dy + 0.2) * r);
+        ctx.lineTo(0, (dy - 0.22) * r);
+        ctx.lineTo(r * 0.45, (dy + 0.2) * r);
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.restore();
+}
+
 export function createMinimap(heightAt) {
   const root = document.createElement('div');
   root.className = 'minimap';
@@ -173,17 +236,60 @@ export function createMinimap(heightAt) {
 
   let tile = null; // { canvas, cx, cz, half }
   let building = null;
+  let places = []; // fun places around the tile
+  let finding = null;
+  const visited = new Set(); // 'ix,iz' cells the car has been near
+  let visits = null; // { canvas, ctx, cx, cz, half }: the visited cells over the current tile
+  let lastVisit = null;
+  const cellKey = (ix, iz) => `${ix},${iz}`;
+  const paintVisit = (ix, iz) => {
+    if (!visits) return;
+    const n = visits.canvas.width;
+    const px = Math.floor(((ix + 0.5) * VISIT_CELL - (visits.cx - visits.half)) / VISIT_CELL);
+    const pz = Math.floor(((iz + 0.5) * VISIT_CELL - (visits.cz - visits.half)) / VISIT_CELL);
+    if (px >= 0 && pz >= 0 && px < n && pz < n) visits.ctx.fillRect(px, pz, 1, 1);
+  };
+  // A layer for the tile around (cx, cz), with every cell visited so far.
+  const startVisits = (cx, cz, half) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = Math.round((2 * half) / VISIT_CELL);
+    const vctx = c.getContext('2d');
+    vctx.fillStyle = `rgb(${VISITED.join(',')})`;
+    visits = { canvas: c, ctx: vctx, cx: Math.round(cx / VISIT_CELL) * VISIT_CELL, cz: Math.round(cz / VISIT_CELL) * VISIT_CELL, half };
+    for (const key of visited) {
+      const [ix, iz] = key.split(',').map(Number);
+      paintVisit(ix, iz);
+    }
+  };
+  const visit = (x, z) => {
+    const r = Math.ceil(VISIT_RADIUS / VISIT_CELL);
+    const ix0 = Math.floor(x / VISIT_CELL);
+    const iz0 = Math.floor(z / VISIT_CELL);
+    for (let dz = -r; dz <= r; dz++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const ix = ix0 + dx;
+        const iz = iz0 + dz;
+        if (Math.hypot((ix + 0.5) * VISIT_CELL - x, (iz + 0.5) * VISIT_CELL - z) > VISIT_RADIUS) continue;
+        const key = cellKey(ix, iz);
+        if (visited.has(key)) continue;
+        visited.add(key);
+        paintVisit(ix, iz);
+      }
+    }
+  };
   const trail = [];
   let angle = null; // the map's turn (radians); snaps to the car's heading on the first frame
 
   const startTile = (x, z) => {
     building = createTileBuilder(heightAt, x, z);
+    finding = funPlaces(heightAt, x, z, TILE_HALF);
   };
   const finishTile = () => {
     const c = document.createElement('canvas');
     c.width = c.height = building.px;
     c.getContext('2d').putImageData(new ImageData(building.pixels, building.px, building.px), 0, 0);
     tile = { canvas: c, cx: building.cx, cz: building.cz, half: building.half };
+    startVisits(tile.cx, tile.cz, tile.half);
     building = null;
   };
 
@@ -194,6 +300,18 @@ export function createMinimap(heightAt) {
     // A new tile around the car before it reaches the old one's edge (the old one stays up meanwhile).
     if (!building && (!tile || Math.max(Math.abs(x - tile.cx), Math.abs(z - tile.cz)) > REBUILD_AT)) startTile(x, z);
     if (building?.step()) finishTile();
+    else if (!building && finding) {
+      const found = finding.step(1);
+      if (found) {
+        places = found;
+        finding = null;
+      }
+    }
+
+    if (!lastVisit || Math.hypot(x - lastVisit.x, z - lastVisit.z) > 2) {
+      visit(x, z);
+      lastVisit = { x, z };
+    }
 
     const last = trail[trail.length - 1];
     if (!last || Math.hypot(x - last.x, z - last.z) > TRAIL_STEP) {
@@ -236,6 +354,11 @@ export function createMinimap(heightAt) {
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(tile.canvas, tile.cx - tile.half, tile.cz - tile.half, tile.half * 2, tile.half * 2);
     }
+    if (visits) {
+      ctx.globalAlpha = 0.42;
+      ctx.drawImage(visits.canvas, visits.cx - visits.half, visits.cz - visits.half, visits.half * 2, visits.half * 2);
+      ctx.globalAlpha = 1;
+    }
     if (trail.length > 1) {
       ctx.lineCap = ctx.lineJoin = 'round';
       ctx.lineWidth = Math.max(3, size * 0.022) / scale;
@@ -257,6 +380,32 @@ export function createMinimap(heightAt) {
     ctx.beginPath();
     ctx.arc(R, R, R, 0, Math.PI * 2);
     ctx.fill();
+
+    // Fun places, upright; parks and gaps off the map on its rim.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(R, R, R, 0, Math.PI * 2);
+    ctx.clip();
+    const icon = Math.max(5, size * 0.045);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    for (const place of places) {
+      const dx = place.x - x;
+      const dz = place.z - z;
+      let sx = (dx * cos - dz * sin) * scale;
+      let sy = (dx * sin + dz * cos) * scale;
+      const d = Math.hypot(sx, sy);
+      const rim = R - icon * 1.4;
+      let off = false;
+      if (d > rim) {
+        if (place.kind === 'jump' || d > R * 2.2) continue;
+        sx *= rim / d;
+        sy *= rim / d;
+        off = true;
+      }
+      drawPlace(ctx, place.kind, R + sx, R + sy, off ? icon * 0.8 : icon, off ? 0.75 : 1);
+    }
+    ctx.restore();
 
     // The car: an arrow pointing up, in the HUD's needle orange.
     const a = Math.max(7, size * 0.06);
@@ -298,6 +447,12 @@ export function createMinimap(heightAt) {
     update,
     get tile() {
       return tile;
+    },
+    get visited() {
+      return visited;
+    },
+    get places() {
+      return places;
     },
   };
 }

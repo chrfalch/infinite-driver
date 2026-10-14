@@ -5,6 +5,7 @@ import { createHeightField } from '../src/terrain/height.js';
 import { buildingsAround, generateBuildings, insideBuilding } from '../src/terrain/buildings.js';
 import { generatePlants } from '../src/terrain/vegetation.js';
 import { generateProps } from '../src/terrain/props.js';
+import { funPlaces } from '../src/terrain/fun.js';
 import { KERB } from '../src/terrain/town.js';
 import { TOWN_KIT } from '../src/terrain/town-kit.js';
 import { buildingsMeshData } from '../src/render/building-mesh.js';
@@ -110,6 +111,23 @@ describe('sunny town', () => {
     const fresh = createHeightField({ mode: 'daytown' });
     expect(generateProps(fresh, 1, -1)).toEqual(generateProps(town, 1, -1));
     expect(generateProps(createHeightField({ mode: 'town' }), 0, 0)).toEqual([]);
+  });
+
+  it('lists its fun places for the minimap', () => {
+    const finder = funPlaces(town, 0, 0, 280);
+    let places = null;
+    for (let i = 0; i < 1000 && !places; i++) places = finder.step(5);
+    const kinds = new Set(places.map((p) => p.kind));
+    expect([...kinds].sort()).toEqual(['gap', 'jump', 'park']);
+    for (const p of places) {
+      expect(Math.abs(p.x)).toBeLessThanOrEqual(280);
+      expect(Math.abs(p.z)).toBeLessThanOrEqual(280);
+      const s = town.sample(p.x, p.z);
+      if (p.kind === 'park') expect(s.park).toBeGreaterThan(0.9);
+      if (p.kind === 'jump') expect(s.jump).toBeGreaterThan(0.8);
+      if (p.kind === 'gap') expect(s.gapLift).toBeGreaterThan(2.4);
+    }
+    expect(funPlaces(createHeightField({ mode: 'town' }), 0, 0, 280).step()).toEqual([]);
   });
 
   it('lines its streets with rows of buildings', () => {

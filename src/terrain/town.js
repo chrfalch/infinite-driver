@@ -283,6 +283,7 @@ export function createTownField(seed = 31, world = 'town') {
     // starts; the road is cut through, its banks steep, and the far bank's road is the landing.
     // (Coming the other way the road just ends at the water, which is shallow enough to ford.)
     let gap = 0;
+    let gapLift = 0;
     if (day && dist < KERB + 6 && riverDist < halfWidth + 27) {
       const fi = r === both[0] ? 0 : 1;
       const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ));
@@ -304,7 +305,7 @@ export function createTownField(seed = 31, world = 'town') {
         gap = (1 - smoothstep(KERB + 2.5, KERB + 5.5, dist)) * squareness;
         // The kicker is on one bank; the far bank's road stays low, a flat landing beyond the channel.
         const out = riverDist - (halfWidth + 0.6);
-        if (out > 0 && out < 18 && Math.sign(river.d) === riverGapSide(fi, k, kr)) h += gap * 3.2 * (1 - out / 18) ** 1.9;
+        if (out > 0 && out < 18 && Math.sign(river.d) === riverGapSide(fi, k, kr)) h += (gapLift = gap * 3.2 * (1 - out / 18) ** 1.9);
       }
     }
     if (riverDist < halfWidth + 4.5) {
@@ -315,7 +316,7 @@ export function createTownField(seed = 31, world = 'town') {
     }
 
     const road = 1 - smoothstep(ROAD_HALF_WIDTH - 0.1, ROAD_HALF_WIDTH + 0.4, dist);
-    return { h, road, side: r.d, dist, other: Math.abs(other.d), gx: r.gx, gz: r.gz, wild, mountain, townHill, riverDist, riverHalf: halfWidth, park, parkLift, jump, driveway };
+    return { h, road, side: r.d, dist, other: Math.abs(other.d), gx: r.gx, gz: r.gz, wild, mountain, townHill, riverDist, riverHalf: halfWidth, park, parkLift, jump, driveway, gapLift };
   }
 
   const heightAt = (x, z) => sample(x, z).h;
