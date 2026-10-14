@@ -19,8 +19,26 @@ const isolationEverywhere = {
   },
 };
 
+// The page is played through the tuft.host tunnel, which drops long-lived websockets now and then.
+// Vite's client then waits for the server and reloads the page, so the drive restarted every so
+// often. This takes the reload out: a lost socket only ends live updates until the next reload by
+// hand. (`server.ws: false` is no help: the client still connects and fails.)
+const RELOAD_ON_RECONNECT = /await waitForSuccessfulPing\(url\.href\);\s*location\.reload\(\);/;
+const noReloadOnReconnect = {
+  name: 'no-reload-on-reconnect',
+  apply: 'serve',
+  transform(code, id) {
+    if (!id.includes('vite/dist/client/client.mjs')) return;
+    if (!RELOAD_ON_RECONNECT.test(code)) {
+      this.warn('Vite client changed: the reload after a lost HMR connection is still in');
+      return;
+    }
+    return code.replace(RELOAD_ON_RECONNECT, 'console.log("[vite] not reloading; reload the page by hand to get updates again");');
+  },
+};
+
 export default defineConfig({
-  plugins: [isolationEverywhere],
+  plugins: [isolationEverywhere, noReloadOnReconnect],
   server: { port: 8731, strictPort: true, host: '127.0.0.1', allowedHosts: ['endless-drift.tuft.host', 'endless-drift-audio.tuft.host'], headers: isolation },
   preview: { headers: isolation },
   optimizeDeps: { exclude: ['@pmndrs/glyph'] },
