@@ -44,6 +44,9 @@ import { createDaylight } from './render/daylight.js';
 import { startHour } from './render/time-of-day.js';
 import { createWater } from './render/water.js';
 import { setBuildingCutaway } from './render/building-mesh.js';
+import { loadTownKit } from './render/town-kit-mesh.js';
+import { createPropsView } from './render/props-mesh.js';
+import { createPropPhysics } from './physics/props.js';
 import { GroundSurface, PATCH_N } from './render/ground-surface.js';
 import { showRutsOnSheet } from './render/rock-surface.js';
 import { DEFORM_CELL } from './terrain/deformation.js';
@@ -80,6 +83,8 @@ async function main() {
   daylight.set(startHour(mode));
   const night = daylight.dark > 0.5;
   const heightAt = createHeightField({ mode });
+  // The sunny town's buildings are models: loaded before its first chunk is built.
+  if (heightAt.buildingKit) await loadTownKit();
   // The town's river and ponds.
   const water = heightAt.waterLevel !== undefined ? createWater(render.scene, heightAt.waterLevel) : null;
   // The tyres, compaction and spray treat the ground as snow in the snowfield.
@@ -120,6 +125,10 @@ async function main() {
     // iterations leave it leaning and trembling at rest. 8 settles it level and still.
     physicsWorld.numSolverIterations = 8;
   }
+
+  // The sunny town's loose crates and cones: drawn here, simulated where the physics runs.
+  const propsView = heightAt.buildingKit ? createPropsView(render.scene, heightAt) : null;
+  const propPhysics = heightAt.buildingKit && physicsWorld ? createPropPhysics(RAPIER, physicsWorld, heightAt) : null;
 
   world.add(Time, Input, TerrainStreaming);
   world.get(Input).headlights = night;
@@ -276,6 +285,12 @@ async function main() {
         const p = player.get(Vehicle).body.translation();
         water?.update(p.x, p.z);
         setBuildingCutaway(p, render.activeCamera);
+        if (propsView) {
+          propPhysics?.update(p.x, p.z);
+          propsView.update(p.x, p.z);
+          if (remote) for (const poses of remote.propPoses.splice(0)) propsView.apply(poses);
+          else propsView.apply(propPhysics.moved());
+        }
       }
       if (player) {
         const canvas = render.renderer.domElement;

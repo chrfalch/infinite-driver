@@ -16,6 +16,7 @@ import { Drivetrain } from '../vehicle/drivetrain.js';
 import { WHEELS, applyWheelSettings } from '../vehicle/physics.js';
 import { createSoftCarBody } from '../vehicle/soft-vehicle.js';
 import { createColliderStreamer } from './colliders.js';
+import { createPropPhysics } from './props.js';
 import { AudioFeed } from '../audio/feed.js';
 
 const STEP = 1 / 120;
@@ -25,6 +26,7 @@ let world = null; // koota world with the physics traits
 let physics = null; // the Physics trait (Rapier world, clock)
 let device = null;
 let colliders = null;
+let props = null; // the sunny town's loose props
 let deformation = null;
 let car = null; // player entity
 let carId = 0;
@@ -66,6 +68,7 @@ function spawn({ id, position, rotation, linvel, angvel, steer = 0, keepDrivetra
   car = world.spawn(IsPlayer, RigidBody({ body }), Vehicle({ controller, body, drivetrain, steer, speed: 0 }));
   carId = id;
   colliders.update(position.x, position.z, { force: true });
+  props?.update(position.x, position.z);
 }
 
 function applyPending() {
@@ -125,8 +128,12 @@ function snapshot(readback) {
     drivetrain: { rpm: d.rpm, gear: d.gear, pendingGear: d.pendingGear, throttle: d.throttle, fuel: d.fuel, exhaustBrake: d.exhaustBrake, clutch: d.clutch, shaftTorque: d.shaftTorque, engaged: { ...d.engaged } },
     positions,
     readbackHubs: solver?.readbackHubs ?? null,
+    // The props that moved (physics/props.js), for drawing.
+    props: props ? props.moved() : null,
   };
-  postMessage(message, positions ? [positions.buffer, steps.buffer] : [steps.buffer]);
+  const transfer = positions ? [positions.buffer, steps.buffer] : [steps.buffer];
+  if (message.props) transfer.push(message.props.buffer);
+  postMessage(message, transfer);
 }
 
 // A zero-delay yield that is not clamped like nested timers are.
@@ -143,6 +150,7 @@ async function simulate() {
     applyPending();
     const p = car.get(Vehicle).body.translation();
     colliders.update(p.x, p.z);
+    props?.update(p.x, p.z);
     const before = physics.simTime;
     await stepPhysics(world, delta);
     if (physics.simTime > before) snapshot(true);
@@ -185,6 +193,7 @@ async function init(msg) {
     stepPoses.push([physics.simTime, t.x, t.y, t.z, q.x, q.y, q.z, q.w]);
   };
   colliders = createColliderStreamer({ rapier: RAPIER, world: physicsWorld, ecs: world, RockField, heightAt, rockCount: msg.rocks });
+  if (heightAt.buildingKit) props = createPropPhysics(RAPIER, physicsWorld, heightAt);
   simLast = performance.now();
   postMessage({ type: 'ready' });
 }

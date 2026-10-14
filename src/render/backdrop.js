@@ -33,6 +33,16 @@ const LOOKS = {
     haze: [0.6, 0.4],
     glow: 0.03,
   },
+  // Sunny town: a clear blue sky, green wooded hills and blue-grey mountains hazed toward a pale
+  // horizon; less haze than the others by day (`orthoFog`, `dayFog`: see render/daylight.js).
+  daytown: {
+    day: { horizon: '#d6e4ea', top: '#3d8ad6', background: '#d6e4ea', far: ['#5d7684', '#a7bcc4'], near: ['#3e6438', '#86a46a'] },
+    steps: 8,
+    scale: 0.75,
+    haze: [0.55, 0.3],
+    orthoFog: [170, 330],
+    dayFog: [120, 320],
+  },
   // Snowfield: snow-capped ranges, standing dark against a faint glow at night. `glow`: skylight
   // scattered back off the snow.
   snow: {

@@ -5,6 +5,19 @@
 // The ground is sampled from the height field into a square tile around the car, a few rows per
 // frame so building it never stalls a frame; the tile is redrawn around the car before it drives
 // out of it. Each frame only draws that tile, rotated, into the round canvas.
+//
+// In the sunny town the fun places are marked on top (terrain/fun.js), upright: stunt parks as
+// orange stars, street jumps as yellow triangles, river gap jumps as blue badges; a park or gap
+// just off the map sits on its rim, pointing the way.
+//
+// Where the car has been is tinted blue: cells of VISIT_CELL m within VISIT_RADIUS of its path,
+// kept for the session and painted into a layer over the tile.
+//
+// In the towns the buildings are drawn on top of the tile, crisp at any zoom (their footprints,
+// turned to their streets); they are placed a chunk's worth per frame once the tile is done.
+import { funPlaces } from '../terrain/fun.js';
+import { generateBuildings } from '../terrain/buildings.js';
+import { CHUNK_SIZE } from '../terrain/chunk.js';
 
 export const VIEW_RADIUS = 140; // m, from the middle of the map to its rim
 export const TILE_HALF = 280; // m, half the tile's side
@@ -13,6 +26,9 @@ const REBUILD_AT = TILE_HALF - VIEW_RADIUS - 30; // m from the tile's centre
 const BUILD_BUDGET = 2; // ms of sampling per frame
 const TRAIL_STEP = 4; // m between trail points
 const TRAIL_POINTS = 120;
+const VISIT_CELL = 4; // m
+const VISIT_RADIUS = 10; // m either side of the car's path
+const VISITED = [64, 92, 228]; // RGB: a deeper blue than the lakes
 
 // Map colours per world (RGB 0..255): the ground, the road (or river bed), and how strongly the
 // relief is shaded.
@@ -22,11 +38,13 @@ const PALETTES = {
   snow: { ground: [243, 246, 250], high: [222, 230, 240], road: [132, 132, 134], edge: [190, 198, 210], relief: 0.8 },
   // The town at night: dark lawns and hills, the streets a little lighter.
   town: { ground: [44, 62, 46], high: [70, 76, 80], road: [120, 122, 128], edge: [26, 32, 30], relief: 0.9 },
+  // The sunny town: green lawns and hills, grey streets.
+  daytown: { ground: [128, 168, 104], high: [150, 150, 140], road: [96, 98, 104], edge: [70, 96, 62], relief: 0.9 },
   plain: { ground: [180, 173, 132], high: [150, 150, 108], road: [236, 226, 200], edge: [120, 110, 90], relief: 1 },
 };
 const LAKE = [160, 194, 216];
 const FOREST = [104, 132, 110];
-const ROAD_HALF = { canyon: 3.2, river: 4, snow: 3.2, town: 4.2 }; // m, drawn at least two pixels wide
+const ROAD_HALF = { canyon: 3.2, river: 4, snow: 3.2, town: 4.2, daytown: 4.2 }; // m, drawn at least two pixels wide
 
 export function paletteFor(heightAt) {
   return PALETTES[heightAt.world] ?? PALETTES.plain;
@@ -158,6 +176,112 @@ export function createTileBuilder(heightAt, cx, cz, { half = TILE_HALF, px = TIL
   };
 }
 
+// One fun place's marker at (x, y), `r` about its radius.
+function drawPlace(ctx, kind, x, y, r, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = Math.max(1.2, r * 0.28);
+  ctx.strokeStyle = 'rgba(31, 29, 25, 0.85)';
+  if (kind === 'jump') {
+    // A small yellow warning triangle.
+    const a = r * 0.75;
+    ctx.beginPath();
+    ctx.moveTo(0, -a);
+    ctx.lineTo(a * 0.95, a * 0.7);
+    ctx.lineTo(-a * 0.95, a * 0.7);
+    ctx.closePath();
+    ctx.fillStyle = '#f5c518';
+    ctx.stroke();
+    ctx.fill();
+  } else {
+    // A round badge: an orange one with a star for a stunt park, a blue one with two chevrons
+    // (up and over) for a river gap.
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = kind === 'park' ? '#ef7d22' : '#2f8fd0';
+    ctx.stroke();
+    ctx.fill();
+    ctx.fillStyle = ctx.strokeStyle = '#fff6e2';
+    if (kind === 'park') {
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const t = -Math.PI / 2 + (i * Math.PI) / 5;
+        const rr = i % 2 ? r * 0.32 : r * 0.7;
+        ctx.lineTo(Math.cos(t) * rr, Math.sin(t) * rr);
+      }
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.lineWidth = Math.max(1.2, r * 0.22);
+      ctx.lineCap = 'round';
+      for (const dy of [-0.18, 0.22]) {
+        ctx.beginPath();
+        ctx.moveTo(-r * 0.45, (dy + 0.2) * r);
+        ctx.lineTo(0, (dy - 0.22) * r);
+        ctx.lineTo(r * 0.45, (dy + 0.2) * r);
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.restore();
+}
+
+// The buildings of the chunks under a tile, a chunk per step (they take a few ms each to place):
+// step(budgetMs) returns them all once done, null until then.
+export function tileBuildings(heightAt, cx, cz, half, now = () => performance.now()) {
+  if (!heightAt.town) return { step: () => [] };
+  const chunks = [];
+  for (let i = Math.floor((cx - half) / CHUNK_SIZE); i <= Math.floor((cx + half) / CHUNK_SIZE); i++) {
+    for (let j = Math.floor((cz - half) / CHUNK_SIZE); j <= Math.floor((cz + half) / CHUNK_SIZE); j++) chunks.push([i, j]);
+  }
+  const out = [];
+  let k = 0;
+  return {
+    step(budgetMs = 2) {
+      const start = now();
+      while (k < chunks.length) {
+        for (const rock of generateBuildings(heightAt, chunks[k][0], chunks[k][1])) out.push(rock.building);
+        k++;
+        if (now() - start > budgetMs) break;
+      }
+      return k < chunks.length ? null : out;
+    },
+  };
+}
+
+// Draws the buildings within `reach` m of (x, z), in world metres (the map's transform applied).
+function drawBuildings(ctx, buildings, x, z, reach, night, lineWidth) {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = lineWidth;
+  for (const b of buildings) {
+    if (Math.abs(b.x - x) > reach || Math.abs(b.z - z) > reach) continue;
+    if (b.kit === 'Kit_Fountain') {
+      // A fountain's paved plaza.
+      ctx.beginPath();
+      ctx.arc(b.x, b.z, 8, 0, Math.PI * 2);
+      ctx.fillStyle = night ? 'rgb(96, 100, 106)' : 'rgb(214, 208, 192)';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(b.x, b.z, 3.4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgb(86, 160, 196)';
+      ctx.fill();
+      continue;
+    }
+    const corner = (a, c) => [b.x + b.ux * a * b.w * 0.5 + b.nx * c * b.d * 0.5, b.z + b.uz * a * b.w * 0.5 + b.nz * c * b.d * 0.5];
+    ctx.beginPath();
+    for (const [a, c] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) ctx.lineTo(...corner(a, c));
+    ctx.closePath();
+    ctx.fillStyle = night ? 'rgb(132, 120, 108)' : 'rgb(196, 112, 82)';
+    ctx.strokeStyle = night ? 'rgb(40, 38, 36)' : 'rgb(118, 62, 46)';
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 export function createMinimap(heightAt) {
   const root = document.createElement('div');
   root.className = 'minimap';
@@ -171,17 +295,63 @@ export function createMinimap(heightAt) {
 
   let tile = null; // { canvas, cx, cz, half }
   let building = null;
+  let places = []; // fun places around the tile
+  let finding = null;
+  let housing = null; // the tile's buildings, being placed
+  let buildings = [];
+  const visited = new Set(); // 'ix,iz' cells the car has been near
+  let visits = null; // { canvas, ctx, cx, cz, half }: the visited cells over the current tile
+  let lastVisit = null;
+  const cellKey = (ix, iz) => `${ix},${iz}`;
+  const paintVisit = (ix, iz) => {
+    if (!visits) return;
+    const n = visits.canvas.width;
+    const px = Math.floor(((ix + 0.5) * VISIT_CELL - (visits.cx - visits.half)) / VISIT_CELL);
+    const pz = Math.floor(((iz + 0.5) * VISIT_CELL - (visits.cz - visits.half)) / VISIT_CELL);
+    if (px >= 0 && pz >= 0 && px < n && pz < n) visits.ctx.fillRect(px, pz, 1, 1);
+  };
+  // A layer for the tile around (cx, cz), with every cell visited so far.
+  const startVisits = (cx, cz, half) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = Math.round((2 * half) / VISIT_CELL);
+    const vctx = c.getContext('2d');
+    vctx.fillStyle = `rgb(${VISITED.join(',')})`;
+    visits = { canvas: c, ctx: vctx, cx: Math.round(cx / VISIT_CELL) * VISIT_CELL, cz: Math.round(cz / VISIT_CELL) * VISIT_CELL, half };
+    for (const key of visited) {
+      const [ix, iz] = key.split(',').map(Number);
+      paintVisit(ix, iz);
+    }
+  };
+  const visit = (x, z) => {
+    const r = Math.ceil(VISIT_RADIUS / VISIT_CELL);
+    const ix0 = Math.floor(x / VISIT_CELL);
+    const iz0 = Math.floor(z / VISIT_CELL);
+    for (let dz = -r; dz <= r; dz++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const ix = ix0 + dx;
+        const iz = iz0 + dz;
+        if (Math.hypot((ix + 0.5) * VISIT_CELL - x, (iz + 0.5) * VISIT_CELL - z) > VISIT_RADIUS) continue;
+        const key = cellKey(ix, iz);
+        if (visited.has(key)) continue;
+        visited.add(key);
+        paintVisit(ix, iz);
+      }
+    }
+  };
   const trail = [];
   let angle = null; // the map's turn (radians); snaps to the car's heading on the first frame
 
   const startTile = (x, z) => {
     building = createTileBuilder(heightAt, x, z);
+    finding = funPlaces(heightAt, x, z, TILE_HALF);
+    housing = tileBuildings(heightAt, x, z, TILE_HALF);
   };
   const finishTile = () => {
     const c = document.createElement('canvas');
     c.width = c.height = building.px;
     c.getContext('2d').putImageData(new ImageData(building.pixels, building.px, building.px), 0, 0);
     tile = { canvas: c, cx: building.cx, cz: building.cz, half: building.half };
+    startVisits(tile.cx, tile.cz, tile.half);
     building = null;
   };
 
@@ -192,6 +362,24 @@ export function createMinimap(heightAt) {
     // A new tile around the car before it reaches the old one's edge (the old one stays up meanwhile).
     if (!building && (!tile || Math.max(Math.abs(x - tile.cx), Math.abs(z - tile.cz)) > REBUILD_AT)) startTile(x, z);
     if (building?.step()) finishTile();
+    else if (!building && housing) {
+      const found = housing.step(2);
+      if (found) {
+        buildings = found;
+        housing = null;
+      }
+    } else if (!building && finding) {
+      const found = finding.step(1);
+      if (found) {
+        places = found;
+        finding = null;
+      }
+    }
+
+    if (!lastVisit || Math.hypot(x - lastVisit.x, z - lastVisit.z) > 2) {
+      visit(x, z);
+      lastVisit = { x, z };
+    }
 
     const last = trail[trail.length - 1];
     if (!last || Math.hypot(x - last.x, z - last.z) > TRAIL_STEP) {
@@ -234,6 +422,12 @@ export function createMinimap(heightAt) {
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(tile.canvas, tile.cx - tile.half, tile.cz - tile.half, tile.half * 2, tile.half * 2);
     }
+    drawBuildings(ctx, buildings, x, z, VIEW_RADIUS * 1.45, heightAt.world === 'town', 1.2 / scale);
+    if (visits) {
+      ctx.globalAlpha = 0.42;
+      ctx.drawImage(visits.canvas, visits.cx - visits.half, visits.cz - visits.half, visits.half * 2, visits.half * 2);
+      ctx.globalAlpha = 1;
+    }
     if (trail.length > 1) {
       ctx.lineCap = ctx.lineJoin = 'round';
       ctx.lineWidth = Math.max(3, size * 0.022) / scale;
@@ -255,6 +449,32 @@ export function createMinimap(heightAt) {
     ctx.beginPath();
     ctx.arc(R, R, R, 0, Math.PI * 2);
     ctx.fill();
+
+    // Fun places, upright; parks and gaps off the map on its rim.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(R, R, R, 0, Math.PI * 2);
+    ctx.clip();
+    const icon = Math.max(5, size * 0.045);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    for (const place of places) {
+      const dx = place.x - x;
+      const dz = place.z - z;
+      let sx = (dx * cos - dz * sin) * scale;
+      let sy = (dx * sin + dz * cos) * scale;
+      const d = Math.hypot(sx, sy);
+      const rim = R - icon * 1.4;
+      let off = false;
+      if (d > rim) {
+        if (place.kind === 'jump' || d > R * 2.2) continue;
+        sx *= rim / d;
+        sy *= rim / d;
+        off = true;
+      }
+      drawPlace(ctx, place.kind, R + sx, R + sy, off ? icon * 0.8 : icon, off ? 0.75 : 1);
+    }
+    ctx.restore();
 
     // The car: an arrow pointing up, in the HUD's needle orange.
     const a = Math.max(7, size * 0.06);
@@ -296,6 +516,12 @@ export function createMinimap(heightAt) {
     update,
     get tile() {
       return tile;
+    },
+    get visited() {
+      return visited;
+    },
+    get places() {
+      return places;
     },
   };
 }

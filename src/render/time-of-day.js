@@ -47,8 +47,8 @@ export function clock(hour) {
 }
 
 // The hour each world starts at until the player picks another: the canyon and the river in the
-// afternoon, the snowfield and the town at night (as they were made).
-export const DEFAULT_HOURS = Object.freeze({ canyon: 15.5, river: 14, snow: 22.5, town: 22.5 });
+// afternoon, the snowfield and the town at night (as they were made), the sunny town at midday.
+export const DEFAULT_HOURS = Object.freeze({ canyon: 15.5, river: 14, snow: 22.5, town: 22.5, daytown: 13 });
 const STORAGE_KEY = 'drift.time.v1';
 
 // ?time=<hours> (e.g. 18.5, or 18:30) overrides the saved hour for this page load.

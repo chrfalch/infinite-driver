@@ -106,7 +106,7 @@ export function createPhysicsClient({ terrain, rocks, deformation, slowGpu = 0, 
   let failed = null;
   let nextId = 1;
   let current = null; // { id, vehicle } of the car the worker simulates
-  const client = { simTime: 0, stepMs: 0, error: null };
+  const client = { simTime: 0, stepMs: 0, error: null, propPoses: [] };
 
   // Shared rut tiles: announce new ones; a clear on either side clears both.
   deformation.onTile = (key, tile) => worker.postMessage({ type: 'tile', key, tile });
@@ -131,6 +131,8 @@ export function createPhysicsClient({ terrain, rocks, deformation, slowGpu = 0, 
 
   function receive(msg) {
     client.simTime = msg.simTime;
+    // Moving props' poses, kept in order until the frame draws them (render/props-mesh.js).
+    if (msg.props?.length) client.propPoses.push(msg.props);
     client.stepMs = msg.stepMs;
     if (msg.batch?.steps) {
       const b = msg.batch;
