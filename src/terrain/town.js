@@ -174,7 +174,17 @@ export function createTownField(seed = 31, world = 'town') {
     const k = Math.round(a / spacing);
     return { d: (a - k * spacing) / g, gx: gx / g, gz: gz / g };
   }
-  const streets = (x, z) => [family(acrossX, x, z, SX, 0), family(acrossZ, x, z, SZ, OFFSET_Z)];
+  // The sunny town has a side street midway between each pair of north-south streets, except
+  // through a stunt park (which keeps its whole block; the side street ends at it).
+  const SZ_STREETS = day ? SZ / 2 : SZ;
+  const streets = (x, z) => {
+    const f0 = family(acrossX, x, z, SX, 0);
+    if (!day) return [f0, family(acrossZ, x, z, SZ, OFFSET_Z)];
+    const a1 = acrossZ(x, z) + OFFSET_Z;
+    const side = Math.round(a1 / SZ_STREETS) % 2 !== 0;
+    const throughPark = side && isPark(Math.floor(acrossX(x, z) / SX), Math.floor(a1 / SZ));
+    return [f0, family(acrossZ, x, z, throughPark ? SZ : SZ_STREETS, OFFSET_Z)];
+  };
   const nearest = (both) => (Math.abs(both[0].d) <= Math.abs(both[1].d) ? both[0] : both[1]);
 
   const riverAt = (x, z) => family(acrossR, x, z, RIVER_SPACING, OFFSET_R);
@@ -243,13 +253,14 @@ export function createTownField(seed = 31, world = 'town') {
     let parkLift = 0;
     let driveway = 0;
     if (day) {
-      const raise = blockRaise(block[0], block[1]);
+      // (Each side of a side street is a block of its own.)
+      const raise = blockRaise(block[0], Math.floor((acrossZ(x, z) + OFFSET_Z) / SZ_STREETS));
       const away = 1 - smoothstep(20, 45, Math.abs(riverAt(x, z).d) - riverHalfAt(x, z));
       // Here and there a driveway ramps up through the retaining wall onto a raised block (1 in 5),
       // into the gardens behind the rows (which leave it clear, see terrain/buildings.js).
       if (raise > 0) {
         const fi = r === both[0] ? 0 : 1;
-        const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ));
+        const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ_STREETS));
         const t0 = drivewayAt(fi, k, fi === 0 ? x : z, r.d > 0 ? 1 : -1);
         if (t0 !== null && Math.abs(other.d) > 20) driveway = smoothstep(4.5, 3.2, Math.abs((fi === 0 ? x : z) - t0)) * (1 - smoothstep(KERB + 26, KERB + 30, dist));
       }
@@ -264,7 +275,7 @@ export function createTownField(seed = 31, world = 'town') {
         const across = Math.abs(f.d);
         if (across > KERB + 0.5) continue;
         const o = both[1 - fi];
-        const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ));
+        const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ_STREETS));
         const t = fi === 0 ? x : z;
         const lift = streetJump(fi, k, t) * (1 - smoothstep(KERB - 0.8, KERB + 0.4, across)) * smoothstep(18, 28, Math.abs(o.d)) * (1 - smoothstep(0.2, 0.4, wild)) * smoothstep(30, 45, Math.abs(riverAt(x, z).d) - riverHalfAt(x, z));
         jump = Math.max(jump, lift);
@@ -290,7 +301,7 @@ export function createTownField(seed = 31, world = 'town') {
     let gapLift = 0;
     if (day && dist < KERB + 6 && riverDist < halfWidth + 27) {
       const fi = r === both[0] ? 0 : 1;
-      const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ));
+      const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ_STREETS));
       const kr = Math.round((acrossR(x, z) + OFFSET_R) / RIVER_SPACING);
       // Only where the street crosses the river squarely enough, not where it runs along a bank:
       // judged where it crosses the middle of the river (one step along the street from here), so
@@ -354,7 +365,7 @@ export function createTownField(seed = 31, world = 'town') {
   // `across` is a multiple of `spacing`; it runs roughly along x (`alongX`) or z.
   heightAt.streetFamilies = [
     { across: acrossX, spacing: SX, alongX: true },
-    { across: (x, z) => acrossZ(x, z) + OFFSET_Z, spacing: SZ, alongX: false },
+    { across: (x, z) => acrossZ(x, z) + OFFSET_Z, spacing: SZ_STREETS, alongX: false },
   ];
   // The sunny town's layout, for placing things on it (terrain/props.js): its blocks' size, which
   // are stunt parks, and the street jumps.

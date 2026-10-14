@@ -536,7 +536,8 @@ function plazaGround(heightAt, x, z) {
 
 function plazaAt(heightAt, k0, k1) {
   const r = (q) => hash(k0 + 911, k1 - 377, q);
-  if (r(1) < 0.4) return null;
+  // (About one junction in three: the side streets make many more junctions.)
+  if (r(1) < 0.67) return null;
   const [f0, f1] = heightAt.streetFamilies;
   const j = crossing(heightAt, k0 * f0.spacing, k1 * f1.spacing, k1 * f1.spacing, k0 * f0.spacing);
   if (!j) return null;

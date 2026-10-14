@@ -46,6 +46,29 @@ function filterLow(p) {
 }
 
 describe('sunny town', () => {
+  it('has side streets between its north-south streets, but not through the stunt parks', () => {
+    const count = (fx, fz) => {
+      let n = 0;
+      let on = false;
+      for (let t = -600; t < 600; t += 1) {
+        const now = town.roadDistance(fx(t), fz(t)) < 1;
+        if (now && !on) n++;
+        on = now;
+      }
+      return n;
+    };
+    // Walking east crosses the north-south streets (60 m apart), walking south the east-west
+    // ones (100 m apart).
+    expect(count((t) => t, () => 23)).toBeGreaterThan(count(() => 41, (t) => t) * 1.4);
+    // The side street would run right through a park's middle: there is none there.
+    const finder = funPlaces(town, 0, 0, 500);
+    let places = null;
+    while (!places) places = finder.step(50);
+    const parks = places.filter((p) => p.kind === 'park');
+    expect(parks.length).toBeGreaterThan(1);
+    for (const p of parks) expect(town.roadDistance(p.x, p.z)).toBeGreaterThan(20);
+  });
+
   it('has jumps on its streets, clear of the junctions', () => {
     let jumps = 0;
     for (let x = -300; x < 300; x += 1.5) {
