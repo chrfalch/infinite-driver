@@ -13,6 +13,10 @@ export const KERB = 5.2; // m from the centre line to the sidewalk's outer edge
 export const WATER_LEVEL = 0; // m, the river's and the ponds' surface
 const SPACING_X = 150; // m between east-west streets
 const SPACING_Z = 190; // m between north-south streets
+// The sunny town is a denser, more regular grid of smaller blocks, as in the reference diorama.
+const DAY_SPACING_X = 100;
+const DAY_SPACING_Z = 120;
+const DAY_WARP = 0.65; // its streets wind less
 const RIVER_SPACING = 640; // m between rivers
 const RIVER_DEPTH = 1.3; // m of water in the middle of the river (shallow enough to ford)
 
@@ -20,6 +24,14 @@ const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
+
+// How high a sunny-town block's plinth stands (m), by its row and column of the street grid.
+const RAISES = [0, 0, 1.2, 1.8, 2.6, 3.4];
+function blockRaise(i, j) {
+  let h = (Math.imul(i, 374761393) + Math.imul(j, 668265263) + 0x5bd1e995) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return RAISES[((h ^ (h >>> 16)) >>> 0) % RAISES.length];
+}
 
 // Stepped ramp: level ledges joined by steep risers (granite outcrops, terraced hillsides).
 function terrace(v, steps, riser = 0.7) {
@@ -32,6 +44,10 @@ function terrace(v, steps, riser = 0.7) {
 // `world`: 'town' (the dark town, at night) or 'daytown' (the sunny town, by day, with the
 // modelled buildings of the kit, see terrain/buildings.js).
 export function createTownField(seed = 31, world = 'town') {
+  const day = world === 'daytown';
+  const SX = day ? DAY_SPACING_X : SPACING_X;
+  const SZ = day ? DAY_SPACING_Z : SPACING_Z;
+  const warp = day ? DAY_WARP : 1;
   const rand = mulberry32(seed);
   const warpA = createNoise2D(rand);
   const warpB = createNoise2D(rand);
@@ -45,11 +61,11 @@ export function createTownField(seed = 31, world = 'town') {
 
   // Warped coordinates across each family; a road (or the river) is where one is a multiple of
   // its spacing. The east-west family is shifted so a street runs through the origin.
-  const a0 = 38 * warpA(0, 0) + 10 * warpB(0, 0);
-  const acrossX = (x, z) => z + 38 * warpA(x * 0.005, z * 0.004) + 10 * warpB(x * 0.017, z * 0.017) - a0;
-  const acrossZ = (x, z) => x + 45 * warpB(x * 0.004 + 40, z * 0.0055) + 9 * warpA(x * 0.018 + 9, z * 0.018);
+  const a0 = warp * (38 * warpA(0, 0) + 10 * warpB(0, 0));
+  const acrossX = (x, z) => z + warp * (38 * warpA(x * 0.005, z * 0.004) + 10 * warpB(x * 0.017, z * 0.017)) - a0;
+  const acrossZ = (x, z) => x + warp * (45 * warpB(x * 0.004 + 40, z * 0.0055) + 9 * warpA(x * 0.018 + 9, z * 0.018));
   const acrossR = (x, z) => 0.6 * x - 0.8 * z + 110 * riverWarp(x * 0.0022, z * 0.0022) + 28 * riverWarp(x * 0.008 + 3, z * 0.008);
-  const OFFSET_Z = SPACING_Z * 0.41;
+  const OFFSET_Z = SZ * 0.41;
   // The river runs half its spacing away from the origin.
   const OFFSET_R = RIVER_SPACING / 2 - acrossR(0, 0);
 
@@ -63,7 +79,7 @@ export function createTownField(seed = 31, world = 'town') {
     const k = Math.round(a / spacing);
     return { d: (a - k * spacing) / g, gx: gx / g, gz: gz / g };
   }
-  const streets = (x, z) => [family(acrossX, x, z, SPACING_X, 0), family(acrossZ, x, z, SPACING_Z, OFFSET_Z)];
+  const streets = (x, z) => [family(acrossX, x, z, SX, 0), family(acrossZ, x, z, SZ, OFFSET_Z)];
   const nearest = (both) => (Math.abs(both[0].d) <= Math.abs(both[1].d) ? both[0] : both[1]);
 
   const riverAt = (x, z) => family(acrossR, x, z, RIVER_SPACING, OFFSET_R);
@@ -123,6 +139,13 @@ export function createTownField(seed = 31, world = 'town') {
     const wander = 0.06 * bumpNoise(x * 0.045 + 31, z * 0.045);
     const mountain = mass > 0 ? mass * (terrace(Math.max(0, Math.min(1, ridge ** 1.5 * (0.75 + 0.35 * crag) + wander)), 6, 0.55) * 42 + 4 * crag) : 0;
     h += townHill + foot + mountain;
+    // Sunny town: each block stands on its own plinth, raised a little behind a stone retaining
+    // wall along the sidewalk (some blocks stay at street level), as the reference's blocks do.
+    if (day) {
+      const raise = blockRaise(Math.floor(acrossX(x, z) / SX), Math.floor((acrossZ(x, z) + OFFSET_Z) / SZ));
+      const away = 1 - smoothstep(20, 45, Math.abs(riverAt(x, z).d) - riverHalfAt(x, z));
+      h += raise * smoothstep(KERB + 0.35, KERB + 1.15, dist) * (1 - smoothstep(0.2, 0.5, wild)) * (1 - away);
+    }
 
     // Ponds in the parks and the wild lowlands (not in the mountains).
     const pondShape = lakeNoise(x * 0.011, z * 0.011);
@@ -172,8 +195,8 @@ export function createTownField(seed = 31, world = 'town') {
   // The two street families, for walking along a street (terrain/buildings.js): a street is where
   // `across` is a multiple of `spacing`; it runs roughly along x (`alongX`) or z.
   heightAt.streetFamilies = [
-    { across: acrossX, spacing: SPACING_X, alongX: true },
-    { across: (x, z) => acrossZ(x, z) + OFFSET_Z, spacing: SPACING_Z, alongX: false },
+    { across: acrossX, spacing: SX, alongX: true },
+    { across: (x, z) => acrossZ(x, z) + OFFSET_Z, spacing: SZ, alongX: false },
   ];
   heightAt.town = true;
   heightAt.world = world;

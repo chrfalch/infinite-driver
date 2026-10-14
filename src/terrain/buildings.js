@@ -304,8 +304,11 @@ function segment(heightAt, fi, k, m, side) {
   const r = (q) => hash(k * 4 + fi * 2 + (side > 0 ? 1 : 0), m, q);
   const narrow = TOWN_KIT.find((kk) => kk.name === NARROW_KIT);
   const out = [];
+  const back = [];
   const t1 = (m + 1) * SEG;
   let t = m * SEG + r(1) * 2;
+  const mid = streetPoint(f, k, t + SEG / 2);
+  const obstacles = mid ? specialsNear(heightAt, mid.x, mid.z, SEG) : [];
   for (let n = 0; n < 24 && t < t1 - 3; n++) {
     const p = streetPoint(f, k, t);
     const q = p && streetPoint(f, k, t + 1);
@@ -331,22 +334,55 @@ function segment(heightAt, fi, k, m, side) {
       const dt = w / speed;
       if (t + dt > t1) continue;
       placed = place(heightAt, f, k, side, t + dt / 2, kit, w, r(500 + n));
-      // On the inside of a bend the backs close in on the previous building: slide along.
-      for (let nudge = 0; placed && out.length && overlap(out[out.length - 1], placed, KIT_GAP) && nudge < 8; nudge++) {
+      // On the inside of a bend the backs close in on the previous building, and the corner
+      // buildings, plazas and landmarks go first: slide along until clear.
+      const blocked = (p) => (out.length && overlap(out[out.length - 1], p, KIT_GAP)) || obstacles.some((o) => overlap(o, p, KIT_GAP));
+      for (let nudge = 0; placed && blocked(placed) && nudge < 30; nudge++) {
         t += 0.6 / speed;
         placed = t + dt <= t1 ? place(heightAt, f, k, side, t + dt / 2, kit, w, r(500 + n)) : null;
       }
-      if (placed && out.length && overlap(out[out.length - 1], placed, KIT_GAP)) placed = null;
+      if (placed && blocked(placed)) placed = null;
       if (placed) {
         t += dt + KIT_GAP / speed;
         break;
       }
     }
-    if (placed) out.push(placed);
-    else t += 3 / speed; // a gap: a corner, a bend, the water
+    if (placed) {
+      out.push(placed);
+      // Often a second building right behind it, so the blocks fill up as in the reference.
+      if (r(600 + n) < 0.7) {
+        const behind = placeBehind(heightAt, placed, pickKit(tall, r(700 + n)), r(800 + n));
+        if (behind && !(back.length && overlap(back[back.length - 1], behind, KIT_GAP)) && !obstacles.some((o) => overlap(o, behind, KIT_GAP))) back.push(behind);
+      }
+    } else t += 3 / speed; // a gap: a corner, a bend, the water
   }
+  out.push(...back);
   cache.set(key, out);
   return out;
+}
+
+// A kit building in a row's second line, right behind `front` and facing the same way (narrow
+// enough not to stick out much past it), or null where it doesn't fit.
+function placeBehind(heightAt, front, pick, seed) {
+  const narrow = TOWN_KIT.find((k) => k.name === NARROW_KIT);
+  for (const kit of [pick, narrow]) {
+    // As wide as the front one where it can stretch to it, or at most a little wider.
+    const w = kit.stretch ? Math.min(kit.w * 1.15, Math.max(kit.w * 0.85, front.w)) : kit.w;
+    if (w > front.w + 3) continue;
+    const b = behindAt(heightAt, front, kit, w, seed);
+    if (b) return b;
+  }
+  return null;
+}
+
+function behindAt(heightAt, front, kit, w, seed) {
+  const gap = 1.2;
+  const x = front.x + front.nx * (front.d / 2 + gap + kit.d / 2);
+  const z = front.z + front.nz * (front.d / 2 + gap + kit.d / 2);
+  const ground = footprintGround(heightAt, x, z, front.ux, front.uz, front.nx, front.nz, w, kit.d);
+  if (!ground) return null;
+  // Behind the rows, ahead of the lots.
+  return kitBuilding(kit, x, z, w, front.nx, front.nz, ground, seed, 0.99 + seed * 0.009);
 }
 
 // A kit building in a street row, centred at `t`, or null where it doesn't fit.
@@ -458,6 +494,25 @@ function crossing(heightAt, a0, a1, x = a1, z = a0) {
   return ok ? { x, z } : null;
 }
 
+// The point near junction j (of streets k0, k1) that is o0 m from street k0 and o1 m from street
+// k1 (signed: toward growing `across`). The fields' slopes change away from the junction, so it is
+// re-solved with the slopes found there.
+function offsetFromJunction(heightAt, k0, k1, j, o0, o1) {
+  const [f0, f1] = heightAt.streetFamilies;
+  const slope = (f, p) => Math.hypot(f.across(p.x + 0.5, p.z) - f.across(p.x - 0.5, p.z), f.across(p.x, p.z + 0.5) - f.across(p.x, p.z - 0.5));
+  let c = { x: j.x, z: j.z };
+  for (let it = 0; it < 3 && c; it++) c = crossing(heightAt, k0 * f0.spacing + o0 * slope(f0, c), k1 * f1.spacing + o1 * slope(f1, c), c.x, c.z);
+  return c;
+}
+
+// The unit normal of family f's streets at a point (toward growing `across`).
+function streetNormal(f, x, z) {
+  const gx = f.across(x + 0.5, z) - f.across(x - 0.5, z);
+  const gz = f.across(x, z + 0.5) - f.across(x, z - 0.5);
+  const g = Math.hypot(gx, gz) || 1;
+  return [gx / g, gz / g];
+}
+
 // The ground under a plaza's paved circle (lowest and highest), or null where it would reach a
 // sidewalk or the water, or stand on a hillside.
 function plazaGround(heightAt, x, z) {
@@ -482,37 +537,76 @@ function plazaAt(heightAt, k0, k1) {
   if (!j) return null;
   const s = heightAt.sample(j.x, j.z);
   if (s.wild > 0.3) return null;
-  // Into one of the four corners (the first that fits, from a random one), `off` from both
-  // streets (their fields' slopes turn m into field units).
+  // Into one of the four corners (the first that fits, from a random one), `off` from both streets.
   const off = KERB + PLAZA_CLEAR / 2 + 1;
-  const slope = (f, p) => Math.hypot(f.across(p.x + 0.5, p.z) - f.across(p.x - 0.5, p.z), f.across(p.x, p.z + 0.5) - f.across(p.x, p.z - 0.5));
   const kit = TOWN_KIT.find((k) => k.name === 'Kit_Fountain');
   const first = Math.floor(r(2) * 4);
   let x;
   let z;
   let nx;
   let nz;
+  let quadrant;
   let ground = null;
   for (let q = 0; q < 4 && !ground; q++) {
-    const s0 = (first + q) & 1 ? -1 : 1;
-    const s1 = (first + q) & 2 ? -1 : 1;
-    // (The fields' slopes change away from the junction: re-solve with the slopes found there.)
-    let c = { x: j.x, z: j.z };
-    for (let it = 0; it < 3 && c; it++) c = crossing(heightAt, k0 * f0.spacing + s0 * off * slope(f0, c), k1 * f1.spacing + s1 * off * slope(f1, c), c.x, c.z);
+    quadrant = (first + q) & 3;
+    const s0 = quadrant & 1 ? -1 : 1;
+    const s1 = quadrant & 2 ? -1 : 1;
+    const c = offsetFromJunction(heightAt, k0, k1, j, s0 * off, s1 * off);
     if (!c) continue;
     ({ x, z } = c);
-    const gx = f0.across(x + 0.5, z) - f0.across(x - 0.5, z);
-    const gz = f0.across(x, z + 0.5) - f0.across(x, z - 0.5);
-    const g = Math.hypot(gx, gz) || 1;
-    nx = (gx / g) * s0;
-    nz = (gz / g) * s0;
+    const [gx, gz] = streetNormal(f0, x, z);
+    nx = gx * s0;
+    nz = gz * s0;
     ground = heightAt.sample(x, z).wild < 0.3 ? plazaGround(heightAt, x, z) : null;
   }
   if (!ground) return null;
   const b = kitBuilding(kit, x, z, kit.w, nx, nz, ground, r(4), 4 + r(5));
   b.clear = PLAZA_CLEAR;
   b.clearRadius = PLAZA_CLEAR * 0.71;
+  b.quadrant = quadrant;
   return b;
+}
+
+// Corner buildings at a junction, in the corners its plaza (if any) leaves: a block that turns
+// the corner (the turret block with its turret to the junction), so the rows run right up to it.
+const CORNER_KITS = [['Kit_TurretCorner', 2], ['Kit_FlatBlock', 1], ['Kit_SlateBlock', 1], ['Kit_BrickWorks', 1]];
+function cornersAt(heightAt, k0, k1, plaza) {
+  const r = (q) => hash(k0 - 5003, k1 + 4001, q);
+  const fams = heightAt.streetFamilies;
+  const [f0, f1] = fams;
+  const j = crossing(heightAt, k0 * f0.spacing, k1 * f1.spacing, k1 * f1.spacing, k0 * f0.spacing);
+  if (!j || heightAt.sample(j.x, j.z).wild > 0.3) return [];
+  const total = CORNER_KITS.reduce((n, [, w]) => n + w, 0);
+  const out = [];
+  for (let q = 0; q < 4; q++) {
+    if (plaza?.quadrant === q || r(10 + q) < 0.15) continue;
+    let left = r(20 + q) * total;
+    const name = CORNER_KITS.find(([, w]) => (left -= w) < 0)?.[0] ?? CORNER_KITS[0][0];
+    const kit = TOWN_KIT.find((k) => k.name === name);
+    const side = [q & 1 ? -1 : 1, q & 2 ? -1 : 1];
+    // Facing one street or the other: the one that puts the model's right side (+x, the
+    // turret's side) toward the other street.
+    // (Where the streets don't cross square, the corner nearest the junction needs more room.)
+    for (const [a, extra] of [[0, 0.4], [1, 0.4], [0, 1.6], [1, 1.6], [0, 3], [1, 3]]) {
+      const b = 1 - a;
+      const offs = [];
+      offs[a] = side[a] * (LINE + extra + kit.d / 2);
+      offs[b] = side[b] * (LINE + extra + kit.w / 2);
+      const c = offsetFromJunction(heightAt, k0, k1, j, offs[0], offs[1]);
+      if (!c) continue;
+      const [ax, az] = streetNormal(fams[a], c.x, c.z);
+      const [bx, bz] = streetNormal(fams[b], c.x, c.z);
+      const nx = ax * side[a];
+      const nz = az * side[a];
+      // u = (-nz, nx) must point toward street b, i.e. against b's side.
+      if ((-nz * bx + nx * bz) * side[b] > 0) continue;
+      const ground = footprintGround(heightAt, c.x, c.z, -nz, nx, nx, nz, kit.w, kit.d);
+      if (!ground) continue;
+      out.push(kitBuilding(kit, c.x, c.z, kit.w, nx, nz, ground, r(30 + q), 3 + r(40 + q)));
+      break;
+    }
+  }
+  return out;
 }
 
 // The landmarks and plazas within `radius` of a point.
@@ -538,6 +632,7 @@ function specialsNear(heightAt, x, z, radius) {
     for (let k1 = Math.floor((a1 - radius - 60) / f1.spacing); k1 <= Math.ceil((a1 + radius + 60) / f1.spacing); k1++) {
       const b = get(`P${k0},${k1}`, () => plazaAt(heightAt, k0, k1));
       if (near(b)) out.push(b);
+      for (const c of get(`C${k0},${k1}`, () => cornersAt(heightAt, k0, k1, b))) if (near(c)) out.push(c);
     }
   }
   return out;

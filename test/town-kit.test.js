@@ -64,10 +64,20 @@ describe('sunny town', () => {
     expect(town.world).toBe('daytown');
     expect(town.town).toBe(true);
     expect(town.buildingKit).toBe(true);
-    // Same streets as the dark town.
+    // A denser street grid than the dark town's: more streets crossed along a line.
     const dark = createHeightField({ mode: 'town' });
-    expect(town(123.4, -56.7)).toBe(dark(123.4, -56.7));
     expect(dark.buildingKit).toBe(false);
+    const crossings = (field) => {
+      let n = 0;
+      let on = false;
+      for (let z = -600; z < 600; z += 1) {
+        const now = field.roadDistance(37, z) < 1;
+        if (now && !on) n++;
+        on = now;
+      }
+      return n;
+    };
+    expect(crossings(town)).toBeGreaterThan(crossings(dark) * 1.3);
   });
 
   it('puts kit buildings at their models\' size on the lots, off the sidewalks', () => {
