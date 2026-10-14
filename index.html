@@ -117,6 +117,16 @@
       .loading-dust { position: absolute; left: calc(50% - 70px); bottom: 26px; width: 14px; height: 14px; border-radius: 50%; background: rgba(222, 196, 150, 0.9); opacity: 0; animation: loading-dust 0.9s ease-out infinite; }
       .loading-dust:nth-of-type(2) { animation-delay: 0.3s; bottom: 30px; }
       .loading-dust:nth-of-type(3) { animation-delay: 0.6s; bottom: 24px; }
+      .loading-levels { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: -6px 0 14px; }
+      .loading-levels[hidden] { display: none; }
+      /* Wider than the card where there is room, so the five fit on one line. */
+      @media (min-width: 600px) { .loading-levels { margin-left: -40px; margin-right: -40px; } }
+      .loading-level { padding: 6px 12px; border: 1px solid rgba(74, 69, 56, 0.22); border-radius: 15px; background: rgba(250, 246, 238, 0.6);
+        color: #4a4538; font: 600 12px/1 system-ui, -apple-system, sans-serif; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+      .loading-level:hover { background: #f6eedd; border-color: rgba(74, 69, 56, 0.4); }
+      .loading-level[aria-pressed='true'] { background: #9a5b2c; border-color: #9a5b2c; color: #fff; cursor: default; }
+      .loading-levels.picked .loading-level { pointer-events: none; }
+      .loading-levels.picked .loading-level:not([aria-pressed='true']) { opacity: 0.45; }
       .loading-bar { height: 8px; margin: 18px 0 10px; border-radius: 4px; overflow: hidden; background: rgba(74, 69, 56, 0.12); }
       .loading-fill { height: 100%; background: linear-gradient(90deg, #d9683f, #f2b25c); transform: scaleX(0); transform-origin: left; transition: transform 0.35s ease-out; }
       .loading-step { font-weight: 600; }
@@ -131,6 +141,8 @@
       @media (max-height: 460px) {
         .loading-title { font-size: 38px; }
         .loading-sub { margin-bottom: 10px; }
+        .loading-levels { margin-top: -4px; margin-bottom: 8px; }
+        .loading-level { padding: 5px 10px; }
         .loading-scene { height: 96px; }
         .loading-bar { margin: 12px 0 8px; }
         .loading-go { margin-top: 8px; }
@@ -151,6 +163,7 @@
       <div class="loading-card">
         <h1 class="loading-title">Drift</h1>
         <p class="loading-sub">an endless drive</p>
+        <div class="loading-levels" role="group" aria-label="World" hidden></div>
         <div class="loading-scene" aria-hidden="true">
           <div class="loading-sun"></div>
           <div class="loading-strip loading-mesas"></div>

@@ -19,7 +19,7 @@ import { applyWheelSettings } from '../vehicle/physics.js';
 import { DRIVETRAIN, resetDrivetrain, saveDrivetrain } from '../vehicle/config.js';
 import { requestRebuild, requestRespawn } from '../vehicle/spawn.js';
 import { setGravelAmount } from '../render/terrain-mesh.js';
-import { WORLDS, saveWorld, worldMode } from '../world.js';
+import { WORLDS, switchWorld, worldMode } from '../world.js';
 import { clock, saveHour } from '../render/time-of-day.js';
 import { AUDIO, resetAudio, saveAudio } from '../audio/config.js';
 import { ENGINE_PRESETS } from '../audio/engine-presets.js';
@@ -162,17 +162,12 @@ export function createTuningPanel(world, { heightAt }) {
     respawn: () => requestRespawn(world, heightAt),
   };
 
-  // World picker: a new world needs a fresh start (both workers build their terrain at load).
+  // World picker: the page reloads into the new world.
   const worldChoice = { mode: worldMode() };
   gui
     .add(worldChoice, 'mode', WORLDS)
     .name('World')
-    .onChange((mode) => {
-      saveWorld(mode);
-      const url = new URL(location.href);
-      url.searchParams.delete('terrain');
-      location.href = url.href;
-    });
+    .onChange((mode) => (location.href = switchWorld(mode)));
   // Time of day, saved per world: the sun's (or moon's) light, the sky and the haze follow it.
   const { daylight } = world.get(Render);
   if (daylight) {
