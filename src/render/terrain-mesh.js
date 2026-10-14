@@ -8,13 +8,12 @@ import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
 import { CANYON_PBR, RIVER_PBR, canyonDirtDetail, canyonGravelDetail, canyonNormal, canyonRockDetail, forestFloorColor, forestFloorNormal } from './river-ground.js';
 import { SOIL_MIN } from '../terrain/riverbed.js';
 import { COVER_DEPTH, LAKE, ROAD as SNOW_ROAD } from '../terrain/snow.js';
-import { KERB as TOWN_KERB, PARK_FLOOR, ROAD_HALF_WIDTH as TOWN_ROAD, WATER_LEVEL } from '../terrain/town.js';
+import { KERB as TOWN_KERB, ROAD_HALF_WIDTH as TOWN_ROAD, WATER_LEVEL } from '../terrain/town.js';
 
 // Ground colour from the vertex colours, with the gravel stones drawn on top (the same stones the
 // GPU tyres roll over; see terrain/gravel.js).
-const PARK_CONCRETE = new Color('#c9c6bd'); // the sunny town's stunt parks
-const PARK_RAMP = new Color('#c4553a');
-const PARK_POOL = new Color('#4f9fc4');
+const PARK_SAND = new Color('#d6bd8c'); // the sunny town's stunt parks: a sand and gravel dirt park
+const PARK_DIRT = new Color('#a9774a'); // its ramps, banks and rollers: packed darker dirt
 const gravelAmount = uniform(GROUND.gravel);
 export function setGravelAmount(value) {
   gravelAmount.value = value;
@@ -210,11 +209,16 @@ export function groundShading({ color, steep, gravel, roadDist, lake, normal }) 
   const snowFar = snowGroundColor(roadDist, gravel, lake);
   // In town 'lake' is the signed distance to the street and 'gravel' where its centre line shows.
   const street = townStreet(roadDist, lake, gravel);
-  // Sunny town stunt parks (their concrete is in the vertex colour): the slopes of the ramps,
-  // banks and rollers painted red, per pixel so the edges stay crisp.
-  const concrete = smoothstep(0.07, 0.03, length(color.sub(vec3(PARK_CONCRETE.r, PARK_CONCRETE.g, PARK_CONCRETE.b))));
-  const parkRamp = concrete.mul(smoothstep(0.985, 0.955, normal.y)).mul(dayTown);
-  const town = mix(mix(ground, vec3(PARK_RAMP.r, PARK_RAMP.g, PARK_RAMP.b), parkRamp), street.rgb, street.a);
+  // Sunny town stunt parks (their sand is in the vertex colour): loose sand and gravel, speckled
+  // with stones at two sizes and patchy, the slopes of the ramps, banks and rollers packed into
+  // darker dirt, per pixel so the edges stay crisp.
+  const sand = smoothstep(0.08, 0.03, length(color.sub(vec3(PARK_SAND.r, PARK_SAND.g, PARK_SAND.b)))).mul(dayTown);
+  const grit = hashCell(positionWorld.xz.div(0.09).floor());
+  const stones = hashCell(positionWorld.xz.div(0.32).floor().add(17.3));
+  const stoneTone = mix(float(0.84), float(1.14), grit).mul(mix(float(1), mix(float(0.72), float(1.22), stones), step(0.62, stones).mul(0.8)));
+  const parkRamp = smoothstep(0.985, 0.955, normal.y);
+  const parkGround = mix(color, vec3(PARK_DIRT.r, PARK_DIRT.g, PARK_DIRT.b), parkRamp.mul(0.85)).mul(stoneTone).mul(patches);
+  const town = mix(mix(ground, parkGround, sand), street.rgb, street.a);
   return {
     color: vec4(
       mix(
@@ -383,11 +387,10 @@ function townColor(s, slope, x, z, out) {
   if (depth > 0) out.lerp(DEEP, Math.min(1, depth / 1.4) * 0.85);
   // Driveways up onto the raised blocks are paved.
   if (s.driveway > 0) out.lerp(TOWN_PAVING, s.driveway * 0.9);
-  // Stunt parks: pale concrete, the ramps, banks and rollers in red, the bowl painted blue.
+  // Stunt parks: sand and gravel (the shader adds the stones and the darker dirt of the slopes).
   if (s.park > 0) {
     const inPark = s.park * smoothstepJs(TOWN_KERB + 0.2, TOWN_KERB + 0.8, s.dist);
-    out.lerp(PARK_CONCRETE, inPark);
-    out.lerp(PARK_POOL, inPark * smoothstepJs(PARK_FLOOR - 0.3, PARK_FLOOR - 0.8, s.parkLift));
+    out.lerp(PARK_SAND, inPark);
   }
   out.offsetHSL(0, 0, fineNoise(x * 0.6, z * 0.6) * 0.02);
   return out;

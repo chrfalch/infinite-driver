@@ -144,8 +144,8 @@ function lotBuilding(heightAt, i, j) {
 // glass block; low lots: mostly houses, some blocks and cottages. Per model. (The landmarks and
 // fountains have their own spots, see `landmarkAt` and `plazaAt`.)
 const KIT_ODDS = {
-  tall: { tall: 1, mid: 0.5, small: 0, rare: 0.02 },
-  low: { tall: 0.5, mid: 1, small: 0.2, rare: 0 },
+  tall: { tall: 0.6, mid: 1, small: 0.3, rare: 0.02 },
+  low: { tall: 0.15, mid: 1, small: 0.8, rare: 0 },
 };
 function pickKit(tall, t) {
   const odds = KIT_ODDS[tall ? 'tall' : 'low'];
@@ -269,6 +269,9 @@ function footprintGround(heightAt, x, z, ux, uz, nx, nz, w, d) {
 // street, like the reference's continuous frontages. A segment depends only on its street, side and
 // number, so every chunk and worker builds the same rows.
 const SEG = 64;
+const HOUSE_GAP = 3; // m between neighbouring houses in a row, at least
+const HOUSE_GAP_SPREAD = 5; // m more, at most
+const BEHIND_SHARE = 0.15; // of the row's buildings with another behind
 const LINE = KERB + 0.6; // m from the centre line to the fronts
 const segments = new WeakMap();
 
@@ -344,14 +347,15 @@ function segment(heightAt, fi, k, m, side) {
       }
       if (placed && blocked(placed)) placed = null;
       if (placed) {
-        t += dt + KIT_GAP / speed;
+        // Detached houses: a garden gap of a few metres to the next one.
+        t += dt + (HOUSE_GAP + r(900 + n) * HOUSE_GAP_SPREAD) / speed;
         break;
       }
     }
     if (placed) {
       out.push(placed);
-      // Often a second building right behind it, so the blocks fill up as in the reference.
-      if (r(600 + n) < 0.7) {
+      // Now and then a second building behind it (a workshop, a back house).
+      if (r(600 + n) < BEHIND_SHARE) {
         const behind = placeBehind(heightAt, placed, pickKit(tall, r(700 + n)), r(800 + n));
         if (behind && !(back.length && overlap(back[back.length - 1], behind, KIT_GAP)) && !obstacles.some((o) => overlap(o, behind, KIT_GAP))) back.push(behind);
       }

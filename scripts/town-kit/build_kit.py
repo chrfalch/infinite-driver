@@ -305,7 +305,7 @@ def turret_corner():
     # Four storeys of cream stone on a corner, a round turret with a cone roof on the front right.
     B = Builder('Kit_TurretCorner', 'cream', 'terra')
     W, D = 9.6, 9.0
-    G, NF = 3.6, 3
+    G, NF = 3.6, 2
     eaves = G + FLOOR * NF
     hx, hy = W / 2, D / 2
     walls_rrect(B, hx, hy, 0.5, eaves, 'cream')
@@ -361,7 +361,7 @@ def bell_mansard():
     # Three storeys of sand render under a bell-curved slate mansard with round dormers.
     B = Builder('Kit_BellMansard', 'yellow', 'slate')
     W, D = 7.2, 8.6
-    G, NF = 3.4, 2
+    G, NF = 3.4, 1
     eaves = G + FLOOR * NF
     hx, hy = W / 2, D / 2
     walls_rrect(B, hx, hy, 0.6, eaves, 'yellow')
@@ -501,7 +501,7 @@ def dome_tower():
     # Five storeys with deeply rounded corners, a columned drum and a teal dome with a lantern.
     B = Builder('Kit_DomeTower', 'sand')
     W = D = 8.4
-    G, NF = 3.8, 4
+    G, NF = 3.8, 2
     eaves = G + FLOOR * NF
     h = W / 2
     walls_rrect(B, h, h, 1.8, eaves, 'sand', segs=4)
@@ -548,7 +548,7 @@ def dutch_gable():
     # windows and half-round green awnings over the shop.
     B = Builder('Kit_DutchGable', 'brick', 'slate')
     W, D = 8.0, 9.4
-    G, NF = 3.6, 2
+    G, NF = 3.6, 1
     eaves = G + FLOOR * NF
     hx, hy = W / 2, D / 2
     walls_rrect(B, hx, hy, 0.25, eaves, 'brick')
@@ -651,7 +651,7 @@ def flat_block():
     # awnings, a regular grid of windows, cornice, parapet and a cluttered flat roof.
     B = Builder('Kit_FlatBlock', 'stucco')
     W, D = 13.0, 10.5
-    G, NF = 3.8, 4
+    G, NF = 3.8, 2
     eaves = G + FLOOR * NF
     hx, hy = W / 2, D / 2
     walls_rrect(B, hx, hy, 0.15, eaves, 'stucco', segs=1)
@@ -683,7 +683,7 @@ def slate_block():
     # on the first floor: the grey-roofed blocks of the reference.
     B = Builder('Kit_SlateBlock', 'greystone', 'slate')
     W, D = 12.0, 10.5
-    G, NF = 3.8, 3
+    G, NF = 3.8, 2
     eaves = G + FLOOR * NF
     hx, hy = W / 2, D / 2
     walls_rrect(B, hx, hy, 0.15, eaves, 'greystone', segs=1)
@@ -744,7 +744,7 @@ def brick_works():
     # windows above, a flat roof with a water tank.
     B = Builder('Kit_BrickWorks', 'brick')
     W, D = 11.0, 10.0
-    G, NF = 4.2, 3
+    G, NF = 4.2, 2
     eaves = G + FLOOR * NF
     hx, hy = W / 2, D / 2
     walls_rrect(B, hx, hy, 0.1, eaves, 'brick', segs=1)
@@ -782,7 +782,7 @@ def townhouse():
     # fronts that close up a row.
     B = Builder('Kit_Townhouse', 'stucco', 'terra')
     W, D = 6.0, 10.0
-    G, NF = 3.5, 3
+    G, NF = 3.5, 2
     eaves = G + FLOOR * NF
     hx, hy = W / 2, D / 2
     walls_rrect(B, hx, hy, 0.05, eaves, 'stucco', segs=1)
@@ -817,7 +817,7 @@ def glass_block():
     # on a recessed ground floor, machinery on its flat roof.
     B = Builder('Kit_GlassBlock', None)
     W, D = 10.0, 10.0
-    G, NF = 4.2, 6
+    G, NF = 4.2, 3
     eaves = G + 3.4 * NF
     hx, hy = W / 2, D / 2
     B.prism(rrect(hx - 0.6, hy - 0.6, 0.1, 1), -PLINTH, G, 'machine')

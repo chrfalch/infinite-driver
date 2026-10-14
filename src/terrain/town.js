@@ -16,7 +16,10 @@ const SPACING_Z = 190; // m between north-south streets
 // The sunny town is a denser, more regular grid of smaller blocks, as in the reference diorama.
 const DAY_SPACING_X = 100;
 const DAY_SPACING_Z = 120;
-const DAY_WARP = 0.65; // its streets wind less
+// Its streets are nearly straight, a square grid with long straights for speed: only a gentle
+// long bend (a fraction of the dark town's), none of its short wiggles.
+const DAY_WARP = 0.15;
+const DAY_WIGGLE = 0;
 const RIVER_SPACING = 640; // m between rivers
 const RIVER_DEPTH = 1.3; // m of water in the middle of the river (shallow enough to ford)
 
@@ -139,6 +142,7 @@ export function createTownField(seed = 31, world = 'town') {
   const SX = day ? DAY_SPACING_X : SPACING_X;
   const SZ = day ? DAY_SPACING_Z : SPACING_Z;
   const warp = day ? DAY_WARP : 1;
+  const wiggle = day ? DAY_WIGGLE : 1;
   const rand = mulberry32(seed);
   const warpA = createNoise2D(rand);
   const warpB = createNoise2D(rand);
@@ -152,9 +156,9 @@ export function createTownField(seed = 31, world = 'town') {
 
   // Warped coordinates across each family; a road (or the river) is where one is a multiple of
   // its spacing. The east-west family is shifted so a street runs through the origin.
-  const a0 = warp * (38 * warpA(0, 0) + 10 * warpB(0, 0));
-  const acrossX = (x, z) => z + warp * (38 * warpA(x * 0.005, z * 0.004) + 10 * warpB(x * 0.017, z * 0.017)) - a0;
-  const acrossZ = (x, z) => x + warp * (45 * warpB(x * 0.004 + 40, z * 0.0055) + 9 * warpA(x * 0.018 + 9, z * 0.018));
+  const a0 = warp * 38 * warpA(0, 0) + wiggle * 10 * warpB(0, 0);
+  const acrossX = (x, z) => z + warp * 38 * warpA(x * 0.005, z * 0.004) + wiggle * 10 * warpB(x * 0.017, z * 0.017) - a0;
+  const acrossZ = (x, z) => x + warp * 45 * warpB(x * 0.004 + 40, z * 0.0055) + wiggle * 9 * warpA(x * 0.018 + 9, z * 0.018);
   const acrossR = (x, z) => 0.6 * x - 0.8 * z + 110 * riverWarp(x * 0.0022, z * 0.0022) + 28 * riverWarp(x * 0.008 + 3, z * 0.008);
   const OFFSET_Z = SZ * 0.41;
   // The river runs half its spacing away from the origin.
@@ -325,7 +329,8 @@ export function createTownField(seed = 31, world = 'town') {
   // terraces' faces); the rest is grass and soil.
   heightAt.groundAt = (x, z, out = { road: 0, rock: 0 }) => {
     const s = sample(x, z);
-    out.road = Math.max(1 - smoothstep(KERB - 0.3, KERB + 0.3, s.dist), s.park ?? 0, s.driveway ?? 0);
+    // (The stunt parks are loose sand and gravel: ground, not road.)
+    out.road = Math.max(1 - smoothstep(KERB - 0.3, KERB + 0.3, s.dist), s.driveway ?? 0);
     out.rock = smoothstep(4, 12, s.mountain) * (1 - out.road);
     return out;
   };
@@ -341,7 +346,7 @@ export function createTownField(seed = 31, world = 'town') {
   heightAt.lakeInside = (x, z) => WATER_LEVEL - heightAt(x, z);
   // The streets and sidewalks are paved: no soil thrown, piled or rutted there (systems/soil.js,
   // systems/tracks.js), asphalt grip and no loose stones for the tyres (tire/config.js).
-  heightAt.bareAt = (x, z) => heightAt.roadDistance(x, z) < KERB || (day && sample(x, z).park > 0.5);
+  heightAt.bareAt = (x, z) => heightAt.roadDistance(x, z) < KERB;
   heightAt.paved = true;
   heightAt.waterLevel = WATER_LEVEL;
   heightAt.wildAt = wildAt;
