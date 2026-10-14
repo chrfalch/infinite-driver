@@ -137,7 +137,7 @@ describe('dry river terrain', () => {
     expect(prev - heightAt.sample(points[0].x, points[0].z).bedY).toBeGreaterThan(200);
   });
 
-  it('climbs in a staircase: level shelves of 5-10 m between short, steep risers of 2-3 m, all varied', () => {
+  it('climbs in a staircase: level shelves (cascades and long runs) between short risers, gentler up the spillways', () => {
     const step = 0.25;
     const ys = walkBed(2000, step).map((p) => heightAt.sample(p.x, p.z).bedY);
     // Runs of level and of climbing ground along the centre line.
@@ -157,21 +157,160 @@ describe('dry river terrain', () => {
     const deg = (g) => Math.atan(g) * (180 / Math.PI);
     const median = (v) => v[v.length >> 1];
     expect(risers.length).toBeGreaterThan(120);
-    // Shelves 5-10 m (a little longer where the bed bends), varied.
-    expect(median(shelves)).toBeGreaterThan(5.5);
-    expect(median(shelves)).toBeLessThan(10);
-    expect(shelves[Math.floor(shelves.length * 0.05)]).toBeGreaterThan(4);
-    expect(shelves[Math.floor(shelves.length * 0.95)]).toBeLessThan(12);
-    expect(shelves[Math.floor(shelves.length * 0.9)] - shelves[Math.floor(shelves.length * 0.1)]).toBeGreaterThan(3);
-    // Risers 2-3 m long, rising 0.6-2 m: some gentle-ish, some very steep, none past ~38°.
+    // The centre line runs up the spillways as often as not (the low channel wanders across it), so
+    // its risers are 2-6.5 m long. Its shelves are bunched into cascades of short ones and spread
+    // into long level runs: no steady beat.
+    expect(median(shelves)).toBeGreaterThan(3);
+    expect(median(shelves)).toBeLessThan(8);
+    expect(shelves[Math.floor(shelves.length * 0.95)]).toBeGreaterThan(10);
+    expect(shelves[shelves.length - 1]).toBeGreaterThan(15);
+    expect(shelves[shelves.length - 1]).toBeLessThan(30);
     const lens = risers.map((r) => r.len).sort((p, q) => p - q);
-    expect(median(lens)).toBeGreaterThan(2);
-    expect(median(lens)).toBeLessThan(3.3);
-    expect(lens[lens.length - 1]).toBeLessThan(4);
+    expect(lens[0]).toBeGreaterThan(1.75);
+    expect(lens[lens.length - 1]).toBeLessThan(7);
+    // Rising 0.6-2 m: some gentle, some steep, none past ~38°.
     const grades = risers.map((r) => deg(r.rise / r.len)).sort((p, q) => p - q);
-    expect(grades[Math.floor(grades.length * 0.1)]).toBeLessThan(24);
-    expect(grades[Math.floor(grades.length * 0.9)]).toBeGreaterThan(27);
+    expect(grades[Math.floor(grades.length * 0.1)]).toBeLessThan(15);
+    expect(grades[Math.floor(grades.length * 0.9)]).toBeGreaterThan(17);
     expect(deg(Math.max(...risers.map((r) => r.peak)))).toBeLessThan(38);
+  });
+
+  it('carves a spillway into every step: a gentler slot where the low channel crosses it, a pool below', () => {
+    const step = 0.25;
+    const points = walkBed(1500, step);
+    const ys = points.map((p) => heightAt.sample(p.x, p.z).bedY);
+    let steps = 0;
+    let spilled = 0;
+    let gentler = 0;
+    let pools = 0;
+    for (let i = 8; i < ys.length - 40; i++) {
+      // The middle of each riser on the centre line.
+      if (!((ys[i] - ys[i - 1]) / step > 0.15 && (ys[i - 1] - ys[i - 2]) / step <= 0.15)) continue;
+      const p = points[i];
+      const side = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
+      const ahead = [Math.cos(p.yaw), -Math.sin(p.yaw)];
+      const w = heightAt.bedWidth(p.x, p.z);
+      if (w < 3) continue;
+      steps++;
+      const at = (d, o) => heightAt.sample(p.x + side[0] * d + ahead[0] * o, p.z + side[1] * d + ahead[1] * o);
+      // Where across the bed the spillway is.
+      let best = 0;
+      let spillD = 0;
+      for (let d = -(w - 0.5); d <= w - 0.5; d += 0.25) {
+        const s = at(d, 1).spill;
+        if (s > best) [best, spillD] = [s, d];
+      }
+      if (best < 0.6) continue;
+      spilled++;
+      // The steepest pitch of the step (the staircase, without the channel's groove) along the bed
+      // through the spillway, and 3 m to one side of it (if the bed is there).
+      const pitch = (d) => {
+        let g = 0;
+        for (let o = -7; o < 3; o += 0.25) g = Math.max(g, (at(d, o + 0.25).stepY - at(d, o).stepY) / 0.25);
+        return g;
+      };
+      const other = Math.abs(spillD + 3) < w - 0.5 ? spillD + 3 : spillD - 3;
+      if (pitch(spillD) < pitch(other) * 0.85) gentler++;
+      // A pool: the ground beneath the rocks dips at the foot of the step, lower than the shelf a
+      // couple of metres further down.
+      let low = Infinity;
+      let lowAt = 0;
+      for (let o = -5; o < 0; o += 0.25) if (at(spillD, o).under < low) [low, lowAt] = [at(spillD, o).under, o];
+      if (low < at(spillD, lowAt - 2).under - 0.08) pools++;
+    }
+    expect(steps).toBeGreaterThan(50);
+    expect(spilled / steps).toBeGreaterThan(0.85);
+    expect(gentler / spilled).toBeGreaterThan(0.75);
+    expect(pools / spilled).toBeGreaterThan(0.5);
+  });
+
+  it('cuts the low channel into the rock, meandering from side to side of the bed', () => {
+    const offsets = [];
+    const depths = [];
+    for (const p of walkBed(1500).filter((_, i) => i % 8 === 0)) {
+      const w = heightAt.bedWidth(p.x, p.z);
+      if (w < 3) continue;
+      const side = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
+      const at = (d) => heightAt.sample(p.x + side[0] * d, p.z + side[1] * d);
+      // The channel's line: where its groove runs (the most worn ground across the bed).
+      let best = -1;
+      let line = 0;
+      for (let d = -(w - 0.5); d <= w - 0.5; d += 0.1) {
+        const r = at(d).rut;
+        if (r > best) [best, line] = [r, d];
+      }
+      offsets.push(line / w);
+      // Its groove: the staircase's floor less the ground beneath the rocks, in it and 2 m aside.
+      const cut = (d) => at(d).stepY - at(d).under;
+      const aside = Math.abs(line + 2) < w ? line + 2 : line - 2;
+      depths.push(cut(line) - cut(aside));
+    }
+    offsets.sort((p, q) => p - q);
+    depths.sort((p, q) => p - q);
+    // Out toward either side of the bed, crossing it again and again.
+    expect(offsets[Math.floor(offsets.length * 0.1)]).toBeLessThan(-0.35);
+    expect(offsets[Math.floor(offsets.length * 0.9)]).toBeGreaterThan(0.35);
+    // Cut in 0.15-0.5 m (more where the bed is narrow).
+    expect(depths[Math.floor(depths.length * 0.1)]).toBeGreaterThan(0.12);
+    expect(depths[depths.length >> 1]).toBeGreaterThan(0.2);
+    expect(depths[depths.length - 1]).toBeLessThan(0.85);
+  });
+
+  it('keeps the risers bare rock: no gravel ramps', () => {
+    const step = 0.25;
+    const points = walkBed(1000, step);
+    const ys = points.map((p) => heightAt.sample(p.x, p.z).bedY);
+    const shares = [];
+    let soil = 0;
+    let all = 0;
+    for (let i = 1; i < ys.length; i++) {
+      const climbing = (ys[i] - ys[i - 1]) / step > 0.2;
+      if (climbing) {
+        const p = points[i];
+        const side = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
+        const w = heightAt.bedWidth(p.x, p.z);
+        for (let d = -(w - 0.5); d <= w - 0.5; d += 0.25) {
+          all++;
+          if (heightAt.soilAt(p.x + side[0] * d, p.z + side[1] * d) > SOIL_MIN) soil++;
+        }
+      } else if (all) {
+        shares.push(soil / all);
+        soil = all = 0;
+      }
+    }
+    shares.sort((p, q) => p - q);
+    expect(shares.length).toBeGreaterThan(60);
+    expect(shares[shares.length >> 1]).toBeLessThan(0.12);
+    expect(shares[Math.floor(shares.length * 0.95)]).toBeLessThan(0.35);
+  });
+
+  it('wanders the step edges across the bed instead of running them straight across', () => {
+    // Where a riser starts at one side of a wide stretch of bed and where at the other: some way
+    // apart along the bed, by a different amount at each step.
+    const offsets = [];
+    const points = walkBed(1500, 0.25);
+    for (const p of points.filter((_, i) => i % 4 === 0)) {
+      if (heightAt.bedWidth(p.x, p.z) < 5) continue;
+      const side = [-Math.sin(p.yaw), -Math.cos(p.yaw)];
+      const ahead = [Math.cos(p.yaw), -Math.sin(p.yaw)];
+      const floorAt = (d, o) => heightAt.sample(p.x + side[0] * d + ahead[0] * o, p.z + side[1] * d + ahead[1] * o).h;
+      // Only where the centre line is at the foot of a riser.
+      const c0 = heightAt.sample(p.x, p.z).bedY;
+      const c1 = heightAt.sample(p.x + ahead[0] * 0.5, p.z + ahead[1] * 0.5).bedY;
+      if (c1 - c0 < 0.15) continue;
+      const startAt = (d) => {
+        let lo = floorAt(d, -8);
+        for (let o = -8; o <= 8; o += 0.25) if (floorAt(d, o) - lo > 0.6) return o;
+        return NaN;
+      };
+      const a = startAt(3.5);
+      const b = startAt(-3.5);
+      if (Number.isFinite(a) && Number.isFinite(b)) offsets.push(Math.abs(a - b));
+    }
+    offsets.sort((p, q) => p - q);
+    expect(offsets.length).toBeGreaterThan(15);
+    expect(offsets[offsets.length >> 1]).toBeGreaterThan(0.7);
+    expect(offsets[Math.floor(offsets.length * 0.9)]).toBeGreaterThan(1.8);
   });
 
   it('narrows and widens along its length: tight gaps between the walls and wide open stretches', () => {
