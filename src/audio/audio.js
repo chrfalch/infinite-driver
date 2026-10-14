@@ -141,6 +141,7 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
   // preset: a fixed engine preset (the engine lab); otherwise the one picked in the settings.
   const audio = { ctx: null, node: null, state: 'off', manual: !feed?.shared, preset, update: () => {}, dispose: () => {} };
   audio.unlock = () => {};
+  audio.preload = () => Promise.resolve();
   const removeButton = button && typeof document !== 'undefined' ? createSoundButton(audio) : () => {};
   if (!Context || typeof AudioWorkletNode === 'undefined' || !globalThis.isSecureContext) {
     audio.state = 'unsupported';
@@ -196,8 +197,9 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
     fadeTo(level());
     loadRecordings(audio.preset ?? currentPreset());
     // The recorded tyre, ground and car sounds; the synths play each part until then (or for good,
-    // if there is no bank).
-    loadFoley(FOLEY_BANK, (data) => ctx.decodeAudioData(data))
+    // if there is no bank). Decoded already if they were preloaded (and not used yet).
+    const foley = takePreloaded(FOLEY_BANK) ?? loadFoley(FOLEY_BANK, (data) => ctx.decodeAudioData(data));
+    foley
       .then((bank) => {
         node.port.postMessage({ type: 'foley', bank }, foleyTransfer(bank));
         log('recorded ground and car sounds:', Object.keys(bank.loops).length, 'loops,', Object.keys(bank.oneshots).length, 'hits');
@@ -213,7 +215,7 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
     if (banks.has(path)) return;
     banks.set(path, true);
     log('loading recordings', path);
-    loadBank(path, (data) => ctx.decodeAudioData(data))
+    (takePreloaded(path) ?? loadBank(path, (data) => ctx.decodeAudioData(data)))
       .then((bank) => {
         node.port.postMessage({ type: 'bank', bank }, bankTransfer(bank));
         log('recordings playing:', bank.name, bank.loops.length, 'loops');
@@ -223,6 +225,54 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
         console.warn('[sound] recordings failed to load, the synth plays instead', error);
       });
   }
+
+  // The recordings fetched and decoded before the first gesture (the loading screen waits for
+  // them), so the sound starts with them. Each preloaded bank is used once: its buffers are
+  // transferred to the worklet.
+  const preloaded = new Map();
+  const takePreloaded = (path) => {
+    const bank = preloaded.get(path);
+    preloaded.delete(path);
+    return bank?.catch(() => (path === FOLEY_BANK ? loadFoley : loadBank)(path, (data) => ctx.decodeAudioData(data)));
+  };
+  // onProgress(done, total) per file; resolves when everything is decoded, or failed (the sound
+  // then loads them as before once it starts).
+  audio.preload = (onProgress = () => {}) => {
+    const Offline = globalThis.OfflineAudioContext ?? globalThis.webkitOfflineAudioContext;
+    const path = (audio.preset ?? currentPreset())?.samples;
+    if (!AUDIO.enabled || !Offline || preloaded.size) return Promise.resolve();
+    // Decoding needs no running context: the worklet resamples each take from its own rate.
+    let offline;
+    try {
+      offline = new Offline(1, 1, 48000);
+    } catch {
+      return Promise.resolve();
+    }
+    let done = 0;
+    let total = 0;
+    const counting = async (url) => {
+      const res = await fetch(url);
+      if (res.ok && url.endsWith('manifest.json')) {
+        const manifest = await res.clone().json();
+        total += [manifest.loops, manifest.oneshots].flatMap((g) => (Array.isArray(g) ? g : Object.values(g ?? {}).flat())).length;
+        onProgress(done, total);
+      }
+      return res;
+    };
+    const decode = async (data) => {
+      const decoded = await offline.decodeAudioData(data);
+      onProgress(++done, total);
+      return decoded;
+    };
+    if (path) preloaded.set(path, loadBank(path, decode, counting));
+    preloaded.set(FOLEY_BANK, loadFoley(FOLEY_BANK, decode, counting));
+    const started = performance.now();
+    return Promise.allSettled(preloaded.values()).then((results) => {
+      const failed = results.filter((r) => r.status === 'rejected');
+      for (const r of failed) console.warn('[sound] preloading failed, loads on start instead', r.reason);
+      log(`preloaded ${done} recordings in ${Math.round(performance.now() - started)} ms`);
+    });
+  };
 
   // Called inside a user gesture.
   function unlock() {

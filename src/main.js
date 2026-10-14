@@ -55,17 +55,41 @@ import { createTuningPanel } from './tuning/panel.js';
 import { loadPanelOpen, panelStartsOpen, savePanelOpen } from './tuning/panel-state.js';
 import { updateInstanceBatchers } from './render/instance-batcher.js';
 import { createPhysicsClient, workerGpuSupported } from './physics/client.js';
-import { ROCK_COUNT, startChunkWorker } from './systems/terrain.js';
+import { ROCK_COUNT, loadTerrain, startChunkWorker } from './systems/terrain.js';
 import { CAR } from './vehicle/config.js';
 import { updateGpuGround, updateGpuRocks } from './tire/gpu-tires.js';
 import { createTouchControls } from './ui/touch-controls.js';
+import { createLoadingScreen } from './ui/loading.js';
 import { count, reportError, sample, startOverlay, timed } from './perf.js';
 import { AudioFeed, createFeedBuffer } from './audio/feed.js';
 import { createAudio } from './audio/audio.js';
+import { AUDIO } from './audio/config.js';
+
+// The loading screen, until the drive is ready (ui/loading.js).
+const loading = createLoadingScreen();
 
 async function main() {
   const container = document.getElementById('app');
+  const params = new URLSearchParams(location.search);
+  // The engine sound reads every physics step from here (audio/feed.js); ?sound=0 turns it off.
+  // Its recordings load and decode alongside everything else.
+  const audioFeed = new AudioFeed(createFeedBuffer());
+  const audio = params.get('sound') === '0' ? null : createAudio({ feed: audioFeed });
+  const soundLoaded = audio
+    ? audio.preload((done, total) => {
+        loading?.set('sound', total ? done / total : 0);
+        loading?.note('sound', total ? `sounds ${done}/${total}` : 'sounds…');
+      })
+    : Promise.resolve();
+  soundLoaded.then(() => {
+    loading?.set('sound', 1);
+    loading?.note('sound', null);
+  });
+
+  loading?.set('gpu', 0.1, 'Waking up the GPU');
   const [render] = await Promise.all([createRenderer(container), RAPIER.init(), glyph.init()]);
+  loading?.set('gpu', 1, 'Surveying the land');
+  await loading?.pause();
 
   // The frame updates world matrices itself, before the instanced parts read them (see draw).
   render.scene.matrixWorldAutoUpdate = false;
@@ -84,7 +108,10 @@ async function main() {
   const night = daylight.dark > 0.5;
   const heightAt = createHeightField({ mode });
   // The sunny town's buildings are models: loaded before its first chunk is built.
-  if (heightAt.buildingKit) await loadTownKit();
+  if (heightAt.buildingKit) {
+    loading?.set('world', 0.3, 'Building the town');
+    await loadTownKit();
+  }
   // The town's river and ponds.
   const water = heightAt.waterLevel !== undefined ? createWater(render.scene, heightAt.waterLevel) : null;
   // The tyres, compaction and spray treat the ground as snow in the snowfield.
@@ -100,11 +127,11 @@ async function main() {
     : { deform: groundSurface.deform, origin: groundSurface.origin, n: PATCH_N, cell: DEFORM_CELL };
   if (heightAt.rockAt) showRutsOnSheet(ruts);
 
+  loading?.set('world', 1, 'Starting the physics');
+  await loading?.pause();
+
   // Physics runs in a worker (with its own GPU device) for the GPU tyres when the browser has
   // WebGPU in workers; ?physics=main keeps it on this thread. Other tyre modes stay here.
-  const params = new URLSearchParams(location.search);
-  // The engine sound reads every physics step from here (audio/feed.js); ?sound=0 turns it off.
-  const audioFeed = new AudioFeed(createFeedBuffer());
   const useWorker = CAR.softTires && CAR.gpuTires && params.get('physics') !== 'main' && (await workerGpuSupported());
   let remote = null;
   let physicsWorld = null;
@@ -126,6 +153,9 @@ async function main() {
     physicsWorld.numSolverIterations = 8;
   }
 
+  loading?.set('physics', 1, 'Bolting the car together');
+  await loading?.pause();
+
   // The sunny town's loose crates and cones: drawn here, simulated where the physics runs.
   const propsView = heightAt.buildingKit ? createPropsView(render.scene, heightAt) : null;
   const propPhysics = heightAt.buildingKit && physicsWorld ? createPropPhysics(RAPIER, physicsWorld, heightAt) : null;
@@ -136,7 +166,6 @@ async function main() {
   world.add(Physics({ rapier: RAPIER, world: physicsWorld, remote, accumulator: 0, step: 1 / 120, stepMs: 0, simTime: 0, displayTime: 0 }));
   // Main-thread physics writes the audio feed itself; worker physics writes it in the worker.
   if (!remote) world.get(Physics).audioFeed = audioFeed;
-  const audio = params.get('sound') === '0' ? null : createAudio({ feed: audioFeed });
   world.add(Render(render));
   const surfaceAt = (x, z) => heightAt(x, z) + deformation.at(x, z);
   world.add(HeightField({ heightAt, surfaceAt }));
@@ -174,9 +203,20 @@ async function main() {
     if (changed === panel) savePanelOpen(!panel._closed);
   });
 
+  loading?.set('car', 1, 'Raising the terrain');
+  await loading?.pause();
+
   // The chunk worker first, so the initial load can hand it the rock sheets (dry river).
   startChunkWorker({ mode });
-  streamTerrain(world, { force: true });
+  await loadTerrain(world, {
+    onProgress: (done, total) => {
+      loading?.set('terrain', total ? done / total : 1);
+      loading?.note('terrain', `terrain ${done}/${total}`);
+    },
+    pause: loading?.pause,
+  });
+  loading?.note('terrain', null);
+  loading?.set('hud', 0.2, 'Painting the gauges');
 
   // HUD text through Glyph.
   const hud = glyph.handle('hud', ThreeConfig);
@@ -186,6 +226,7 @@ async function main() {
   const gauges = createGauges({ hud, font: inter, scene: render.hudScene });
   // Round map of the ground around the car, bottom left (?map=0 hides it).
   const minimap = params.get('map') === '0' ? null : createMinimap(heightAt);
+  loading?.set('hud', 1, 'Warming up the engine');
 
   // The perf card's two lines (P or the panel's switch shows it).
   const gpuName = render.renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2 (no WebGPU)';
@@ -308,8 +349,15 @@ async function main() {
     }
     timed('draw', draw);
     sample('frame.js', performance.now() - fStart);
+    loading?.frame(now);
   };
   render.renderer.setAnimationLoop(frame);
+
+  // The drive starts on a tap or key press once everything is in, so the sound (which browsers
+  // start only from such a gesture) starts with it; no need if the sound is off, or already started
+  // by a tap while loading. Browsers driven by a script skip the prompt.
+  const soundToStart = () => !!audio && audio.state === 'off' && AUDIO.enabled && !navigator.webdriver;
+  loading?.finish({ sound: soundLoaded, prompt: soundToStart });
 
   // Handy for debugging from the console.
   window.__game = {
@@ -357,6 +405,7 @@ function syncRemoteSolver(world) {
 
 main().catch((error) => {
   console.error(error);
+  loading?.remove();
   const pre = document.createElement('pre');
   pre.className = 'fatal';
   pre.textContent = String(error?.stack ?? error);

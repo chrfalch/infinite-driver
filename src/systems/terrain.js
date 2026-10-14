@@ -300,6 +300,38 @@ export function streamTerrain(world, { force = false } = {}) {
   }
 }
 
+// The initial load: every chunk in range built here with its colliders and rocks, as
+// streamTerrain does with `force`, but one chunk per task (`pause` between them), so the page
+// still draws (the loading screen) and takes input meanwhile. onProgress(done, total) per chunk.
+export async function loadTerrain(world, { onProgress = () => {}, pause = () => new Promise((r) => setTimeout(r, 0)) } = {}) {
+  const target = world.queryFirst(CameraTarget, Transform);
+  if (!target) return;
+  const { position } = target.get(Transform);
+  const { radius, colliderRadius } = world.get(TerrainStreaming);
+  const physics = world.get(Physics);
+  const { scene } = world.get(Render);
+  const { heightAt } = world.get(HeightField);
+  const ccx = Math.floor(position.x / CHUNK_SIZE);
+  const ccz = Math.floor(position.z / CHUNK_SIZE);
+  const loaded = new Set();
+  world.query(TerrainChunk).forEach((e) => loaded.add(chunkKey(e.get(TerrainChunk).cx, e.get(TerrainChunk).cz)));
+  const missing = [];
+  for (let dz = -radius; dz <= radius; dz++) {
+    for (let dx = -radius; dx <= radius; dx++) if (!loaded.has(chunkKey(ccx + dx, ccz + dz))) missing.push([ccx + dx, ccz + dz, dx * dx + dz * dz]);
+  }
+  missing.sort((a, b) => a[2] - b[2]);
+  onProgress(0, missing.length);
+  for (let i = 0; i < missing.length; i++) {
+    const [cx, cz] = missing[i];
+    const near = Math.abs(cx - ccx) <= colliderRadius && Math.abs(cz - ccz) <= colliderRadius;
+    timed('terrain.spawnChunk', () => spawnChunk(world, physics, scene, heightAt, cx, cz, { ground: true, rocks: true, near }));
+    onProgress(i + 1, missing.length);
+    await pause();
+  }
+  // Anything left (none, unless the target moved meanwhile).
+  streamTerrain(world, { force: true });
+}
+
 // `data`: the chunk as built by the chunk worker, or null to build it here.
 function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, near }, data = null) {
   const heights = data?.heights ?? timed('terrain.heights', () => sampleChunk(heightAt, cx, cz));

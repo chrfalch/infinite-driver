@@ -87,11 +87,97 @@
       @media (max-width: 700px) {
         .lil-gui.tuning { --width: 250px; max-height: 60vh; }
       }
-      .fatal { position: fixed; inset: 16px; margin: 0; padding: 16px; background: #fff; color: #a00; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; overflow: auto; }
+      /* The loading screen (src/ui/loading.js). Its animations are transforms and opacity only, so
+         they keep running while the page is busy. */
+      .loading {
+        position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center;
+        background: radial-gradient(ellipse at 50% 35%, #f3ecdd 0%, #e9e2d3 55%, #ddd2bc 100%);
+        color: #4a4538; font: 14px/1.4 system-ui, -apple-system, sans-serif;
+        transition: opacity 0.6s ease, transform 0.6s ease;
+      }
+      .loading.gone { opacity: 0; transform: scale(1.04); pointer-events: none; }
+      .loading-card { width: min(440px, 86vw); text-align: center; }
+      .loading-title { margin: 0; font: 800 54px/1 system-ui, -apple-system, sans-serif; letter-spacing: 0.02em; color: #9a5b2c; }
+      .loading-sub { margin: 4px 0 18px; font-size: 13px; letter-spacing: 0.3em; text-transform: uppercase; opacity: 0.7; }
+      .loading-scene { position: relative; height: 120px; overflow: hidden; border-radius: 14px; background: linear-gradient(#f6e7c8, #efd9b0); box-shadow: inset 0 0 0 1px rgba(74, 69, 56, 0.12); }
+      .loading-sun { position: absolute; right: 54px; top: 14px; width: 34px; height: 34px; border-radius: 50%; background: #f2b25c; box-shadow: 0 0 24px 6px rgba(242, 178, 92, 0.45); animation: loading-glow 3s ease-in-out infinite alternate; }
+      .loading-strip { position: absolute; left: 0; width: 200%; background-repeat: repeat-x; will-change: transform; }
+      .loading-mesas { bottom: 30px; height: 46px; opacity: 0.55; animation: loading-scroll 14s linear infinite;
+        background-size: 50% 100%;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 46' preserveAspectRatio='none'%3E%3Cpath d='M0 46V30h18l6-14h30l5 14h22l10-22h24l8 22h20l4-10h26l6 10h21v16z' fill='%23c4774a'/%3E%3C/svg%3E"); }
+      .loading-ground { bottom: 0; height: 32px; animation: loading-scroll 1.6s linear infinite; background-color: #c9a46d;
+        background-size: 50% 100%;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 32' preserveAspectRatio='none'%3E%3Crect width='220' height='32' fill='%23c9a46d'/%3E%3Crect y='0' width='220' height='3' fill='%23b38a55'/%3E%3Crect x='10' y='15' width='26' height='3' rx='1.5' fill='%23e6cf9f'/%3E%3Crect x='65' y='15' width='26' height='3' rx='1.5' fill='%23e6cf9f'/%3E%3Crect x='120' y='15' width='26' height='3' rx='1.5' fill='%23e6cf9f'/%3E%3Crect x='175' y='15' width='26' height='3' rx='1.5' fill='%23e6cf9f'/%3E%3Ccircle cx='45' cy='26' r='2' fill='%23a87f4c'/%3E%3Ccircle cx='150' cy='8' r='1.6' fill='%23a87f4c'/%3E%3Ccircle cx='200' cy='27' r='2.4' fill='%23a87f4c'/%3E%3C/svg%3E"); }
+      .loading-car { position: absolute; left: calc(50% - 60px); bottom: 22px; width: 120px; height: 56px; animation: loading-bounce 0.42s ease-in-out infinite alternate; }
+      .loading-car svg { position: absolute; inset: 0; }
+      .loading-wheel { position: absolute; bottom: -2px; width: 26px; height: 26px; border-radius: 50%; box-sizing: border-box; border: 6px solid #2d2a25;
+        background: conic-gradient(#c58a3c 0 25%, #8f6128 0 50%, #c58a3c 0 75%, #8f6128 0); animation: loading-spin 0.35s linear infinite; }
+      .loading-wheel.rear { left: 14px; }
+      .loading-wheel.front { right: 12px; }
+      .loading-dust { position: absolute; left: calc(50% - 70px); bottom: 26px; width: 14px; height: 14px; border-radius: 50%; background: rgba(222, 196, 150, 0.9); opacity: 0; animation: loading-dust 0.9s ease-out infinite; }
+      .loading-dust:nth-of-type(2) { animation-delay: 0.3s; bottom: 30px; }
+      .loading-dust:nth-of-type(3) { animation-delay: 0.6s; bottom: 24px; }
+      .loading-bar { height: 8px; margin: 18px 0 10px; border-radius: 4px; overflow: hidden; background: rgba(74, 69, 56, 0.12); }
+      .loading-fill { height: 100%; background: linear-gradient(90deg, #d9683f, #f2b25c); transform: scaleX(0); transform-origin: left; transition: transform 0.35s ease-out; }
+      .loading-step { font-weight: 600; }
+      .loading-detail { min-height: 1.4em; font-size: 12px; opacity: 0.6; font-variant-numeric: tabular-nums; }
+      .loading-quip { min-height: 1.4em; margin-top: 6px; font-style: italic; opacity: 0; transform: translateY(4px); transition: opacity 0.4s, transform 0.4s; }
+      .loading-quip.in { opacity: 0.75; transform: none; }
+      .loading-go { margin-top: 14px; padding: 12px 22px; border: 0; border-radius: 22px; background: #d9683f; color: #fff; font: 700 15px/1 system-ui, -apple-system, sans-serif; cursor: pointer;
+        box-shadow: 0 4px 14px rgba(217, 104, 63, 0.35); animation: loading-pulse 1.2s ease-in-out infinite alternate; }
+      .loading-go[hidden] { display: none; }
+      .loading.ready .loading-bar, .loading.ready .loading-detail { opacity: 0.35; }
+      .loading.ready .loading-quip { display: none; }
+      @media (max-height: 460px) {
+        .loading-title { font-size: 38px; }
+        .loading-sub { margin-bottom: 10px; }
+        .loading-scene { height: 96px; }
+        .loading-bar { margin: 12px 0 8px; }
+        .loading-go { margin-top: 8px; }
+      }
+      @keyframes loading-scroll { to { transform: translateX(-50%); } }
+      @keyframes loading-bounce { from { transform: translateY(0) rotate(-0.6deg); } to { transform: translateY(-3px) rotate(0.8deg); } }
+      @keyframes loading-spin { to { transform: rotate(360deg); } }
+      @keyframes loading-glow { to { transform: scale(1.12); } }
+      @keyframes loading-pulse { to { transform: scale(1.05); } }
+      @keyframes loading-dust { 0% { opacity: 0.9; transform: translate(0, 0) scale(0.5); } 100% { opacity: 0; transform: translate(-60px, -14px) scale(2.2); } }
+      @media (prefers-reduced-motion: reduce) { .loading * { animation-duration: 0s !important; animation-iteration-count: 1 !important; } }
+      .fatal { position: fixed; z-index: 10001; inset: 16px; margin: 0; padding: 16px; background: #fff; color: #a00; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; overflow: auto; }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="loading" class="loading" role="status" aria-live="polite">
+      <div class="loading-card">
+        <h1 class="loading-title">Drift</h1>
+        <p class="loading-sub">an endless drive</p>
+        <div class="loading-scene" aria-hidden="true">
+          <div class="loading-sun"></div>
+          <div class="loading-strip loading-mesas"></div>
+          <div class="loading-strip loading-ground"></div>
+          <div class="loading-dust"></div>
+          <div class="loading-dust"></div>
+          <div class="loading-dust"></div>
+          <div class="loading-car">
+            <svg viewBox="0 0 120 56">
+              <path d="M8 38 L14 28 L44 26 L58 18 L82 18 L96 28 L112 31 L114 40 L104 42 L22 42 Z" fill="#d9683f" />
+              <path d="M46 26 L56 7 L80 7 L88 26 M56 7 L66 26" fill="none" stroke="#2d2a25" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />
+              <circle cx="70" cy="16" r="6" fill="#f3ecdd" stroke="#2d2a25" stroke-width="2" />
+              <path d="M18 29 L13 2" stroke="#2d2a25" stroke-width="1.5" stroke-linecap="round" />
+              <path d="M13 2 L25 5 L14 9 Z" fill="#f2b25c" />
+              <rect x="104" y="33" width="9" height="3" rx="1.5" fill="#f6e7c8" />
+            </svg>
+            <div class="loading-wheel rear"></div>
+            <div class="loading-wheel front"></div>
+          </div>
+        </div>
+        <div class="loading-bar"><div class="loading-fill"></div></div>
+        <div class="loading-step">Getting ready</div>
+        <div class="loading-detail"></div>
+        <div class="loading-quip"></div>
+        <button class="loading-go" type="button" hidden>Tap or press any key to drive</button>
+      </div>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
