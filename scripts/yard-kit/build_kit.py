@@ -293,7 +293,7 @@ def crate_stack():
     crate_shell(B, -0.52, 0, 0, 1.0)
     crate_shell(B, 0.55, 0.05, 0, 0.9)
     crate_shell(B, -0.4, 0.05, 1.0, 0.7)
-    entry(B.finish(), 'fixed')
+    entry(B.finish(), 'loose', 'box', 70)
 
 def fruit_crates():
     # Open fruit crates on a stand: oranges, apples and lemons.
@@ -308,7 +308,7 @@ def fruit_crates():
         for i in range(3):
             for j in range(3):
                 B.sphere((x - 0.11 + i * 0.11, -0.11 + j * 0.11, 0.97 + 0.02 * ((i + j + k) % 2)), 0.055, fruit, n=6, rings=4)
-    entry(B.finish(), 'fixed')
+    entry(B.finish(), 'loose', 'box', 45)
 
 def pallet():
     B = Builder('Yard_Pallet', 'plank')
@@ -413,7 +413,7 @@ def bench():
     for k in range(3):
         a = Vector((0, 0.22 + k * 0.028, 0.56 + k * 0.12))
         B.obox(a, X, Vector((0, 0.24, -1)).normalized(), W, 0.03, 0.09, 'wood', w=Vector((0, 1, 0.24)).normalized())
-    entry(B.finish(), 'fixed')
+    entry(B.finish(), 'loose', 'box', 40)
 
 # ---- Plants -------------------------------------------------------------------------------------
 
@@ -440,7 +440,7 @@ def planter():
     flowers(B, -0.38, -0.06, H + 0.3, 0.17, ('pink', 'white'), 7, 0.3)
     flowers(B, 0.38, -0.06, H + 0.3, 0.17, ('yellow', 'orange'), 7, 1.1)
     flowers(B, 0, -0.06, H + 0.3, 0.17, ('purple', 'pink'), 6, 2.2)
-    entry(B.finish(), 'fixed')
+    entry(B.finish(), 'loose', 'box', 80)
 
 def flower_pot():
     B = Builder('Yard_FlowerPot', 'pot')

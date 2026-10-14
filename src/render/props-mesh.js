@@ -1,13 +1,16 @@
-// Draws the sunny town's loose props (terrain/props.js) around the car: one instanced mesh of
-// crates and one of cones for all chunks. Each prop stands where it was placed until physics
+// Draws the sunny town's props (terrain/props.js) around the car: one instanced mesh of crates, one
+// of cones and one per yard kit model (render/yard-kit-mesh.js, made when first needed) for all
+// chunks. Each prop stands where it was placed until physics
 // reports it moving (apply), then follows its body. Chunks come and go as physics/props.js's do.
 import { BoxGeometry, BufferAttribute, Color, ConeGeometry, CylinderGeometry, InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from 'three/webgpu';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CHUNK_SIZE, chunkKey } from '../terrain/chunk.js';
-import { CONE, CRATE, generateProps } from '../terrain/props.js';
+import { CONE, CRATE, generateProps, propHalfHeight } from '../terrain/props.js';
+import { yardGeometries } from './yard-kit-mesh.js';
 import { PROP_RADIUS, PROP_STRIDE } from '../physics/props.js';
 
 const CAPACITY = 1500;
+const YARD_CAPACITY = 600; // per yard model
 
 const painted = (geometry, hex) => {
   const g = geometry.toNonIndexed();
@@ -43,20 +46,28 @@ function coneGeometry() {
 
 export function createPropsView(scene, heightAt) {
   const material = new MeshStandardMaterial({ vertexColors: true, roughness: 0.75 });
-  const meshes = {
-    crate: new InstancedMesh(crateGeometry(), material, CAPACITY),
-    cone: new InstancedMesh(coneGeometry(), material, CAPACITY),
-  };
+  const meshes = {};
   const free = {};
-  for (const [kind, mesh] of Object.entries(meshes)) {
+  const addMesh = (kind, geometry, capacity) => {
+    const mesh = new InstancedMesh(geometry, material, capacity);
     mesh.count = 0;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;
     mesh.name = `props:${kind}`;
+    meshes[kind] = mesh;
     free[kind] = [];
     scene.add(mesh);
-  }
+    return mesh;
+  };
+  addMesh('crate', crateGeometry(), CAPACITY);
+  addMesh('cone', coneGeometry(), CAPACITY);
+  // A yard model's mesh, made the first time one is placed (null if the kit isn't loaded).
+  const meshFor = (kind) => {
+    if (meshes[kind]) return meshes[kind];
+    const geometry = yardGeometries()?.get(kind);
+    return geometry ? addMesh(kind, geometry, YARD_CAPACITY) : null;
+  };
   const hidden = new Matrix4().makeScale(0, 0, 0);
   const chunks = new Map();
   const m = new Matrix4();
@@ -65,7 +76,8 @@ export function createPropsView(scene, heightAt) {
   const one = new Vector3(1, 1, 1);
 
   const slot = (kind) => {
-    const mesh = meshes[kind];
+    const mesh = meshFor(kind);
+    if (!mesh) return -1;
     if (free[kind].length) return free[kind].pop();
     if (mesh.count >= CAPACITY) return -1;
     return mesh.count++;
@@ -79,7 +91,7 @@ export function createPropsView(scene, heightAt) {
   function add(cx, cz) {
     const props = generateProps(heightAt, cx, cz).map((prop) => {
       const index = slot(prop.kind);
-      const half = prop.kind === 'crate' ? CRATE / 2 : CONE.height / 2;
+      const half = propHalfHeight(prop.kind);
       place(prop.kind, index, prop.x, prop.y + half, prop.z, 0, Math.sin(prop.yaw / 2), 0, Math.cos(prop.yaw / 2));
       return { kind: prop.kind, index };
     });

@@ -45,6 +45,7 @@ import { startHour } from './render/time-of-day.js';
 import { createWater } from './render/water.js';
 import { setBuildingCutaway } from './render/building-mesh.js';
 import { loadTownKit } from './render/town-kit-mesh.js';
+import { loadYardKit } from './render/yard-kit-mesh.js';
 import { createPropsView } from './render/props-mesh.js';
 import { createTrackMarkersView } from './render/track-markers-mesh.js';
 import { createPropPhysics } from './physics/props.js';
@@ -114,7 +115,7 @@ async function main() {
   // The sunny town's buildings are models: loaded before its first chunk is built.
   if (heightAt.buildingKit) {
     loading?.set('world', 0.3, 'Building the town');
-    await loadTownKit();
+    await Promise.all([loadTownKit(), loadYardKit()]);
   }
   // The town's river and ponds.
   const water = heightAt.waterLevel !== undefined ? createWater(render.scene, heightAt.waterLevel) : null;
@@ -160,7 +161,7 @@ async function main() {
   loading?.set('physics', 1, 'Bolting the car together');
   await loading?.pause();
 
-  // The sunny town's loose crates and cones: drawn here, simulated where the physics runs.
+  // The sunny town's crates, cones and yard props: drawn here, simulated where the physics runs.
   const propsView = heightAt.buildingKit ? createPropsView(render.scene, heightAt) : null;
   const propPhysics = heightAt.buildingKit && physicsWorld ? createPropPhysics(RAPIER, physicsWorld, heightAt) : null;
   // The dry river's course markers: flags, chevron boards, tyre stacks and the start gantry.
