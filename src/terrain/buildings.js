@@ -254,7 +254,7 @@ function footprintGround(heightAt, x, z, ux, uz, nx, nz, w, d) {
   let hi = -Infinity;
   for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1], [-1, 0], [1, 0], [0, 0]]) {
     const ps = heightAt.sample(x + ux * a * w * 0.5 + nx * b * d * 0.5, z + uz * a * w * 0.5 + nz * b * d * 0.5);
-    if (ps.dist < KERB + 0.4 || ps.riverDist < ps.riverHalf + 4) return null;
+    if (ps.dist < KERB + 0.4 || ps.riverDist < ps.riverHalf + 4 || ps.park > 0.05) return null;
     if (ps.h < 0.6 || ps.mountain > 3) return null;
     lo = Math.min(lo, ps.h);
     hi = Math.max(hi, ps.h);
@@ -522,7 +522,7 @@ function plazaGround(heightAt, x, z) {
     const a = (k / 12) * Math.PI * 2;
     const rr = k === 12 ? 0 : 8;
     const p = heightAt.sample(x + Math.cos(a) * rr, z + Math.sin(a) * rr);
-    if (p.dist < KERB + 0.2 || p.riverDist < p.riverHalf + 4 || p.h < 0.6 || p.mountain > 1 || p.townHill > 0.2) return null;
+    if (p.dist < KERB + 0.2 || p.riverDist < p.riverHalf + 4 || p.h < 0.6 || p.mountain > 1 || p.townHill > 0.2 || p.park > 0.05) return null;
     lo = Math.min(lo, p.h);
     hi = Math.max(hi, p.h);
   }

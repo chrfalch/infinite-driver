@@ -142,7 +142,8 @@ function generateTownPlants(heightAt, cx, cz) {
       const shade = rand();
       if (roll > 0.45) continue;
       const s = heightAt.sample(x, z);
-      if (s.dist < KERB + 0.4 || s.h < 0.15) continue;
+      // (Nothing grows on the street, in the water, or in the sunny town's stunt parks.)
+      if (s.dist < KERB + 0.4 || s.h < 0.15 || s.park > 0.05) continue;
       const slope = Math.abs(heightAt(x + 0.8, z) - heightAt(x - 0.8, z)) / 1.6 + Math.abs(heightAt(x, z + 0.8) - heightAt(x, z - 0.8)) / 1.6;
       if (slope > 0.8) continue;
       const town = 1 - s.wild;

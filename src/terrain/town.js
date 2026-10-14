@@ -33,6 +33,66 @@ function blockRaise(i, j) {
   return RAISES[((h ^ (h >>> 16)) >>> 0) % RAISES.length];
 }
 
+// Sunny town stunt parks: about one town block in seven (never the origin's).
+function isPark(i, j) {
+  if (i === 0 && j === 0) return false;
+  let h = (Math.imul(i, 668265263) + Math.imul(j, 374761393) + 0x27d4eb2d) | 0;
+  h = Math.imul(h ^ (h >>> 15), 2246822519);
+  return ((h ^ (h >>> 13)) >>> 0) % 7 === 0;
+}
+
+// A stunt park's ground (m above the block's ground) at (px, pz) from the block's middle (along
+// the east-west streets' field, then the north-south one's; both about metres) and `e` m in from
+// the sidewalk. The park is a raised slab of concrete with banked quarter-pipe walls around the
+// edge (gaps in the middle of each side to drive in), a tabletop down the middle with ramps at
+// both ends, kickers beyond it launching toward the banks, a ring of rollers (a pump track)
+// around it all, a mogul field on one side and a bowl on the other.
+export const PARK_FLOOR = 1.6;
+export function parkHeight(px, pz, e) {
+  const sideX = DAY_SPACING_X / 2 - Math.abs(px); // to the east-west streets
+  const sideZ = DAY_SPACING_Z / 2 - Math.abs(pz);
+  const along = sideX < sideZ ? Math.abs(pz) : Math.abs(px);
+  const gate = smoothstep(10, 7, along);
+  const bank = 3.6 * smoothstep(10, 1.2, e) ** 1.5 * (1 - gate);
+  const ax = Math.abs(px);
+  const az = Math.abs(pz);
+  const table = 2.2 * Math.min(1, Math.max(0, (20 - az) / 9)) * smoothstep(7.5, 6.2, ax);
+  const lip = az - 30; // kickers rise outward to a lip at |pz| 30
+  const kicker = ax < 4.5 && lip > -6 && lip < 0.8 ? 1.6 * (lip <= 0 ? (1 + lip / 6) ** 1.4 : smoothstep(0.8, 0, lip)) * smoothstep(4.5, 3.5, ax) : 0;
+  const ring = Math.hypot(px / 33, pz / 43);
+  const theta = Math.atan2(pz / 43, px / 33);
+  const rollers = ring > 0.84 && ring < 1.02 ? 0.75 * Math.sin(theta * 16) ** 2 * smoothstep(0.84, 0.88, ring) * smoothstep(1.02, 0.98, ring) : 0;
+  const moguls = px > 11 && px < 26 && az < 15 ? 0.55 * Math.sin((px - 11) * 0.63) ** 2 * Math.cos(pz * 0.52) ** 2 * smoothstep(15, 12, az) * smoothstep(26, 23, px) : 0;
+  const r = Math.hypot(px + 19, pz);
+  const bowl = r < 8.5 ? -2.4 * (1 - (r / 8.5) ** 2) ** 1.4 : 0;
+  return PARK_FLOOR + bank + table + kicker + rollers + moguls + bowl;
+}
+
+// A street's jump at `t` along it (x or z): one in two 90 m stretches of each street has
+// one, a smooth crest or a tabletop with a flat top.
+const JUMP_SPACING = 90;
+function streetJump(fi, k, t) {
+  const m = Math.floor(t / JUMP_SPACING);
+  let lift = 0;
+  for (const mm of [m - 1, m, m + 1]) {
+    let h = (Math.imul(mm, 374761393) + Math.imul(k * 2 + fi, 668265263) + 0x165667b1) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    const r = ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+    if (r > 0.5) continue;
+    const t0 = (mm + 0.5) * JUMP_SPACING + (r / 0.5 - 0.5) * 30;
+    const u = Math.abs(t - t0);
+    if (r < 0.25) {
+      // Crest: 1.4 m over 14 m.
+      if (u < 7) lift = Math.max(lift, 1.4 * Math.cos((Math.PI * u) / 14) ** 2);
+    } else if (u < 10) {
+      // Tabletop: a curved 7 m kicker up to 1.7 m (steepening to about 24 degrees at the lip), a
+      // 6 m flat top, and the same curve down the far side to land on.
+      lift = Math.max(lift, 1.7 * Math.min(1, (10 - u) / 7) ** 1.8);
+    }
+  }
+  return lift;
+}
+
 // Stepped ramp: level ledges joined by steep risers (granite outcrops, terraced hillsides).
 function terrace(v, steps, riser = 0.7) {
   const s = v * steps;
@@ -104,6 +164,9 @@ export function createTownField(seed = 31, world = 'town') {
     const other = r === both[0] ? both[1] : both[0];
     const dist = Math.abs(r.d);
     const wild = wildAt(x, z);
+    // Sunny town: some blocks are stunt parks (see `parkHeight`), away from the wild and the river.
+    const block = day ? [Math.floor(acrossX(x, z) / SX), Math.floor((acrossZ(x, z) + OFFSET_Z) / SZ)] : null;
+    const park = day && isPark(block[0], block[1]) ? (1 - smoothstep(0.15, 0.3, wild)) * (1 - smoothstep(-60, -40, -(Math.abs(riverAt(x, z).d) - riverHalfAt(x, z)))) : 0;
     // Streets are graded level from side to side: near a street the floor is taken at its centre
     // line, blending into the local floor further out (and both gradings where two streets meet).
     let sum = 0;
@@ -129,7 +192,7 @@ export function createTownField(seed = 31, world = 'town') {
     // Town: terraced hills in the middle of some blocks, with rock faces between the terraces.
     const hill = Math.max(0, hillNoise(x * 0.011, z * 0.011));
     const inner = smoothstep(24, 52, dist);
-    const townHill = inner * (1 - wild) * terrace(Math.min(1, hill * 1.4), 3, 0.6) * 11;
+    const townHill = inner * (1 - wild) * (1 - park) * terrace(Math.min(1, hill * 1.4), 3, 0.6) * 11;
     // Wild districts: forested foothills, then ridged granite mountains in the middle of the blocks.
     const foot = smoothstep(9, 46, dist) * wild * (3 + 7 * (0.5 + 0.5 * hillNoise(x * 0.016 + 5, z * 0.016)));
     const ridge = 1 - Math.abs(ridgeNoise(x * 0.008, z * 0.008));
@@ -141,15 +204,31 @@ export function createTownField(seed = 31, world = 'town') {
     h += townHill + foot + mountain;
     // Sunny town: each block stands on its own plinth, raised a little behind a stone retaining
     // wall along the sidewalk (some blocks stay at street level), as the reference's blocks do.
+    let jump = 0;
+    let parkLift = 0;
     if (day) {
-      const raise = blockRaise(Math.floor(acrossX(x, z) / SX), Math.floor((acrossZ(x, z) + OFFSET_Z) / SZ));
+      const raise = blockRaise(block[0], block[1]);
       const away = 1 - smoothstep(20, 45, Math.abs(riverAt(x, z).d) - riverHalfAt(x, z));
-      h += raise * smoothstep(KERB + 0.35, KERB + 1.15, dist) * (1 - smoothstep(0.2, 0.5, wild)) * (1 - away);
+      h += raise * smoothstep(KERB + 0.35, KERB + 1.15, dist) * (1 - smoothstep(0.2, 0.5, wild)) * (1 - away) * (1 - park);
+      // The stunt parks' banks, tabletop, kickers, moguls and bowl, on the paving behind the sidewalks.
+      if (park > 0) h += (parkLift = park * smoothstep(KERB + 0.3, KERB + 1.0, dist) * parkHeight(acrossX(x, z) - (block[0] + 0.5) * SX, acrossZ(x, z) + OFFSET_Z - (block[1] + 0.5) * SZ, dist - KERB));
+      // Jumps on the streets: crests and tabletops on some straights, clear of the junctions.
+      for (let fi = 0; fi < 2; fi++) {
+        const f = both[fi];
+        const across = Math.abs(f.d);
+        if (across > KERB + 0.5) continue;
+        const o = both[1 - fi];
+        const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ));
+        const t = fi === 0 ? x : z;
+        const lift = streetJump(fi, k, t) * (1 - smoothstep(KERB - 0.8, KERB + 0.4, across)) * smoothstep(18, 28, Math.abs(o.d)) * (1 - smoothstep(0.2, 0.4, wild));
+        jump = Math.max(jump, lift);
+      }
+      h += jump;
     }
 
     // Ponds in the parks and the wild lowlands (not in the mountains).
     const pondShape = lakeNoise(x * 0.011, z * 0.011);
-    const pond = smoothstep(0.42, 0.56, pondShape) * smoothstep(17, 27, dist) * (1 - smoothstep(0.5, 0.8, wild)) * (1 - smoothstep(0.5, 3, townHill));
+    const pond = smoothstep(0.42, 0.56, pondShape) * smoothstep(17, 27, dist) * (1 - smoothstep(0.5, 0.8, wild)) * (1 - smoothstep(0.5, 3, townHill)) * (1 - park);
     if (pond > 0) h += (WATER_LEVEL - 1.4 - h) * pond;
 
     // The river: a valley floor near the water, then a channel cut to below the water level. It
@@ -163,7 +242,7 @@ export function createTownField(seed = 31, world = 'town') {
     }
 
     const road = 1 - smoothstep(ROAD_HALF_WIDTH - 0.1, ROAD_HALF_WIDTH + 0.4, dist);
-    return { h, road, side: r.d, dist, other: Math.abs(other.d), gx: r.gx, gz: r.gz, wild, mountain, townHill, riverDist, riverHalf: halfWidth };
+    return { h, road, side: r.d, dist, other: Math.abs(other.d), gx: r.gx, gz: r.gz, wild, mountain, townHill, riverDist, riverHalf: halfWidth, park, parkLift, jump };
   }
 
   const heightAt = (x, z) => sample(x, z).h;
@@ -172,7 +251,7 @@ export function createTownField(seed = 31, world = 'town') {
   // terraces' faces); the rest is grass and soil.
   heightAt.groundAt = (x, z, out = { road: 0, rock: 0 }) => {
     const s = sample(x, z);
-    out.road = 1 - smoothstep(KERB - 0.3, KERB + 0.3, s.dist);
+    out.road = Math.max(1 - smoothstep(KERB - 0.3, KERB + 0.3, s.dist), s.park ?? 0);
     out.rock = smoothstep(4, 12, s.mountain) * (1 - out.road);
     return out;
   };
@@ -188,7 +267,7 @@ export function createTownField(seed = 31, world = 'town') {
   heightAt.lakeInside = (x, z) => WATER_LEVEL - heightAt(x, z);
   // The streets and sidewalks are paved: no soil thrown, piled or rutted there (systems/soil.js,
   // systems/tracks.js), asphalt grip and no loose stones for the tyres (tire/config.js).
-  heightAt.bareAt = (x, z) => heightAt.roadDistance(x, z) < KERB;
+  heightAt.bareAt = (x, z) => heightAt.roadDistance(x, z) < KERB || (day && sample(x, z).park > 0.5);
   heightAt.paved = true;
   heightAt.waterLevel = WATER_LEVEL;
   heightAt.wildAt = wildAt;

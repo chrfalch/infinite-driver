@@ -1,6 +1,6 @@
 import { createNoise2D } from 'simplex-noise';
 import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, dot, exp, normalWorldGeometry, transformNormalToView, float, floor, fract, fwidth, max, mix, positionLocal, positionWorld, sin, smoothstep, step, uniform, vec2, vec3, vec4 } from 'three/tsl';
+import { attribute, dot, exp, length, normalWorldGeometry, transformNormalToView, float, floor, fract, fwidth, max, mix, positionLocal, positionWorld, sin, smoothstep, step, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import { gravelShade } from '../terrain/gravel.js';
 import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
@@ -8,10 +8,13 @@ import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
 import { CANYON_PBR, RIVER_PBR, canyonDirtDetail, canyonGravelDetail, canyonNormal, canyonRockDetail, forestFloorColor, forestFloorNormal } from './river-ground.js';
 import { SOIL_MIN } from '../terrain/riverbed.js';
 import { COVER_DEPTH, LAKE, ROAD as SNOW_ROAD } from '../terrain/snow.js';
-import { KERB as TOWN_KERB, ROAD_HALF_WIDTH as TOWN_ROAD, WATER_LEVEL } from '../terrain/town.js';
+import { KERB as TOWN_KERB, PARK_FLOOR, ROAD_HALF_WIDTH as TOWN_ROAD, WATER_LEVEL } from '../terrain/town.js';
 
 // Ground colour from the vertex colours, with the gravel stones drawn on top (the same stones the
 // GPU tyres roll over; see terrain/gravel.js).
+const PARK_CONCRETE = new Color('#c9c6bd'); // the sunny town's stunt parks
+const PARK_RAMP = new Color('#c4553a');
+const PARK_POOL = new Color('#4f9fc4');
 const gravelAmount = uniform(GROUND.gravel);
 export function setGravelAmount(value) {
   gravelAmount.value = value;
@@ -137,7 +140,14 @@ function townStreet(dist, side, marks) {
   // stripes along the street across its width.
   const crossing = smoothstep(0.02, 0.08, marks).mul(smoothstep(0.55, 0.42, marks)).mul(smoothstep(TOWN_ROAD - 0.3, TOWN_ROAD - 0.5, dist));
   const zebra = smoothstep(0.27, 0.23, fract(side.div(1.1)).sub(0.5).abs()).mul(crossing).mul(dayTown);
-  const painted = mix(mix(mix(asphalt, vec3(0.9, 0.9, 0.86), edgeLine.mul(0.9)), vec3(0.93, 0.74, 0.22), centreLine.mul(0.9)), vec3(0.92, 0.92, 0.88), zebra.mul(0.92));
+  // Sunny town: the street jumps' slopes painted with yellow and black chevrons.
+  const ramp = smoothstep(0.993, 0.98, normalWorldGeometry.y).mul(smoothstep(TOWN_ROAD - 0.2, TOWN_ROAD - 0.5, dist)).mul(dayTown);
+  const chevron = step(0.5, fract(positionWorld.x.add(positionWorld.z).mul(0.45).add(side.abs().mul(0.45))));
+  const painted = mix(
+    mix(mix(mix(asphalt, vec3(0.9, 0.9, 0.86), edgeLine.mul(0.9)), vec3(0.93, 0.74, 0.22), centreLine.mul(0.9)), vec3(0.92, 0.92, 0.88), zebra.mul(0.92)),
+    mix(vec3(0.1, 0.1, 0.1), vec3(0.95, 0.75, 0.12), chevron),
+    ramp.mul(0.9),
+  );
   // Sidewalk: pale concrete slabs (1.2 m) behind a lighter kerb stone.
   const slab = fract(positionWorld.xz.div(1.2));
   const seam = max(smoothstep(0.04, 0.0, slab.x.min(slab.x.oneMinus())), smoothstep(0.04, 0.0, slab.y.min(slab.y.oneMinus())));
@@ -200,7 +210,11 @@ export function groundShading({ color, steep, gravel, roadDist, lake, normal }) 
   const snowFar = snowGroundColor(roadDist, gravel, lake);
   // In town 'lake' is the signed distance to the street and 'gravel' where its centre line shows.
   const street = townStreet(roadDist, lake, gravel);
-  const town = mix(ground, street.rgb, street.a);
+  // Sunny town stunt parks (their concrete is in the vertex colour): the slopes of the ramps,
+  // banks and rollers painted red, per pixel so the edges stay crisp.
+  const concrete = smoothstep(0.07, 0.03, length(color.sub(vec3(PARK_CONCRETE.r, PARK_CONCRETE.g, PARK_CONCRETE.b))));
+  const parkRamp = concrete.mul(smoothstep(0.985, 0.955, normal.y)).mul(dayTown);
+  const town = mix(mix(ground, vec3(PARK_RAMP.r, PARK_RAMP.g, PARK_RAMP.b), parkRamp), street.rgb, street.a);
   return {
     color: vec4(
       mix(
@@ -367,6 +381,12 @@ function townColor(s, slope, x, z, out) {
   const depth = WATER_LEVEL - s.h;
   out.lerp(SHORE, smoothstepJs(1.3, 0.5, s.h) * (1 - smoothstepJs(4, 9, s.mountain)));
   if (depth > 0) out.lerp(DEEP, Math.min(1, depth / 1.4) * 0.85);
+  // Stunt parks: pale concrete, the ramps, banks and rollers in red, the bowl painted blue.
+  if (s.park > 0) {
+    const inPark = s.park * smoothstepJs(TOWN_KERB + 0.2, TOWN_KERB + 0.8, s.dist);
+    out.lerp(PARK_CONCRETE, inPark);
+    out.lerp(PARK_POOL, inPark * smoothstepJs(PARK_FLOOR - 0.3, PARK_FLOOR - 0.8, s.parkLift));
+  }
   out.offsetHSL(0, 0, fineNoise(x * 0.6, z * 0.6) * 0.02);
   return out;
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createHeightField } from '../src/terrain/height.js';
 import { buildingsAround, generateBuildings, insideBuilding } from '../src/terrain/buildings.js';
+import { generatePlants } from '../src/terrain/vegetation.js';
 import { KERB } from '../src/terrain/town.js';
 import { TOWN_KIT } from '../src/terrain/town-kit.js';
 import { buildingsMeshData } from '../src/render/building-mesh.js';
@@ -43,6 +44,40 @@ function filterLow(p) {
 }
 
 describe('sunny town', () => {
+  it('has jumps on its streets, clear of the junctions', () => {
+    let jumps = 0;
+    for (let x = -300; x < 300; x += 1.5) {
+      for (let z = -300; z < 300; z += 1.5) {
+        const s = town.sample(x, z);
+        if (s.jump < 0.05) continue;
+        expect(s.dist).toBeLessThan(KERB + 0.4);
+        expect(s.other).toBeGreaterThan(17);
+        if (s.jump > 1.3 && s.dist < 1) jumps++;
+      }
+    }
+    expect(jumps).toBeGreaterThan(10);
+  });
+
+  it('has stunt parks: ramps and a bowl above the water, no buildings or plants in them', () => {
+    let inPark = 0;
+    let high = 0;
+    for (let x = -500; x < 500; x += 2) {
+      for (let z = -500; z < 500; z += 2) {
+        const s = town.sample(x, z);
+        if (s.park < 0.99 || s.dist < KERB + 1.5) continue;
+        inPark++;
+        expect(s.h).toBeGreaterThan(0.5);
+        if (s.parkLift > 3) high++;
+      }
+    }
+    expect(inPark).toBeGreaterThan(2000);
+    expect(high).toBeGreaterThan(100);
+    const all = [];
+    for (let cx = -6; cx <= 6; cx++) for (let cz = -6; cz <= 6; cz++) all.push(...generateBuildings(town, cx, cz));
+    for (const { building: b } of all) expect(town.sample(b.x, b.z).park).toBeLessThan(0.05);
+    for (let cx = -3; cx <= 3; cx++) for (let cz = -3; cz <= 3; cz++) for (const p of generatePlants(town, cx, cz)) expect(town.sample(p.x, p.z).park).toBeLessThan(0.06);
+  });
+
   it('lines its streets with rows of buildings', () => {
     // Points just behind the sidewalks in town, away from junctions and the water: most are
     // inside a building.

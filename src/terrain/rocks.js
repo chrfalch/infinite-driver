@@ -127,7 +127,7 @@ function generateTownRocks(heightAt, cx, cz, { seed, count }) {
     const size = pickSize(0.62 + rand() * 0.38) * 1.3;
     if (Math.hypot(x, z) < SPAWN_CLEAR_RADIUS + size) continue;
     const s = heightAt.sample(x, z);
-    if (s.dist < KERB + 1.5 + size) continue;
+    if (s.dist < KERB + 1.5 + size || s.park > 0) continue;
     const shore = s.h < 1.2 && s.h > -0.6;
     const p = s.mountain > 2 ? 0.5 : s.townHill > 0.5 ? 0.25 : shore ? 0.4 : 0.04 * s.wild;
     if (keep > p) continue;
