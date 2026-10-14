@@ -29,7 +29,9 @@ function terrace(v, steps, riser = 0.7) {
   return (k + (f < riser ? 0 : smoothstep(riser, 1, f))) / steps;
 }
 
-export function createTownField(seed = 31) {
+// `world`: 'town' (the dark town, at night) or 'daytown' (the sunny town, by day, with the
+// modelled buildings of the kit, see terrain/buildings.js).
+export function createTownField(seed = 31, world = 'town') {
   const rand = mulberry32(seed);
   const warpA = createNoise2D(rand);
   const warpB = createNoise2D(rand);
@@ -168,6 +170,7 @@ export function createTownField(seed = 31) {
   heightAt.waterLevel = WATER_LEVEL;
   heightAt.wildAt = wildAt;
   heightAt.town = true;
-  heightAt.world = 'town';
+  heightAt.world = world;
+  heightAt.buildingKit = world === 'daytown';
   return heightAt;
 }

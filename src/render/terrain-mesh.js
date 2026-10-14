@@ -222,8 +222,9 @@ if (FOREST_DETAIL || CANYON_DETAIL) {
 export function setTerrainWorld(world) {
   sandstone.value = world === 'river' ? 1 : 0;
   snowWorld.value = world === 'snow' ? 1 : 0;
-  townWorld.value = world === 'town' ? 1 : 0;
-  granite.value = world === 'town' ? 1 : 0;
+  const town = world === 'town' || world === 'daytown';
+  townWorld.value = town ? 1 : 0;
+  granite.value = town ? 1 : 0;
 }
 
 // Near the car a fine patch draws the ground with its ruts: the snow surface on snow
@@ -372,7 +373,7 @@ export function terrainColorAt(heightAt, x, z, out = new Color()) {
   if (heightAt.world === 'snow') return snowColor(heightAt(x, z), x, z, out);
   const slope = slopeAt(heightAt, x, z);
   if (heightAt.world === 'river') return riverColor(heightAt.sample(x, z), slope, x, z, out);
-  if (heightAt.world === 'town') {
+  if (heightAt.town) {
     const s = heightAt.sample(x, z);
     townColor(s, slope, x, z, out);
     if (s.dist < TOWN_KERB) out.copy(s.dist < TOWN_ROAD ? TOWN_ASPHALT : TOWN_PAVING);
@@ -439,7 +440,7 @@ export function groundMeshData(heightAt, heights, x0, z0, step, resX, resZ = res
         lake[i] = heightAt.lakeInside(x, z);
         roadDist[i] = heightAt.roadSide(x, z); // signed (see snowCover)
       }
-      else if (heightAt.world === 'town') {
+      else if (heightAt.town) {
         const s = heightAt.sample(x, z);
         townColor(s, slope, x, z, tmp);
         roadDist[i] = s.dist;

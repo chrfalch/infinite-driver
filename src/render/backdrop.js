@@ -29,6 +29,17 @@ const LOOKS = {
     night: true,
     fog: [20, 120],
   },
+  // Sunny town, by day: a clear blue sky, green wooded hills and blue-grey mountains hazed
+  // toward a pale horizon.
+  daytown: {
+    horizon: new Color('#d6e4ea'),
+    skyTop: new Color('#3d8ad6'),
+    far: ['#5d7684', '#a7bcc4'],
+    near: ['#3e6438', '#86a46a'],
+    steps: 8,
+    scale: 0.75,
+    haze: [0.55, 0.3],
+  },
   // Snowfield, at night: a starry sky, a faint glow low on the horizon, and snow-capped ranges
   // standing dark against it. `night`: the scene is lit by the moon and the car's headlights;
   // `fog`: the perspective view's haze (near, far), closer in the dark.

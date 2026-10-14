@@ -92,7 +92,7 @@ export function generateRocks(heightAt, cx, cz, { seed = 99, count = 70 } = {}) 
   if (heightAt.world === 'river') return generateRiverRocks(heightAt, cx, cz, { seed, count });
   // The snowfield is open snow for now.
   if (heightAt.world === 'snow') return [];
-  if (heightAt.world === 'town') return generateTownRocks(heightAt, cx, cz, { seed, count });
+  if (heightAt.town) return generateTownRocks(heightAt, cx, cz, { seed, count });
   const rand = mulberry32(hashChunk(seed, cx, cz));
   const noise = createNoise3D(rand);
   const rocks = [];

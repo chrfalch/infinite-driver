@@ -8,6 +8,7 @@
 // (the rock mesh skips it; render/building-mesh.js draws it from `building`).
 import { CHUNK_SIZE } from './chunk.js';
 import { KERB } from './town.js';
+import { TOWN_KIT } from './town-kit.js';
 
 const LOT = 13; // m between lot centres
 const GAP = 0.8; // m kept between neighbouring buildings
@@ -43,6 +44,13 @@ function lotBuilding(heightAt, i, j) {
   // Width along the street, depth away from it.
   let w = 6.5 + r(6) * 5;
   let d = 7 + r(7) * 5;
+  // The sunny town builds from the modelled kit (render/town-kit-mesh.js): a tall lot gets a tower
+  // or a three-storey house, a low one a cottage or a house, at the model's own size.
+  const kit = heightAt.buildingKit ? pickKit(tall, r(15)) : null;
+  if (kit) {
+    w = kit.w;
+    d = kit.d;
+  }
   // The building faces the street: its depth axis is the street's normal (gx, gz), pointing away.
   const sign = Math.sign(s.side) || 1;
   const nx = s.gx * sign;
@@ -57,7 +65,8 @@ function lotBuilding(heightAt, i, j) {
   let roof;
   const pick = r(9);
   // Mostly pitched tile roofs, as in the reference; flat roofs on some of the blocks.
-  if (tall) roof = pick < 0.06 ? 'spire' : pick < 0.14 ? 'dome' : pick < 0.42 ? 'hip' : pick < 0.62 ? 'gable' : 'flat';
+  if (kit) roof = 'kit';
+  else if (tall) roof = pick < 0.06 ? 'spire' : pick < 0.14 ? 'dome' : pick < 0.42 ? 'hip' : pick < 0.62 ? 'gable' : 'flat';
   else roof = pick < 0.5 ? 'gable' : pick < 0.88 ? 'hip' : 'flat';
   // Spires and domes crown narrower towers.
   if (roof === 'spire' || roof === 'dome') {
@@ -79,7 +88,7 @@ function lotBuilding(heightAt, i, j) {
     hi = Math.max(hi, ps.h);
   }
   if (hi - lo > 3.5) return null;
-  const height = storeys * FLOOR + 0.6;
+  const height = kit ? kit.eaves : storeys * FLOOR + 0.6;
   return {
     x,
     z,
@@ -93,15 +102,35 @@ function lotBuilding(heightAt, i, j) {
     base: lo - 1,
     ground: hi,
     height,
-    storeys,
+    storeys: kit ? kit.storeys : storeys,
     roof,
-    glass: tall && r(10) < 0.3,
+    kit: kit ? kit.name : null,
+    glass: !kit && tall && r(10) < 0.3,
     wall: r(11),
     roofColor: r(12),
     extra: r(13),
     radius: Math.hypot(w, d) / 2,
     priority: r(14),
   };
+}
+
+// Tall lots: mostly towers, some three-storey houses; low lots: houses and cottages. The domed
+// tower is a landmark, so rarer.
+const KIT_ODDS = {
+  tall: { tall: 2, mid: 1, small: 0 },
+  low: { tall: 0, mid: 1, small: 1.2 },
+};
+const KIT_RARITY = { Kit_DomeTower: 0.35 };
+function pickKit(tall, t) {
+  const odds = KIT_ODDS[tall ? 'tall' : 'low'];
+  const weight = (k) => odds[k.size] * (KIT_RARITY[k.name] ?? 1);
+  const total = TOWN_KIT.reduce((sum, k) => sum + weight(k), 0);
+  let left = t * total;
+  for (const k of TOWN_KIT) {
+    left -= weight(k);
+    if (left < 0 && weight(k) > 0) return k;
+  }
+  return TOWN_KIT.findLast((k) => weight(k) > 0);
 }
 
 function smoothstep(a, b, x) {

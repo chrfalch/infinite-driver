@@ -22,11 +22,13 @@ const PALETTES = {
   snow: { ground: [243, 246, 250], high: [222, 230, 240], road: [132, 132, 134], edge: [190, 198, 210], relief: 0.8 },
   // The town at night: dark lawns and hills, the streets a little lighter.
   town: { ground: [44, 62, 46], high: [70, 76, 80], road: [120, 122, 128], edge: [26, 32, 30], relief: 0.9 },
+  // The sunny town: green lawns and hills, grey streets.
+  daytown: { ground: [128, 168, 104], high: [150, 150, 140], road: [96, 98, 104], edge: [70, 96, 62], relief: 0.9 },
   plain: { ground: [180, 173, 132], high: [150, 150, 108], road: [236, 226, 200], edge: [120, 110, 90], relief: 1 },
 };
 const LAKE = [160, 194, 216];
 const FOREST = [104, 132, 110];
-const ROAD_HALF = { canyon: 3.2, river: 4, snow: 3.2, town: 4.2 }; // m, drawn at least two pixels wide
+const ROAD_HALF = { canyon: 3.2, river: 4, snow: 3.2, town: 4.2, daytown: 4.2 }; // m, drawn at least two pixels wide
 
 export function paletteFor(heightAt) {
   return PALETTES[heightAt.world] ?? PALETTES.plain;

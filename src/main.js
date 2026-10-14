@@ -43,6 +43,7 @@ import { SNOW_PATCH_N, SnowSurface } from './render/snow-surface.js';
 import { worldLook } from './render/backdrop.js';
 import { createWater } from './render/water.js';
 import { setBuildingCutaway, setBuildingNight } from './render/building-mesh.js';
+import { loadTownKit } from './render/town-kit-mesh.js';
 import { setHeadlightBeams } from './render/headlights.js';
 import { GroundSurface, PATCH_N } from './render/ground-surface.js';
 import { showRutsOnSheet } from './render/rock-surface.js';
@@ -78,6 +79,11 @@ async function main() {
     render.scene.background.set('#e4e1d6');
     render.scene.fog.color.set('#e4e1d6');
   }
+  // The sunny town's haze is the pale blue of its horizon.
+  if (mode === 'daytown') {
+    render.scene.background.set('#d6e4ea');
+    render.scene.fog.color.set('#d6e4ea');
+  }
   // Night worlds (the snowfield, the town): a dark blue haze, faint moonlight from the same direction as the
   // sun (so it still casts the shadows), a little skylight thrown back off the snow, and the car's
   // headlights on.
@@ -98,6 +104,8 @@ async function main() {
     setBuildingNight(true);
   }
   const heightAt = createHeightField({ mode });
+  // The sunny town's buildings are models: loaded before its first chunk is built.
+  if (heightAt.buildingKit) await loadTownKit();
   // The town's river and ponds.
   const water = heightAt.waterLevel !== undefined ? createWater(render.scene, heightAt.waterLevel) : null;
   // The tyres, compaction and spray treat the ground as snow in the snowfield.

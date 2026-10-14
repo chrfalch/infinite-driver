@@ -189,7 +189,8 @@ function addBuilding(out, b) {
 // The buildings among a chunk's rocks as vertex data (plain arrays, so a worker can build it).
 export function buildingsMeshData(rocks) {
   const out = new Builder();
-  for (const rock of rocks) if (rock.building) addBuilding(out, rock.building);
+  // (The sunny town's kit buildings are drawn from their models, see render/town-kit-mesh.js.)
+  for (const rock of rocks) if (rock.building && !rock.building.kit) addBuilding(out, rock.building);
   if (!out.positions.length) return null;
   return {
     positions: new Float32Array(out.positions),
@@ -254,6 +255,19 @@ export function setBuildingNight(on) {
 buildingMaterial.maskNode = hole.lessThan(dither.mul(0.98).add(0.01));
 // The shadows stay whole.
 buildingMaterial.maskShadowNode = float(1).greaterThan(0);
+
+// The sunny town's modelled buildings (render/town-kit-mesh.js): their colours come with the
+// model, the glass (the `glass` attribute) is glossy and lights up at night like the drawn
+// windows, and they are cut away around the car the same way.
+const kitGlass = attribute('glass', 'float');
+export const kitBuildingMaterial = new MeshStandardNodeMaterial({ roughness: 0.85, metalness: 0 });
+kitBuildingMaterial.colorNode = vec4(baseColor, 1);
+kitBuildingMaterial.roughnessNode = mix(float(0.85), float(0.15), kitGlass);
+kitBuildingMaterial.metalnessNode = kitGlass.mul(0.3);
+const kitLit = hash(positionWorld.x.mul(0.7).floor().add(positionWorld.y.mul(0.4).floor().mul(31.7)).add(positionWorld.z.mul(0.7).floor().mul(7.3)));
+kitBuildingMaterial.emissiveNode = vec3(1, 0.7, 0.38).mul(kitGlass).mul(step(0.5, kitLit).mul(kitLit.mul(0.8).add(0.4))).mul(night).mul(0.75);
+kitBuildingMaterial.maskNode = buildingMaterial.maskNode;
+kitBuildingMaterial.maskShadowNode = buildingMaterial.maskShadowNode;
 
 // Where the car is and the direction from it toward the camera (called every frame).
 export function setBuildingCutaway(car, camera) {
