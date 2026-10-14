@@ -5,13 +5,16 @@
 // walls are repainted from, and whether it may be stretched along the street.
 export const TOWN_KIT = [
   { name: 'Kit_TurretCorner', w: 10.95, d: 10.36, eaves: 13.2, top: 21.4, storeys: 4, size: 'tall', paint: 'stucco', stretch: false, tris: 3110 },
-  { name: 'Kit_BellMansard', w: 7.98, d: 9.93, eaves: 9.8, top: 15.35, storeys: 3, size: 'mid', paint: 'stucco', stretch: false, tris: 2989 },
+  { name: 'Kit_BellMansard', w: 7.98, d: 9.38, eaves: 9.8, top: 15.35, storeys: 3, size: 'mid', paint: 'stucco', stretch: false, tris: 2989 },
   { name: 'Kit_Cottage', w: 8.1, d: 8.34, eaves: 4.4, top: 9.25, storeys: 1, size: 'small', paint: 'stucco', stretch: false, tris: 946 },
-  { name: 'Kit_DomeTower', w: 9.18, d: 9.73, eaves: 16.6, top: 26.36, storeys: 5, size: 'rare', paint: 'stucco', stretch: false, tris: 3070 },
-  { name: 'Kit_DutchGable', w: 8.5, d: 10.55, eaves: 10.0, top: 16.1, storeys: 3, size: 'mid', paint: 'brick', stretch: false, tris: 2336 },
-  { name: 'Kit_FlatBlock', w: 13.35, d: 11.65, eaves: 16.6, top: 20.85, storeys: 5, size: 'tall', paint: 'stucco', stretch: true, tris: 3618 },
-  { name: 'Kit_SlateBlock', w: 12.74, d: 11.81, eaves: 13.4, top: 19.15, storeys: 4, size: 'tall', paint: 'stucco', stretch: true, tris: 3704 },
-  { name: 'Kit_BrickWorks', w: 11.5, d: 11.05, eaves: 13.8, top: 17.7, storeys: 4, size: 'mid', paint: 'brick', stretch: true, tris: 2481 },
-  { name: 'Kit_Townhouse', w: 6.12, d: 10.96, eaves: 13.1, top: 18.3, storeys: 4, size: 'mid', paint: 'stucco', stretch: true, tris: 858 },
+  { name: 'Kit_DomeTower', w: 9.18, d: 9.18, eaves: 16.6, top: 26.36, storeys: 5, size: 'rare', paint: 'stucco', stretch: false, tris: 3070 },
+  { name: 'Kit_DutchGable', w: 8.5, d: 9.85, eaves: 10.0, top: 16.1, storeys: 3, size: 'mid', paint: 'brick', stretch: false, tris: 2336 },
+  { name: 'Kit_FlatBlock', w: 13.35, d: 10.95, eaves: 16.6, top: 20.85, storeys: 5, size: 'tall', paint: 'stucco', stretch: true, tris: 3618 },
+  { name: 'Kit_SlateBlock', w: 12.74, d: 11.11, eaves: 13.4, top: 19.15, storeys: 4, size: 'tall', paint: 'stucco', stretch: true, tris: 3704 },
+  { name: 'Kit_BrickWorks', w: 11.5, d: 10.5, eaves: 13.8, top: 17.7, storeys: 4, size: 'mid', paint: 'brick', stretch: true, tris: 2481 },
+  { name: 'Kit_Townhouse', w: 6.12, d: 10.26, eaves: 13.1, top: 18.3, storeys: 4, size: 'mid', paint: 'stucco', stretch: true, tris: 858 },
   { name: 'Kit_GlassBlock', w: 9.9, d: 9.9, eaves: 24.6, top: 27.7, storeys: 7, size: 'rare', paint: 'none', stretch: false, tris: 820 },
+  { name: 'Kit_ClockTower', w: 9.5, d: 18.75, eaves: 13.0, top: 38.0, storeys: 6, size: 'landmark', paint: 'stucco', stretch: false, tris: 1058 },
+  { name: 'Kit_LatticeTower', w: 12.6, d: 12.6, eaves: 8.5, top: 40.0, storeys: 0, size: 'landmark', paint: 'none', stretch: false, tris: 1270 },
+  { name: 'Kit_Fountain', w: 6.8, d: 6.8, eaves: 0.75, top: 3.71, storeys: 0, size: 'landmark', paint: 'none', stretch: false, tris: 622 },
 ];

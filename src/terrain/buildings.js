@@ -140,11 +140,12 @@ function lotBuilding(heightAt, i, j) {
   };
 }
 
-// Tall lots: mostly the big blocks, some three-storey houses, now and then a landmark (the domed
-// tower, the glass block); low lots: mostly houses, some blocks and cottages. Per model.
+// Tall lots: mostly the big blocks, some three-storey houses, very rarely the domed tower or the
+// glass block; low lots: mostly houses, some blocks and cottages. Per model. (The landmarks and
+// fountains have their own spots, see `landmarkAt` and `plazaAt`.)
 const KIT_ODDS = {
-  tall: { tall: 1, mid: 0.5, small: 0, rare: 0.03 },
-  low: { tall: 0.5, mid: 1, small: 0.2, rare: 0.01 },
+  tall: { tall: 1, mid: 0.5, small: 0, rare: 0.02 },
+  low: { tall: 0.5, mid: 1, small: 0.2, rare: 0 },
 };
 function pickKit(tall, t) {
   const odds = KIT_ODDS[tall ? 'tall' : 'low'];
@@ -185,7 +186,11 @@ export function generateBuildings(heightAt, cx, cz) {
     const b = heightAt.buildingKit ? lotAt(heightAt, i, j) : lotBuilding(heightAt, i, j);
     if (b) lots.push(b);
   }
-  if (heightAt.buildingKit) lots.push(...frontageNear(heightAt, (cx + 0.5) * CHUNK_SIZE, (cz + 0.5) * CHUNK_SIZE, CHUNK_SIZE));
+  if (heightAt.buildingKit) {
+    const mx = (cx + 0.5) * CHUNK_SIZE;
+    const mz = (cz + 0.5) * CHUNK_SIZE;
+    lots.push(...frontageNear(heightAt, mx, mz, CHUNK_SIZE), ...specialsNear(heightAt, mx, mz, CHUNK_SIZE));
+  }
   const buildings = [];
   for (const b of lots) {
     if (Math.floor(b.x / CHUNK_SIZE) !== cx || Math.floor(b.z / CHUNK_SIZE) !== cz) continue;
@@ -229,7 +234,7 @@ function survives(heightAt, b) {
 
 // The sunny town's buildings that might touch b: the street rows' near it and the lots around it.
 function neighbours(heightAt, b) {
-  const out = frontageNear(heightAt, b.x, b.z, b.radius + 14);
+  const out = [...frontageNear(heightAt, b.x, b.z, b.radius + 14), ...specialsNear(heightAt, b.x, b.z, b.radius + 14)];
   const lot = KIT_LOT;
   const i0 = Math.floor(b.x / lot);
   const j0 = Math.floor(b.z / lot);
@@ -370,14 +375,20 @@ function place(heightAt, f, k, side, t, kit, w, seed) {
   if (front.dist > LINE + back + 1.5) return null;
   const ground = footprintGround(heightAt, x, z, ux, uz, nx, nz, w, d);
   if (!ground) return null;
+  // The rows go before the lots behind them.
+  return kitBuilding(kit, x, z, w, nx, nz, ground, seed, 1 + seed);
+}
+
+function kitBuilding(kit, x, z, w, nx, nz, ground, seed, priority) {
   const r = (q) => hash(Math.floor(seed * 1e6), q, 77);
+  const d = kit.d;
   return {
     x,
     z,
     w,
     d,
-    ux,
-    uz,
+    ux: -nz,
+    uz: nx,
     nx,
     nz,
     yaw: Math.atan2(nz, nx),
@@ -393,9 +404,143 @@ function place(heightAt, f, k, side, t, kit, w, seed) {
     roofColor: r(2),
     extra: r(3),
     radius: Math.hypot(w, d) / 2,
-    // The rows go before the lots behind them.
-    priority: 1 + seed,
+    priority,
   };
+}
+
+// ---- Landmarks and plazas --------------------------------------------------------------------
+// One landmark at most in each LANDMARK_CELL square (a clock tower, the lattice tower, the domed
+// tower or the glass block), on the street nearest a spot in it; and a fountain on a paved plaza
+// at the corner of some junctions. Both go before the rows, which close up around them.
+const LANDMARK_CELL = 260;
+const LANDMARKS = ['Kit_ClockTower', 'Kit_LatticeTower', 'Kit_DomeTower', 'Kit_ClockTower', 'Kit_GlassBlock'];
+const PLAZA_CLEAR = 17; // m: the fountain's paved plaza, kept clear of buildings
+const specials = new WeakMap();
+
+function landmarkAt(heightAt, ci, cj) {
+  const r = (q) => hash(ci + 7001, cj - 3001, q);
+  if (r(1) < 0.25) return null;
+  const sx = (ci + 0.2 + 0.6 * r(2)) * LANDMARK_CELL;
+  const sz = (cj + 0.2 + 0.6 * r(3)) * LANDMARK_CELL;
+  const s = heightAt.sample(sx, sz);
+  if (s.wild > 0.3 || s.dist > 70) return null;
+  const kit = TOWN_KIT.find((k) => k.name === LANDMARKS[Math.floor(r(4) * LANDMARKS.length)]);
+  // On the building line of the nearest street, facing it.
+  const sign = Math.sign(s.side) || 1;
+  const nx = s.gx * sign;
+  const nz = s.gz * sign;
+  const px = sx - s.gx * s.side;
+  const pz = sz - s.gz * s.side;
+  const x = px + nx * (LINE + 0.5 + kit.d / 2);
+  const z = pz + nz * (LINE + 0.5 + kit.d / 2);
+  const ground = footprintGround(heightAt, x, z, -nz, nx, nx, nz, kit.w, kit.d);
+  return ground && kitBuilding(kit, x, z, kit.w, nx, nz, ground, r(5), 5 + r(6));
+}
+
+// Where the east-west family's field is a0 and the north-south one's a1 (a junction of streets
+// k0 and k1 at a0 = k0 spacing0, a1 = k1 spacing1): Newton steps on both fields.
+function crossing(heightAt, a0, a1, x = a1, z = a0) {
+  const [f0, f1] = heightAt.streetFamilies;
+  for (let it = 0; it < 16; it++) {
+    const a = f0.across(x, z) - a0;
+    const b = f1.across(x, z) - a1;
+    if (Math.abs(a) + Math.abs(b) < 1e-3) break;
+    const e = 0.5;
+    const ax = (f0.across(x + e, z) - f0.across(x - e, z)) / (2 * e);
+    const az = (f0.across(x, z + e) - f0.across(x, z - e)) / (2 * e);
+    const bx = (f1.across(x + e, z) - f1.across(x - e, z)) / (2 * e);
+    const bz = (f1.across(x, z + e) - f1.across(x, z - e)) / (2 * e);
+    const det = ax * bz - az * bx || 1;
+    x -= Math.max(-30, Math.min(30, (a * bz - b * az) / det));
+    z -= Math.max(-30, Math.min(30, (b * ax - a * bx) / det));
+  }
+  const ok = Math.abs(f0.across(x, z) - a0) < 0.05 && Math.abs(f1.across(x, z) - a1) < 0.05;
+  return ok ? { x, z } : null;
+}
+
+// The ground under a plaza's paved circle (lowest and highest), or null where it would reach a
+// sidewalk or the water, or stand on a hillside.
+function plazaGround(heightAt, x, z) {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (let k = 0; k <= 12; k++) {
+    const a = (k / 12) * Math.PI * 2;
+    const rr = k === 12 ? 0 : 8;
+    const p = heightAt.sample(x + Math.cos(a) * rr, z + Math.sin(a) * rr);
+    if (p.dist < KERB + 0.2 || p.riverDist < p.riverHalf + 4 || p.h < 0.6 || p.mountain > 1 || p.townHill > 0.2) return null;
+    lo = Math.min(lo, p.h);
+    hi = Math.max(hi, p.h);
+  }
+  return hi - lo > 1.4 ? null : { lo, hi };
+}
+
+function plazaAt(heightAt, k0, k1) {
+  const r = (q) => hash(k0 + 911, k1 - 377, q);
+  if (r(1) < 0.4) return null;
+  const [f0, f1] = heightAt.streetFamilies;
+  const j = crossing(heightAt, k0 * f0.spacing, k1 * f1.spacing, k1 * f1.spacing, k0 * f0.spacing);
+  if (!j) return null;
+  const s = heightAt.sample(j.x, j.z);
+  if (s.wild > 0.3) return null;
+  // Into one of the four corners (the first that fits, from a random one), `off` from both
+  // streets (their fields' slopes turn m into field units).
+  const off = KERB + PLAZA_CLEAR / 2 + 1;
+  const slope = (f, p) => Math.hypot(f.across(p.x + 0.5, p.z) - f.across(p.x - 0.5, p.z), f.across(p.x, p.z + 0.5) - f.across(p.x, p.z - 0.5));
+  const kit = TOWN_KIT.find((k) => k.name === 'Kit_Fountain');
+  const first = Math.floor(r(2) * 4);
+  let x;
+  let z;
+  let nx;
+  let nz;
+  let ground = null;
+  for (let q = 0; q < 4 && !ground; q++) {
+    const s0 = (first + q) & 1 ? -1 : 1;
+    const s1 = (first + q) & 2 ? -1 : 1;
+    // (The fields' slopes change away from the junction: re-solve with the slopes found there.)
+    let c = { x: j.x, z: j.z };
+    for (let it = 0; it < 3 && c; it++) c = crossing(heightAt, k0 * f0.spacing + s0 * off * slope(f0, c), k1 * f1.spacing + s1 * off * slope(f1, c), c.x, c.z);
+    if (!c) continue;
+    ({ x, z } = c);
+    const gx = f0.across(x + 0.5, z) - f0.across(x - 0.5, z);
+    const gz = f0.across(x, z + 0.5) - f0.across(x, z - 0.5);
+    const g = Math.hypot(gx, gz) || 1;
+    nx = (gx / g) * s0;
+    nz = (gz / g) * s0;
+    ground = heightAt.sample(x, z).wild < 0.3 ? plazaGround(heightAt, x, z) : null;
+  }
+  if (!ground) return null;
+  const b = kitBuilding(kit, x, z, kit.w, nx, nz, ground, r(4), 4 + r(5));
+  b.clear = PLAZA_CLEAR;
+  b.clearRadius = PLAZA_CLEAR * 0.71;
+  return b;
+}
+
+// The landmarks and plazas within `radius` of a point.
+function specialsNear(heightAt, x, z, radius) {
+  let cache = specials.get(heightAt);
+  if (!cache || cache.size > 20000) specials.set(heightAt, (cache = new Map()));
+  const get = (key, make) => {
+    if (!cache.has(key)) cache.set(key, make());
+    return cache.get(key);
+  };
+  const out = [];
+  const near = (b) => b && Math.abs(b.x - x) < radius + 30 && Math.abs(b.z - z) < radius + 30;
+  for (let ci = Math.floor((x - radius - 60) / LANDMARK_CELL); ci <= Math.floor((x + radius + 60) / LANDMARK_CELL); ci++) {
+    for (let cj = Math.floor((z - radius - 60) / LANDMARK_CELL); cj <= Math.floor((z + radius + 60) / LANDMARK_CELL); cj++) {
+      const b = get(`L${ci},${cj}`, () => landmarkAt(heightAt, ci, cj));
+      if (near(b)) out.push(b);
+    }
+  }
+  const [f0, f1] = heightAt.streetFamilies;
+  const a0 = f0.across(x, z);
+  const a1 = f1.across(x, z);
+  for (let k0 = Math.floor((a0 - radius - 60) / f0.spacing); k0 <= Math.ceil((a0 + radius + 60) / f0.spacing); k0++) {
+    for (let k1 = Math.floor((a1 - radius - 60) / f1.spacing); k1 <= Math.ceil((a1 + radius + 60) / f1.spacing); k1++) {
+      const b = get(`P${k0},${k1}`, () => plazaAt(heightAt, k0, k1));
+      if (near(b)) out.push(b);
+    }
+  }
+  return out;
 }
 
 // The street rows' buildings within `radius` of a point (by their segments).
@@ -419,11 +564,12 @@ function frontageNear(heightAt, x, z, radius) {
 // Whether two footprints (turned rectangles) come closer than `gap`: separating axis test on the
 // four edge directions.
 function overlap(a, b, gap) {
-  if (Math.hypot(a.x - b.x, a.z - b.z) > a.radius + b.radius + gap) return false;
+  if (Math.hypot(a.x - b.x, a.z - b.z) > (a.clearRadius ?? a.radius) + (b.clearRadius ?? b.radius) + gap) return false;
   const dx = b.x - a.x;
   const dz = b.z - a.z;
   for (const [ax, az] of [[a.ux, a.uz], [a.nx, a.nz], [b.ux, b.uz], [b.nx, b.nz]]) {
-    const reach = (r) => (Math.abs(r.ux * ax + r.uz * az) * r.w + Math.abs(r.nx * ax + r.nz * az) * r.d) / 2;
+    // (A fountain keeps its whole plaza clear, not just its basin.)
+    const reach = (r) => (Math.abs(r.ux * ax + r.uz * az) * (r.clear ?? r.w) + Math.abs(r.nx * ax + r.nz * az) * (r.clear ?? r.d)) / 2;
     if (Math.abs(dx * ax + dz * az) >= reach(a) + reach(b) + gap) return false;
   }
   return true;
@@ -456,8 +602,8 @@ export function insideBuilding(buildings, x, z, margin = 0) {
   for (const { building: b } of buildings) {
     const dx = x - b.x;
     const dz = z - b.z;
-    if (dx * dx + dz * dz > (b.radius + margin) ** 2) continue;
-    if (Math.abs(dx * b.ux + dz * b.uz) < b.w / 2 + margin && Math.abs(dx * b.nx + dz * b.nz) < b.d / 2 + margin) return true;
+    if (dx * dx + dz * dz > ((b.clearRadius ?? b.radius) + margin) ** 2) continue;
+    if (Math.abs(dx * b.ux + dz * b.uz) < (b.clear ?? b.w) / 2 + margin && Math.abs(dx * b.nx + dz * b.nz) < (b.clear ?? b.d) / 2 + margin) return true;
   }
   return false;
 }

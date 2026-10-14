@@ -30,7 +30,15 @@ const sandstone = uniform(0);
 const granite = uniform(0);
 const strata = mix(mix(redStrata, yellowStrata, sandstone), greyStrata, granite);
 const seam = smoothstep(0.86, 0.97, fract(layer)).mul(0.25);
-const rock = strata.mul(seam.oneMinus());
+// Sunny town: the terraces' faces in town are dressed stone retaining walls (courses of beige
+// blocks with mortar joints), as in the reference; the granite stays up the mountains.
+const masonry = uniform(0);
+const blockRow = positionWorld.y.div(0.55);
+const blockRun = positionWorld.x.add(positionWorld.z).div(1.1).add(blockRow.floor().mul(0.5));
+const blockHash = fract(sin(dot(vec2(blockRow.floor(), blockRun.floor()), vec2(12.9898, 78.233))).mul(43758.5453));
+const joint = max(smoothstep(0.9, 0.97, fract(blockRow)), smoothstep(0.93, 0.98, fract(blockRun)));
+const stoneWall = mix(vec3(0.62, 0.58, 0.51), vec3(0.74, 0.7, 0.62), blockHash).mul(joint.mul(0.35).oneMinus());
+const rock = mix(strata.mul(seam.oneMinus()), stoneWall, masonry.mul(smoothstep(19, 15, positionWorld.y)));
 // Fresh snow, per pixel: bright, faintly blue, with wind ripples and a fine sparkle of grains. The
 // snow surface near the car (render/snow-surface.js) uses the same, so the two meet unseen.
 const snowHash = (p) => fract(sin(dot(p, vec2(12.9898, 78.233))).mul(43758.5453));
@@ -111,6 +119,7 @@ export function snowGroundRoughness(side, packed, inside) {
 }
 const snowWorld = uniform(0);
 const townWorld = uniform(0);
+const dayTown = uniform(0);
 
 // The town's streets, per pixel: dark asphalt with white edge lines and a double yellow centre line,
 // a kerb, and a paved sidewalk out to KERB. `dist`: m from the centre line; `side`: the same, signed
@@ -124,7 +133,11 @@ function townStreet(dist, side, marks) {
   const line = (centre, half) => smoothstep(half + 0.02, half - 0.02, dist.sub(centre).abs());
   const edgeLine = line(TOWN_ROAD - 0.35, 0.06);
   const centreLine = smoothstep(0.12, 0.08, side.abs().sub(0.13).abs()).mul(marks);
-  const painted = mix(mix(asphalt, vec3(0.9, 0.9, 0.86), edgeLine.mul(0.9)), vec3(0.93, 0.74, 0.22), centreLine.mul(0.9));
+  // Sunny town: zebra crossings just before the junctions (where the centre line fades out),
+  // stripes along the street across its width.
+  const crossing = smoothstep(0.02, 0.08, marks).mul(smoothstep(0.55, 0.42, marks)).mul(smoothstep(TOWN_ROAD - 0.3, TOWN_ROAD - 0.5, dist));
+  const zebra = smoothstep(0.27, 0.23, fract(side.div(1.1)).sub(0.5).abs()).mul(crossing).mul(dayTown);
+  const painted = mix(mix(mix(asphalt, vec3(0.9, 0.9, 0.86), edgeLine.mul(0.9)), vec3(0.93, 0.74, 0.22), centreLine.mul(0.9)), vec3(0.92, 0.92, 0.88), zebra.mul(0.92));
   // Sidewalk: pale concrete slabs (1.2 m) behind a lighter kerb stone.
   const slab = fract(positionWorld.xz.div(1.2));
   const seam = max(smoothstep(0.04, 0.0, slab.x.min(slab.x.oneMinus())), smoothstep(0.04, 0.0, slab.y.min(slab.y.oneMinus())));
@@ -225,6 +238,8 @@ export function setTerrainWorld(world) {
   const town = world === 'town' || world === 'daytown';
   townWorld.value = town ? 1 : 0;
   granite.value = town ? 1 : 0;
+  dayTown.value = world === 'daytown' ? 1 : 0;
+  masonry.value = world === 'daytown' ? 1 : 0;
 }
 
 // Near the car a fine patch draws the ground with its ruts: the snow surface on snow

@@ -29,15 +29,15 @@ function bounds(p) {
   return { lo, hi };
 }
 
-// The corners of every triangle that reaches into the band a car could hit (0.5 m below the
-// ground to 2 m above it).
+// The corners of every triangle that reaches into the band a car could hit (0.3 m to 2 m above
+// the ground: not paving).
 function filterLow(p) {
   const out = [];
   const y = (v) => p.positions[v * 3 + 1];
   for (let t = 0; t < p.index.length; t += 3) {
     const tri = [p.index[t], p.index[t + 1], p.index[t + 2]];
     const ys = tri.map(y);
-    if (Math.min(...ys) < 2 && Math.max(...ys) > -0.5) for (const v of tri) out.push(p.positions[v * 3], p.positions[v * 3 + 1], p.positions[v * 3 + 2]);
+    if (Math.min(...ys) < 2 && Math.max(...ys) > 0.3) for (const v of tri) out.push(p.positions[v * 3], p.positions[v * 3 + 1], p.positions[v * 3 + 2]);
   }
   return out;
 }
@@ -93,7 +93,7 @@ describe('sunny town', () => {
       }
     }
     // Every everyday model shows up (the landmarks are rare).
-    for (const k of TOWN_KIT) if (k.size !== 'rare') expect(used.has(k.name)).toBe(true);
+    for (const k of TOWN_KIT) if (k.size !== 'rare' && k.size !== 'landmark') expect(used.has(k.name)).toBe(true);
     // None overlap (separating axis on the four edge directions).
     for (let i = 0; i < all.length; i++) {
       for (let j = i + 1; j < all.length; j++) {
@@ -129,13 +129,15 @@ describe('sunny town', () => {
       expect(Math.abs(low.hi[0] + low.lo[0])).toBeLessThan(0.02);
       expect(Math.abs(low.hi[2] + low.lo[2])).toBeLessThan(0.02);
       // Eaves, awnings and the roof reach out only a little past it.
-      expect(hi[0] - lo[0]).toBeLessThan(entry.w + 2.5);
-      expect(hi[2] - lo[2]).toBeLessThan(entry.d + 2.5);
+      // (The fountain's plaza paving spreads further, kept clear of buildings by the town.)
+      const spread = entry.name === 'Kit_Fountain' ? 10 : 2.5;
+      expect(hi[0] - lo[0]).toBeLessThan(entry.w + spread);
+      expect(hi[2] - lo[2]).toBeLessThan(entry.d + spread);
       // Walls reach well below the ground (for slopes); the roof's top as listed.
       expect(lo[1]).toBeLessThan(-4);
       expect(hi[1]).toBeCloseTo(entry.top, 1);
       expect(p.index.length / 3).toBeLessThan(4000);
-      expect(p.glass.some((g) => g === 1)).toBe(true);
+      if (entry.name !== 'Kit_LatticeTower') expect(p.glass.some((g) => g === 1)).toBe(true);
       // Coloured (the baked colours made it into the model): walls, roofs and trim differ.
       expect(new Set(Array.from(p.colors, (c) => c.toFixed(2))).size).toBeGreaterThan(8);
       // The main walls (and roofs) are marked for repainting, and only they.

@@ -38,7 +38,7 @@ C = dict(
     cream='#ecd3a2', sand='#dcb57e', white='#f3eee3', trim='#f6f1e6', stone='#a39a88', plinth='#8f877a',
     terra='#c9552e', terra_dk='#9a3d22', slate='#56607a', slate_dk='#3d4559', brick='#b0573d', brick_dk='#8a4030',
     teal='#3f9fae', copper='#5fae9a', gold='#d9b24a', wood='#5e3c24', green='#3f6e52', red='#b8423b',
-    iron='#2c2c30', yellow='#ead88f', ochre='#d79a52', glass='#36587c',
+    iron='#2c2c30', orange='#d8742c', paving='#cfc8b8', paving_dk='#b5ad9c', yellow='#ead88f', ochre='#d79a52', glass='#36587c',
     stucco='#e6dac0', greystone='#c9c1af', flat='#9d9a92', machine='#bfbcb4', aqua='#5fc3cf', aqua_dk='#2f8f9e', mullion='#dfe8ea',
 )
 
@@ -844,6 +844,155 @@ def glass_block():
     # Its glass is the facade itself: mark the aqua panels as glass for the game.
     entry(ob, W, D, eaves, NF + 1, 'rare', paint='none')
 
+def clock_face(B, f, s, zc, r):
+    n, u, off = f
+    pts = [n * (off + 0.06) + u * (s + x) + Z * (zc + y) for x, y in circle(r, 12)]
+    B.poly(pts, [tuple(range(12))[::-1]], 'white')
+    ring = [n * (off + 0.08) + u * (s + x) + Z * (zc + y) for x, y in circle(r + 0.18, 12)] + [n * (off + 0.08) + u * (s + x) + Z * (zc + y) for x, y in circle(r, 12)]
+    B.poly(ring, [(i, (i + 1) % 12, 12 + (i + 1) % 12, 12 + i) for i in range(12)], 'gold')
+    B.obox(n * (off + 0.1) + u * s + Z * (zc + r * 0.3), u, n, 0.1, 0.04, r * 0.6, 'iron')
+    B.obox(n * (off + 0.1) + u * (s + r * 0.22) + Z * zc, u, n, r * 0.45, 0.04, 0.1, 'iron')
+
+def clock_tower():
+    # A stone church tower with clock faces, an open belfry and a slate spire, a small nave
+    # behind it: one of the reference's landmarks.
+    B = Builder('Kit_ClockTower', 'greystone', 'slate')
+    T = 7.0  # tower width
+    h = T / 2
+    Dn, Wn = 12.0, 9.0  # nave behind
+    ty = -5.0  # the tower's centre, toward the street
+    # Nave: walls, tall arched windows, a steep roof.
+    ny = ty + h + Dn / 2 - 0.5
+    B.prism([(x, y + ny) for x, y in rrect(Wn / 2, Dn / 2, 0.1, 1)], -PLINTH, 9.0, 'greystone')
+    for sx in (-1, 1):
+        for k in range(3):
+            f = (Vector((sx, 0, 0)), Vector((0, sx, 0)), Wn / 2)
+            window(B, (f[0], f[1], Wn / 2), sx * (ny - Dn / 2 + 2.5 + k * 3.5), 2.0, 1.4, 4.5, arch=True, segs=4, bars=False, sill=True)
+    for sx in (-1, 1):
+        B.poly([(sx * (Wn / 2 + 0.4), ny - Dn / 2 - 0.2, 8.8), (sx * (Wn / 2 + 0.4), ny + Dn / 2 + 0.3, 8.8), (0, ny + Dn / 2 + 0.3, 14.5), (0, ny - Dn / 2 - 0.2, 14.5)], [(0, 1, 2, 3)], 'slate')
+    B.poly([(-Wn / 2, ny + Dn / 2, 9.0), (Wn / 2, ny + Dn / 2, 9.0), (0, ny + Dn / 2, 14.3)], [(0, 1, 2)], 'greystone')
+    round_window(B, (Vector((0, 1, 0)), Vector((-1, 0, 0)), ny + Dn / 2), 0.0, 11.0, 1.1, segs=12)
+    # Tower in stages with buttressed corners.
+    stages = [(0, 7.0), (7.0, 13.0), (13.0, 19.0), (19.0, 24.0)]
+    for i, (z0, z1) in enumerate(stages):
+        inset = 0.15 * i
+        B.prism([(x, y + ty) for x, y in rrect(h - inset, h - inset, 0.1, 1)], -PLINTH if i == 0 else z0, z1, 'greystone')
+        B.prism([(x, y + ty) for x, y in rrect(h - inset + 0.15, h - inset + 0.15, 0.1, 1)], z1 - 0.3, z1, 'trim')
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            B.box(sx * (h - 0.2), ty + sy * (h - 0.2), -PLINTH, 0.9, 0.9, 13.0 + PLINTH, 'stone')
+    tf = {k: (n, u, off) for k, (n, u, off) in facades(T, T).items()}
+    for name, (n, u, off) in tf.items():
+        f = (n, u, off - 0.3)
+        # Shift facades to the tower's centre.
+        c = Vector((0, ty, 0))
+        fn = (n, u, off + c.dot(n))
+        s0 = c.dot(u)
+        if name == 'front':
+            door(B, fn, s0, 2.0, 4.0, col='wood')
+        else:
+            window(B, fn, s0, 2.5, 1.0, 2.8, arch=True, segs=4, bars=False)
+        window(B, (n, u, fn[2] - 0.15), s0, 8.5, 1.0, 3.0, arch=True, segs=4, bars=False)
+        clock_face(B, (n, u, fn[2] - 0.3), s0, 16.0, 1.6)
+        # Belfry: two open arches (dark) per side.
+        for ds in (-1.2, 1.2):
+            inner = arch_contour(s0 + ds, 19.8, 1.4, 3.4, 4)
+            B.poly([n * (fn[2] - 0.43) + u * p[0] + Z * p[1] for p in inner], [tuple(range(len(inner)))[::-1]], 'iron')
+    # Spire: octagonal, with a gold cross.
+    spire = [(x, y + ty) for x, y in circle(h - 0.4, 8, math.pi / 8)]
+    B.prism(spire, 24.0, 24.6, 'trim')
+    verts = [(x, y, 24.6) for x, y in spire] + [(0, ty, 36.0)]
+    B.poly(verts, [(i, (i + 1) % 8, 8) for i in range(8)], 'slate')
+    B.box(0, ty, 36.0, 0.15, 0.15, 2.0, 'gold')
+    B.box(0, ty, 37.2, 0.9, 0.15, 0.15, 'gold')
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            B.cone(sx * (h - 0.5), ty + sy * (h - 0.5), 0.45, 24.0, 2.2, 'slate', n=6)
+    ob = B.finish()
+    entry(ob, 0, 0, 13.0, 6, 'landmark')
+
+def lattice_tower():
+    # An orange steel lattice tower on four splayed legs, two platforms and a mast: the
+    # reference's radio tower.
+    B = Builder('Kit_LatticeTower', None)
+    H = 34.0
+    def half(z):  # half-width of the tower at height z
+        return 5.0 * (1 - z / H) ** 1.6 + 0.5
+    levels = [0, 4, 8.5, 13, 18, 23, 28, 32]
+    def corner(z, sx, sy):
+        a = half(z)
+        return Vector((sx * a, sy * a, z))
+    cs = ((-1, -1), (1, -1), (1, 1), (-1, 1))
+    def strut(a, b, t, col='orange'):
+        d = b - a
+        L = d.length
+        u = d.normalized()
+        side = u.cross(Z)
+        side = side.normalized() if side.length > 1e-3 else Vector((1, 0, 0))
+        up = side.cross(u).normalized()
+        c = (a + b) / 2
+        v = []
+        for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            v.append(c - u * L / 2 + side * su * t / 2 + up * sv * t / 2)
+        for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            v.append(c + u * L / 2 + side * su * t / 2 + up * sv * t / 2)
+        B.poly(v, [(0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)], col)
+    # Footings.
+    for sx, sy in cs:
+        B.box(sx * half(0), sy * half(0), -PLINTH, 1.6, 1.6, PLINTH + 0.6, 'stone')
+    for i in range(len(levels) - 1):
+        z0, z1 = levels[i], levels[i + 1]
+        for k, (sx, sy) in enumerate(cs):
+            a0, a1 = corner(z0, sx, sy), corner(z1, sx, sy)
+            strut(a0, a1, 0.5 - 0.04 * i)
+            nx_, ny_ = cs[(k + 1) % 4]
+            b0, b1 = corner(z0, nx_, ny_), corner(z1, nx_, ny_)
+            # X bracing on each face, a ring at each level.
+            strut(a0, b1, 0.16)
+            strut(b0, a1, 0.16)
+            strut(a1, b1, 0.2)
+    # Arches between the legs at the bottom.
+    for k, (sx, sy) in enumerate(cs):
+        nx_, ny_ = cs[(k + 1) % 4]
+        pts = []
+        for j in range(7):
+            t = j / 6
+            p = corner(0.6, sx, sy).lerp(corner(0.6, nx_, ny_), t)
+            p.z = 0.6 + 3.2 * math.sin(math.pi * t) ** 0.7
+            pts.append(p)
+        for j in range(6):
+            strut(pts[j], pts[j + 1], 0.28)
+    # Platforms.
+    for z, grow in ((8.5, 1.0), (23.0, 0.8)):
+        a = half(z) + grow
+        B.box(0, 0, z - 0.25, 2 * a, 2 * a, 0.3, 'orange')
+        for sx, sy, w_, d_ in ((0, -a, 2 * a, 0.05), (0, a, 2 * a, 0.05), (-a, 0, 0.05, 2 * a), (a, 0, 0.05, 2 * a)):
+            B.box(sx, sy, z + 0.95, w_, d_ + 0.05, 0.06, 'iron')
+    B.prism(circle(0.35, 6), levels[-1], H + 2, 'orange', smooth=True)
+    B.prism(circle(0.12, 6), H + 2, H + 6, 'white', smooth=True)
+    B.box(0, 0, H + 3.5, 0.25, 0.25, 0.25, 'red')
+    ob = B.finish()
+    entry(ob, 0, 0, 8.5, 0, 'landmark', paint='none')
+
+def fountain():
+    # A round fountain for a plaza: a stone basin with water, a pedestal and two bowls.
+    B = Builder('Kit_Fountain', None)
+    # The plaza's paving around it, in rings, just above the ground.
+    B.prism(circle(8.0, 20), -1.5, 0.06, 'paving')
+    B.prism(circle(6.0, 20), 0.06, 0.07, 'paving_dk')
+    B.prism(circle(4.6, 20), 0.07, 0.08, 'paving')
+    B.prism(circle(3.6, 16), -PLINTH, 0.15, 'stone', smooth=True)
+    B.loft([(circle(3.4, 16), 0.15), (circle(3.4, 16), 0.75), (circle(3.0, 16), 0.75), (circle(3.0, 16), 0.45)], 'trim', smooth=True, cap=False)
+    B.prism(circle(3.0, 16), 0.15, 0.55, 'aqua_dk', smooth=True)
+    B.prism(circle(0.45, 8), 0.55, 2.2, 'trim', smooth=True)
+    B.loft([(circle(0.5, 12), 1.6), (circle(1.6, 12), 1.95), (circle(1.6, 12), 2.1), (circle(1.4, 12), 2.1)], 'trim', smooth=True, cap=False)
+    B.prism(circle(1.4, 12), 1.9, 2.05, 'aqua', smooth=True)
+    B.prism(circle(0.25, 8), 2.1, 3.0, 'trim', smooth=True)
+    B.loft([(circle(0.3, 10), 2.8), (circle(0.8, 10), 3.1), (circle(0.8, 10), 3.2), (circle(0.65, 10), 3.2)], 'trim', smooth=True, cap=False)
+    B.dome(0, 0, 0.4, 3.15, 'aqua', n=10, rings=3, sz=1.4)
+    ob = B.finish()
+    entry(ob, 0, 0, 0.75, 0, 'landmark', paint='none')
+
 turret_corner()
 bell_mansard()
 cottage()
@@ -854,6 +1003,9 @@ slate_block()
 brick_works()
 townhouse()
 glass_block()
+clock_tower()
+lattice_tower()
+fountain()
 
 objs = [bpy.data.objects[k['name']] for k in KIT]
 for k, o in zip(KIT, objs):
@@ -864,7 +1016,7 @@ for k, o in zip(KIT, objs):
     low = []
     for poly in me.polygons:
         zs = [me.vertices[i].co.z for i in poly.vertices]
-        if min(zs) < 2.0 and max(zs) > -0.5:
+        if min(zs) < 2.0 and max(zs) > 0.3:
             low += [me.vertices[i].co for i in poly.vertices]
     x0, x1 = min(c.x for c in low), max(c.x for c in low)
     y0, y1 = min(c.y for c in low), max(c.y for c in low)
@@ -900,15 +1052,21 @@ if MANIFEST:
 if RENDER:
     # A contact sheet of the kit for review.
     import os
+    # Rows of five, front to back.
     x = 0.0
-    for o in objs:
+    width = 0.0
+    for i, o in enumerate(objs):
+        if i % 5 == 0:
+            x = 0.0
         w = o.dimensions.x
-        o.location = (x + w / 2, 0, 0)
+        o.location = (x + w / 2, (i // 5) * 26.0, 0)
         x += w + 3
+        width = max(width, x)
+    x = width
     sc = bpy.context.scene
     cx = x / 2 - 1.5
     me = bpy.data.meshes.new('Ground')
-    me.from_pydata([(-100, -100, 0), (100, -100, 0), (100, 100, 0), (-100, 100, 0)], [], [(0, 1, 2, 3)])
+    me.from_pydata([(-300, -300, 0), (300, -300, 0), (300, 300, 0), (-300, 300, 0)], [], [(0, 1, 2, 3)])
     g = bpy.data.objects.new('Ground', me)
     sc.collection.objects.link(g)
     gm = bpy.data.materials.new('GroundMat')
@@ -921,15 +1079,15 @@ if RENDER:
     bg = w.node_tree.nodes.get('Background')
     bg.inputs[0].default_value = (0.62, 0.75, 0.92, 1); bg.inputs[1].default_value = 0.9
     for name, ang in (('front', 28), ('back', 208)):
-        cd = bpy.data.cameras.new(name); cd.type = 'ORTHO'; cd.ortho_scale = x * 0.92
+        cd = bpy.data.cameras.new(name); cd.type = 'ORTHO'; cd.ortho_scale = x * 1.05
         cam = bpy.data.objects.new(name, cd); sc.collection.objects.link(cam)
         a = math.radians(ang)
-        target = Vector((cx, 0, 7))
+        target = Vector((cx, 26.0 * ((len(objs) - 1) // 5) / 2, 7))
         cam.location = target + Vector((math.sin(a) * 60, -math.cos(a) * 60, 38))
         cam.rotation_euler = (target - cam.location).to_track_quat('-Z', 'Y').to_euler()
         sc.camera = cam
         sc.render.engine = 'BLENDER_EEVEE'
-        sc.render.resolution_x, sc.render.resolution_y = 2000, 900
+        sc.render.resolution_x, sc.render.resolution_y = 2000, 1400
         sc.view_settings.view_transform = 'AgX'
         sc.render.filepath = os.path.join(RENDER, f'kit_{name}.png')
         bpy.ops.render.render(write_still=True)

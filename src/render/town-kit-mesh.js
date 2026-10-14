@@ -129,6 +129,8 @@ export function createKitBuildingsMesh(rocks, kit = prototypes) {
   const normals = new Float32Array(vertices * 3);
   const colors = new Float32Array(vertices * 3);
   const glass = new Float32Array(vertices);
+  const surface = new Float32Array(vertices);
+  const level = new Float32Array(vertices);
   const index = new Uint32Array(indices);
   let v = 0;
   let k = 0;
@@ -148,6 +150,7 @@ export function createKitBuildingsMesh(rocks, kit = prototypes) {
       const pz = proto.positions[s + 2];
       positions[o] = b.x + ax * px + fx * pz;
       positions[o + 1] = b.ground + proto.positions[s + 1];
+      level[v + i] = proto.positions[s + 1];
       positions[o + 2] = b.z + az * px + fz * pz;
       // Normals of a stretched model: scaled by the inverse stretch along x, then renormalised.
       const nx = proto.normals[s] / sx;
@@ -162,6 +165,9 @@ export function createKitBuildingsMesh(rocks, kit = prototypes) {
     // Some buildings keep their model's colours, the rest get walls from their model's palette
     // (stucco or brick) and a tile or slate roof.
     const kit = KIT_BY_NAME.get(b.kit);
+    // The shader's surface detail: brick courses or stucco mottling on the main walls.
+    const wallSurface = kit?.paint === 'brick' ? 2 : kit?.paint === 'stucco' ? 1 : 0;
+    if (wallSurface) for (let i = 0; i < n; i++) if (proto.paint[i] === 1) surface[v + i] = wallSurface;
     const walls = b.wall >= KEEP && PAINTS[kit?.paint];
     const roof = b.roofColor >= KEEP;
     if (walls) wallColor.set(pickPaint(walls, b.wall)).offsetHSL(0, 0, (b.extra - 0.5) * 0.05);
@@ -185,6 +191,8 @@ export function createKitBuildingsMesh(rocks, kit = prototypes) {
   geometry.setAttribute('normal', new BufferAttribute(normals, 3));
   geometry.setAttribute('color', new BufferAttribute(colors, 3));
   geometry.setAttribute('glass', new BufferAttribute(glass, 1));
+  geometry.setAttribute('surface', new BufferAttribute(surface, 1));
+  geometry.setAttribute('level', new BufferAttribute(level, 1));
   geometry.setIndex(new BufferAttribute(index, 1));
   geometry.computeBoundingSphere();
   const mesh = new Mesh(geometry, kitBuildingMaterial);
