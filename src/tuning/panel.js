@@ -20,6 +20,7 @@ import { DRIVETRAIN, resetDrivetrain, saveDrivetrain } from '../vehicle/config.j
 import { requestRebuild, requestRespawn } from '../vehicle/spawn.js';
 import { setGravelAmount } from '../render/terrain-mesh.js';
 import { WORLDS, saveWorld, worldMode } from '../world.js';
+import { clock, saveHour } from '../render/time-of-day.js';
 import { AUDIO, resetAudio, saveAudio } from '../audio/config.js';
 import { ENGINE_PRESETS } from '../audio/engine-presets.js';
 
@@ -172,6 +173,18 @@ export function createTuningPanel(world, { heightAt }) {
       url.searchParams.delete('terrain');
       location.href = url.href;
     });
+  // Time of day, saved per world: the sun's (or moon's) light, the sky and the haze follow it.
+  const { daylight } = world.get(Render);
+  if (daylight) {
+    const time = { hour: daylight.hour };
+    const label = () => `Time of day (${clock(time.hour)})`;
+    const slider = gui.add(time, 'hour', 0, 24, 0.05).name(label());
+    slider.onChange(() => {
+      daylight.set(time.hour);
+      slider.name(label());
+    });
+    slider.onFinishChange(() => saveHour(daylight.world, time.hour));
+  }
   const copyButton = gui.add(actions, 'copy').name('Copy settings');
   gui.add(actions, 'reset').name('Reset to defaults');
   gui.add(actions, 'respawn').name('Respawn car (R)');

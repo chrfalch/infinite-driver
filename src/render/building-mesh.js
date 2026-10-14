@@ -248,8 +248,8 @@ const night = uniform(0);
 const litPick = hash(floor(bay).mul(13.1).add(floor(storey).mul(7.7)).add(positionWorld.z.floor().mul(0.31)));
 const lit = step(0.5, litPick).mul(litPick.mul(0.8).add(0.4));
 buildingMaterial.emissiveNode = vec3(1, 0.7, 0.38).mul(pane).mul(lit).mul(night).mul(mix(float(0.75), float(0.45), isGlass));
-export function setBuildingNight(on) {
-  night.value = on ? 1 : 0;
+export function setBuildingNight(level) {
+  night.value = Number(level);
 }
 buildingMaterial.maskNode = hole.lessThan(dither.mul(0.98).add(0.01));
 // The shadows stay whole.

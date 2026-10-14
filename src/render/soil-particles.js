@@ -6,7 +6,12 @@ const SETTLE_TIME = 1.6; // s a landed clump stays before it crumbles away
 
 const material = new MeshStandardMaterial({ roughness: 1, metalness: 0, flatShading: true });
 // Powder snow scatters light through itself: no dark faces or self-shadowing.
-const powderMaterial = new MeshStandardMaterial({ roughness: 1, metalness: 0, flatShading: true, emissive: '#b8c2cc' });
+const POWDER_GLOW = new Color('#b8c2cc');
+const powderMaterial = new MeshStandardMaterial({ roughness: 1, metalness: 0, flatShading: true, emissive: POWDER_GLOW });
+// How strongly the powder glows (1 by day; the time of day dims it at night).
+export function setPowderGlow(k) {
+  powderMaterial.emissive.copy(POWDER_GLOW).multiplyScalar(k);
+}
 const m4 = new Matrix4();
 const q = new Quaternion();
 const v3 = new Vector3();
@@ -17,13 +22,11 @@ const s3 = new Vector3();
 // at the tyre and piling up where it lands balance out. Fine grains (sand, dust) use the same pool
 // with a cheaper shape, no shadows, and a quick settle (createFineParticles).
 export class SoilParticles {
-  constructor(scene, { capacity = 2500, drag = DRAG, powder = false, night = false, settle = SETTLE_TIME, geometry = null, shadows = true, name = 'soil spray' } = {}) {
+  constructor(scene, { capacity = 2500, drag = DRAG, powder = false, settle = SETTLE_TIME, geometry = null, shadows = true, name = 'soil spray' } = {}) {
     this.capacity = capacity;
     this.drag = drag;
     this.settle = settle;
     this.mesh = new InstancedMesh(geometry ?? new IcosahedronGeometry(1, 0), powder ? powderMaterial : material, capacity);
-    // At night the powder's scattered glow is only the faint skylight's.
-    if (powder && night) powderMaterial.emissive.multiplyScalar(0.08);
     this.mesh.castShadow = shadows;
     this.mesh.receiveShadow = !powder;
     this.mesh.frustumCulled = false;
