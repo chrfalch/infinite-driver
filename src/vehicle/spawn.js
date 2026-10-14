@@ -221,15 +221,20 @@ function obstaclesNear(world, x, z, radius) {
   return out;
 }
 
+// How far the whole footprint must stand above the water (town's river and ponds), m.
+const WATER_CLEARANCE = 0.3;
+
 // A good place to put the car back on its wheels near (x, z): on the nearest road if the terrain
-// has roads, otherwise the nearest level patch, clear of rocks and trees. The car faces along the
-// road (whichever way is closer to its old heading). Falls back to the old spot.
+// has roads, otherwise the nearest level patch, clear of rocks and trees and out of the water. The
+// car faces along the road (whichever way is closer to its old heading). Falls back to the old spot.
 export function findSpawnSpot(world, heightAt, x0, z0, yaw0) {
   // The dry river's rock bed is never level: allow its humps.
   const tolerance = heightAt.rockAt ? 0.8 : 0.35;
+  // (Sunny town's jump streets run down to the water's edge on the far bank.)
+  const dryAbove = heightAt.waterLevel !== undefined ? heightAt.waterLevel + WATER_CLEARANCE : -Infinity;
   const level = (x, z, yaw) => {
     const f = footprint(heightAt, x, z, yaw);
-    return f.max - f.min < tolerance;
+    return f.max - f.min < tolerance && f.min > dryAbove;
   };
   const clear = (x, z) => obstaclesNear(world, x, z, 6).every((o) => Math.hypot(o.x - x, o.z - z) > o.r + HALF_LENGTH + 0.3);
   const facing = (h) => {
