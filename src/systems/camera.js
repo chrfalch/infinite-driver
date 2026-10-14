@@ -234,8 +234,11 @@ export function followCamera(world) {
     persp.position.set(px, py, pz);
     persp.lookAt(state.x, state.y + 0.6, state.z);
     render.activeCamera = persp;
+    // The camera looks straight at the point it follows, so that is the distance to focus at.
+    render.focusDistance = Math.hypot(px - state.x, py - state.y - 0.6, pz - state.z);
   } else {
     render.activeCamera = camera;
+    render.focusDistance = DISTANCE;
   }
   if (daylight) {
     const haze = low ? daylight.horizon : daylight.background;

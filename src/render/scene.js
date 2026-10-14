@@ -10,6 +10,7 @@ import {
   WebGPURenderer,
 } from 'three/webgpu';
 import { applyQuality } from './quality.js';
+import { createDepthOfField } from './depth-of-field.js';
 
 export const VIEW_HEIGHT = 22; // metres visible vertically at zoom 1
 // Ground depth per metre of screen height: 1 / sin(35.26 deg) for the isometric view.
@@ -87,5 +88,8 @@ export async function createRenderer(container) {
   resize();
   window.addEventListener('resize', resize);
 
-  return { renderer, scene, camera, perspective, activeCamera: camera, sun, hemi, hudScene, hudCamera, resize, quality };
+  // The car in focus, the distance behind it blurred; followCamera sets focusDistance.
+  const dof = createDepthOfField(renderer, scene, camera);
+
+  return { renderer, scene, camera, perspective, activeCamera: camera, sun, hemi, hudScene, hudCamera, resize, quality, dof, focusDistance: 30 };
 }

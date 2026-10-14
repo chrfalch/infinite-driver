@@ -260,7 +260,8 @@ async function main() {
     scene.updateMatrixWorld();
     updateInstanceBatchers();
     renderer.clear();
-    renderer.render(scene, camera);
+    if (render.dof.enabled) render.dof.render(camera, render.focusDistance);
+    else renderer.render(scene, camera);
     sample('scene.drawCalls', renderer.info.render.drawCalls);
     sample('scene.ktris', renderer.info.render.triangles / 1000);
     renderer.clearDepth();

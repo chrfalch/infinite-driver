@@ -13,6 +13,11 @@ export const DEFAULT_CONTROLS = Object.freeze({
   performance: false,
   // Graphics quality: 'auto', 'high', or 'low'. See render/quality.js.
   graphics: 'auto',
+  // Depth of field: the car sharp, the world behind it blurring with distance (render/depth-of-field.js).
+  depthOfField: true,
+  // Metres behind the car to full blur, and the blur's size (0 = none).
+  dofRange: 35,
+  dofStrength: 3,
   // Physics and renderer stats on the dashboard (P toggles).
   showPerf: false,
 });
