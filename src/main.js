@@ -37,7 +37,7 @@ import { TireTracks } from './render/tracks.js';
 import { GROUND, setPavedRoads, setSnowCover } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
-import { worldMode } from './world.js';
+import { WORLDS, switchWorld, worldMode } from './world.js';
 import { setGroundPatch, setTerrainWorld } from './render/terrain-mesh.js';
 import { SNOW_PATCH_N, SnowSurface } from './render/snow-surface.js';
 import { createDaylight } from './render/daylight.js';
@@ -71,10 +71,13 @@ const loading = createLoadingScreen();
 async function main() {
   const container = document.getElementById('app');
   const params = new URLSearchParams(location.search);
+  // The world picker on the loading screen (the panel has one too).
+  loading?.levels(WORLDS, worldMode(), (mode) => (location.href = switchWorld(mode)));
   // The engine sound reads every physics step from here (audio/feed.js); ?sound=0 turns it off.
-  // Its recordings load and decode alongside everything else.
+  // Its recordings load and decode alongside everything else; it starts only as the loading screen
+  // goes (armed then), not on taps while loading.
   const audioFeed = new AudioFeed(createFeedBuffer());
-  const audio = params.get('sound') === '0' ? null : createAudio({ feed: audioFeed });
+  const audio = params.get('sound') === '0' ? null : createAudio({ feed: audioFeed, armed: !loading });
   const soundLoaded = audio
     ? audio.preload((done, total) => {
         loading?.set('sound', total ? done / total : 0);
@@ -354,10 +357,14 @@ async function main() {
   render.renderer.setAnimationLoop(frame);
 
   // The drive starts on a tap or key press once everything is in, so the sound (which browsers
-  // start only from such a gesture) starts with it; no need if the sound is off, or already started
-  // by a tap while loading. Browsers driven by a script skip the prompt.
+  // start only from such a gesture) starts with it; no need if the sound is off. Browsers driven
+  // by a script skip the prompt. Gestures start the sound from then on (M turns it on later).
   const soundToStart = () => !!audio && audio.state === 'off' && AUDIO.enabled && !navigator.webdriver;
-  loading?.finish({ sound: soundLoaded, prompt: soundToStart });
+  const startSound = (gesture) => {
+    audio?.arm();
+    if (gesture) audio?.unlock();
+  };
+  loading?.finish({ sound: soundLoaded, prompt: soundToStart, start: startSound });
 
   // Handy for debugging from the console.
   window.__game = {

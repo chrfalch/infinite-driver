@@ -136,11 +136,14 @@ function createSoundButton(audio) {
   };
 }
 
-export function createAudio({ feed = null, preset = null, button = true } = {}) {
+// armed: false keeps the sound from starting on gestures until arm() (the game arms it as the
+// loading screen goes, so taps while loading stay silent).
+export function createAudio({ feed = null, preset = null, button = true, armed = true } = {}) {
   const Context = globalThis.AudioContext ?? globalThis.webkitAudioContext;
   // preset: a fixed engine preset (the engine lab); otherwise the one picked in the settings.
   const audio = { ctx: null, node: null, state: 'off', manual: !feed?.shared, preset, update: () => {}, dispose: () => {} };
   audio.unlock = () => {};
+  audio.arm = () => {};
   audio.preload = () => Promise.resolve();
   const removeButton = button && typeof document !== 'undefined' ? createSoundButton(audio) : () => {};
   if (!Context || typeof AudioWorkletNode === 'undefined' || !globalThis.isSecureContext) {
@@ -319,6 +322,7 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
     }
   }
   audio.unlock = unlock;
+  audio.arm = () => (armed = true);
 
   let lastGesture = '';
   const onGesture = (e) => {
@@ -327,7 +331,7 @@ export function createAudio({ feed = null, preset = null, button = true } = {}) 
       AUDIO.enabled = !AUDIO.enabled;
       saveAudio(); // applies it (below)
     }
-    unlock();
+    if (armed) unlock();
   };
   let engineType = AUDIO.engineType;
   const apply = () => {

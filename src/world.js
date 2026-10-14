@@ -26,3 +26,12 @@ export function saveWorld(mode) {
 export function worldMode(search = globalThis.location?.search ?? '') {
   return new URLSearchParams(search).get('terrain') ?? savedWorld();
 }
+
+// The page for a newly picked world: saved, and without ?terrain (which would override it).
+// A new world needs a fresh start (both workers build their terrain at load).
+export function switchWorld(mode, href = globalThis.location.href) {
+  saveWorld(mode);
+  const url = new URL(href);
+  url.searchParams.delete('terrain');
+  return url.href;
+}

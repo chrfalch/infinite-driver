@@ -5,7 +5,10 @@
 // Each step has a weight in the bar; set(key, fraction) moves it. When the game is ready to drive
 // and the sound is decoded, a button asks for a tap or a key: that gesture is what lets the browser
 // start the sound, so the drive starts with it. Without sound to start (off, unsupported, or a
-// browser driven by a script), the screen goes as soon as everything is ready.
+// browser driven by a script), the screen goes as soon as everything is ready. No sound plays
+// before then: main.js arms it in finish's start().
+//
+// A row of worlds to pick from sits under the title the whole time; picking one reloads into it.
 
 const STEPS = { gpu: 0.12, world: 0.08, physics: 0.08, car: 0.04, terrain: 0.36, hud: 0.04, warmup: 0.12, sound: 0.16 };
 
@@ -41,6 +44,7 @@ export function createLoadingScreen() {
   const detail = $('detail');
   const quip = $('quip');
   const go = $('go');
+  const levels = $('levels');
   const progress = Object.fromEntries(Object.keys(STEPS).map((key) => [key, 0]));
   const details = {};
   const started = performance.now();
@@ -90,6 +94,30 @@ export function createLoadingScreen() {
       }),
   };
 
+  // The worlds to pick from ({ label: mode }), the one being loaded marked; pick(mode) switches.
+  screen.levels = (worlds, current, pick) => {
+    levels.replaceChildren(
+      ...Object.entries(worlds).map(([label, mode]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'loading-level';
+        button.textContent = label;
+        if (mode === current) {
+          button.setAttribute('aria-pressed', 'true');
+        } else {
+          button.addEventListener('click', () => {
+            levels.classList.add('picked');
+            button.setAttribute('aria-pressed', 'true');
+            step.textContent = `Off to the ${label.toLowerCase()}`;
+            pick(mode);
+          });
+        }
+        return button;
+      }),
+    );
+    levels.hidden = false;
+  };
+
   // Called every frame of the game until the drive runs smoothly.
   let frames = 0;
   let smooth = 0;
@@ -109,8 +137,10 @@ export function createLoadingScreen() {
   };
 
   // Resolves once the game is warmed up, the sound decoded (`sound`, a promise), and (if `prompt()`
-  // says so then) the player tapped or pressed a key; then the screen fades away.
-  screen.finish = async ({ sound = Promise.resolve(), prompt = () => true } = {}) => {
+  // says so then) the player tapped or pressed a key; then the screen fades away. start(gesture)
+  // runs then: start(true) inside that gesture (taps and keys on the world picker do not count),
+  // start(false) when there was no prompt.
+  screen.finish = async ({ sound = Promise.resolve(), prompt = () => true, start = () => {} } = {}) => {
     await Promise.all([warmed, sound]);
     clearInterval(quipTimer);
     for (const key of Object.keys(STEPS)) progress[key] = 1;
@@ -127,12 +157,14 @@ export function createLoadingScreen() {
         const types = ['pointerdown', 'keydown'];
         const onGesture = (e) => {
           if (e.type === 'keydown' && (e.metaKey || e.ctrlKey || e.altKey)) return;
+          if (levels.contains(e.target)) return;
           for (const type of types) window.removeEventListener(type, onGesture, true);
+          start(true);
           resolve();
         };
         for (const type of types) window.addEventListener(type, onGesture, true);
       });
-    }
+    } else start(false);
     root.classList.add('gone');
     setTimeout(() => root.remove(), 700);
   };
