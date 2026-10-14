@@ -381,6 +381,8 @@ function townColor(s, slope, x, z, out) {
   const depth = WATER_LEVEL - s.h;
   out.lerp(SHORE, smoothstepJs(1.3, 0.5, s.h) * (1 - smoothstepJs(4, 9, s.mountain)));
   if (depth > 0) out.lerp(DEEP, Math.min(1, depth / 1.4) * 0.85);
+  // Driveways up onto the raised blocks are paved.
+  if (s.driveway > 0) out.lerp(TOWN_PAVING, s.driveway * 0.9);
   // Stunt parks: pale concrete, the ramps, banks and rollers in red, the bowl painted blue.
   if (s.park > 0) {
     const inPark = s.park * smoothstepJs(TOWN_KERB + 0.2, TOWN_KERB + 0.8, s.dist);

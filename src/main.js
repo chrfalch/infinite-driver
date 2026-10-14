@@ -44,6 +44,8 @@ import { worldLook } from './render/backdrop.js';
 import { createWater } from './render/water.js';
 import { setBuildingCutaway, setBuildingNight } from './render/building-mesh.js';
 import { loadTownKit } from './render/town-kit-mesh.js';
+import { createPropsView } from './render/props-mesh.js';
+import { createPropPhysics } from './physics/props.js';
 import { setHeadlightBeams } from './render/headlights.js';
 import { GroundSurface, PATCH_N } from './render/ground-surface.js';
 import { showRutsOnSheet } from './render/rock-surface.js';
@@ -158,6 +160,10 @@ async function main() {
     // iterations leave it leaning and trembling at rest. 8 settles it level and still.
     physicsWorld.numSolverIterations = 8;
   }
+
+  // The sunny town's loose crates and cones: drawn here, simulated where the physics runs.
+  const propsView = heightAt.buildingKit ? createPropsView(render.scene, heightAt) : null;
+  const propPhysics = heightAt.buildingKit && physicsWorld ? createPropPhysics(RAPIER, physicsWorld, heightAt) : null;
 
   world.add(Time, Input, TerrainStreaming);
   world.get(Input).headlights = night;
@@ -314,6 +320,12 @@ async function main() {
         const p = player.get(Vehicle).body.translation();
         water?.update(p.x, p.z);
         setBuildingCutaway(p, render.activeCamera);
+        if (propsView) {
+          propPhysics?.update(p.x, p.z);
+          propsView.update(p.x, p.z);
+          if (remote) for (const poses of remote.propPoses.splice(0)) propsView.apply(poses);
+          else propsView.apply(propPhysics.moved());
+        }
       }
       if (player) {
         const canvas = render.renderer.domElement;

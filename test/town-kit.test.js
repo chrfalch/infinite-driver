@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createHeightField } from '../src/terrain/height.js';
 import { buildingsAround, generateBuildings, insideBuilding } from '../src/terrain/buildings.js';
 import { generatePlants } from '../src/terrain/vegetation.js';
+import { generateProps } from '../src/terrain/props.js';
 import { KERB } from '../src/terrain/town.js';
 import { TOWN_KIT } from '../src/terrain/town-kit.js';
 import { buildingsMeshData } from '../src/render/building-mesh.js';
@@ -76,6 +77,39 @@ describe('sunny town', () => {
     for (let cx = -6; cx <= 6; cx++) for (let cz = -6; cz <= 6; cz++) all.push(...generateBuildings(town, cx, cz));
     for (const { building: b } of all) expect(town.sample(b.x, b.z).park).toBeLessThan(0.05);
     for (let cx = -3; cx <= 3; cx++) for (let cz = -3; cz <= 3; cz++) for (const p of generatePlants(town, cx, cz)) expect(town.sample(p.x, p.z).park).toBeLessThan(0.06);
+  });
+
+  it('jumps some streets over the river, with a kicker on one bank', () => {
+    let lips = 0;
+    for (let x = -700; x < 700; x += 1.5) {
+      for (let z = -700; z < 700; z += 1.5) {
+        const s = town.sample(x, z);
+        const out = s.riverDist - s.riverHalf;
+        // A lip: the road high right at the water's edge (no embankment there).
+        if (s.dist < 1 && out > 0.6 && out < 2 && s.h > 3) lips++;
+      }
+    }
+    expect(lips).toBeGreaterThan(5);
+  });
+
+  it('ramps driveways up onto some raised blocks, and builds nothing across them', () => {
+    let ramps = 0;
+    for (let x = -300; x < 300; x += 2) for (let z = -300; z < 300; z += 2) if (town.sample(x, z).driveway > 0.95) ramps++;
+    expect(ramps).toBeGreaterThan(200);
+    const all = [];
+    for (let cx = -4; cx <= 4; cx++) for (let cz = -4; cz <= 4; cz++) all.push(...generateBuildings(town, cx, cz));
+    for (const { building: b } of all) expect(town.sample(b.x, b.z).driveway).toBeLessThan(0.05);
+  });
+
+  it('scatters crates and cones the same way every time', () => {
+    const props = [];
+    for (let cx = -4; cx <= 4; cx++) for (let cz = -4; cz <= 4; cz++) props.push(...generateProps(town, cx, cz));
+    expect(props.filter((p) => p.kind === 'cone').length).toBeGreaterThan(30);
+    expect(props.filter((p) => p.kind === 'crate').length).toBeGreaterThan(6);
+    for (const p of props) expect(Math.abs(p.y - town(p.x, p.z))).toBeLessThan(3.1); // stacked at most two crates up
+    const fresh = createHeightField({ mode: 'daytown' });
+    expect(generateProps(fresh, 1, -1)).toEqual(generateProps(town, 1, -1));
+    expect(generateProps(createHeightField({ mode: 'town' }), 0, 0)).toEqual([]);
   });
 
   it('lines its streets with rows of buildings', () => {

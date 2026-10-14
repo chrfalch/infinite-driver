@@ -254,7 +254,8 @@ function footprintGround(heightAt, x, z, ux, uz, nx, nz, w, d) {
   let hi = -Infinity;
   for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1], [-1, 0], [1, 0], [0, 0]]) {
     const ps = heightAt.sample(x + ux * a * w * 0.5 + nx * b * d * 0.5, z + uz * a * w * 0.5 + nz * b * d * 0.5);
-    if (ps.dist < KERB + 0.4 || ps.riverDist < ps.riverHalf + 4 || ps.park > 0.05) return null;
+    // (Nor across a driveway up onto the block, or in a stunt park.)
+    if (ps.dist < KERB + 0.4 || ps.riverDist < ps.riverHalf + 4 || ps.park > 0.05 || ps.driveway > 0.05) return null;
     if (ps.h < 0.6 || ps.mountain > 3) return null;
     lo = Math.min(lo, ps.h);
     hi = Math.max(hi, ps.h);
@@ -273,7 +274,7 @@ const segments = new WeakMap();
 
 // The centre line of street k of family f at `t` along it (x or z), with its unit normal (toward
 // growing `across`): Newton steps on the family's field.
-function streetPoint(f, k, t) {
+export function streetPoint(f, k, t) {
   const target = k * f.spacing;
   let v = target;
   const at = (v) => (f.alongX ? f.across(t, v) : f.across(v, t));
@@ -475,7 +476,7 @@ function landmarkAt(heightAt, ci, cj) {
 
 // Where the east-west family's field is a0 and the north-south one's a1 (a junction of streets
 // k0 and k1 at a0 = k0 spacing0, a1 = k1 spacing1): Newton steps on both fields.
-function crossing(heightAt, a0, a1, x = a1, z = a0) {
+export function crossing(heightAt, a0, a1, x = a1, z = a0) {
   const [f0, f1] = heightAt.streetFamilies;
   for (let it = 0; it < 16; it++) {
     const a = f0.across(x, z) - a0;
