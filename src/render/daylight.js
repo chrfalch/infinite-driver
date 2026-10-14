@@ -1,10 +1,10 @@
 // Lights the scene for an hour of the day (render/time-of-day.js): the sun or moon's light and
 // direction, the skylight, the sky and haze colours, and the things that come on in the dark (the
-// town's windows, the headlight beams, a dimmer glow in powder snow).
+// town's windows, the player's headlights, a dimmer glow in powder snow).
 import { Color } from 'three/webgpu';
 import { setBuildingNight } from './building-mesh.js';
 import { sky, worldLook } from './backdrop.js';
-import { setHeadlightBeams } from './headlights.js';
+import { setHeadlightDarkness } from './headlights.js';
 import { setPowderGlow } from './soil-particles.js';
 import { lightingAt, skyPalette } from './time-of-day.js';
 
@@ -13,9 +13,8 @@ import { lightingAt, skyPalette } from './time-of-day.js';
 const ORTHO_FOG = [125, 210];
 const DAY_FOG = [80, 210];
 const NIGHT_FOG = [20, 120];
-// Darker than this and the headlights cast their beams; the player's lights switch on (or off)
-// when the hour is set across it.
-const BEAMS_AT = 0.3;
+// The player's lights switch on (or off) when the hour is set across this darkness; H still
+// switches them at any time.
 const LIGHTS_ON_AT = 0.5;
 
 export function createDaylight(render, world) {
@@ -57,7 +56,7 @@ export function createDaylight(render, world) {
       this.perspectiveFog[1] = DAY_FOG[1] + (NIGHT_FOG[1] - DAY_FOG[1]) * l.dark;
 
       setBuildingNight(l.dark);
-      setHeadlightBeams(l.dark > BEAMS_AT);
+      setHeadlightDarkness(l.dark);
       // The powder's scattered glow is only the faint skylight's at night.
       setPowderGlow(1 + (0.08 - 1) * l.dark);
       const isDark = l.dark > LIGHTS_ON_AT;

@@ -217,7 +217,11 @@ export const headlampMaterial = new MeshStandardMaterial({ color: '#fff4d6', emi
 // The headlamp lenses' centre (design frame, right side; the builder stretches x), for the lights.
 export const HEADLAMP = Object.freeze({ x: 2.155, y: 0.22, z: 0.32 });
 const lampBody = new MeshStandardMaterial({ color: '#1d1e20', roughness: 0.4, metalness: 0.6 });
-// Tail light lens: a dim red glow while driving, bright when braking (set per frame by the game).
+// Tail lamp lens: dark red with the lights off, a steady red glow with them on (set per frame by the game).
+export const tailLampMaterial = new MeshStandardMaterial({ color: '#5a0c0c', emissive: '#ff1e12', emissiveIntensity: 0, roughness: 0.25 });
+// The round tail lamps' centre (design frame, right side; the builder stretches x), for the lights.
+export const TAILLAMP = Object.freeze({ x: -2.47, y: 0.1, z: 0.36 });
+// Brake light lens: a dim red glow while driving, bright when braking (set per frame by the game).
 export const brakeLightMaterial = new MeshStandardMaterial({ color: '#7a1010', emissive: '#ff2a1a', emissiveIntensity: 0.25, roughness: 0.3 });
 
 // Sand buggy after the user's reference: few, thick tubes in long flowing bends; low wide rockers
@@ -326,6 +330,15 @@ const sandBuggy = {
       lens.position.set(b.x(-2.478), -0.02, s * 0.36);
       const bracket = b.mesh(new BoxGeometry(0.06, 0.02, 0.04), lampBody);
       bracket.position.set(b.x(-2.42), 0.04, s * 0.4);
+    }
+    // Round tail lamps above the brake lights, switched with the headlights (see tailLampMaterial).
+    for (const s of [1, -1]) {
+      const body = b.mesh(new CylinderGeometry(0.05, 0.042, 0.05, 20), lampBody);
+      body.rotation.z = Math.PI / 2;
+      body.position.set(b.x(TAILLAMP.x + 0.025), TAILLAMP.y, s * TAILLAMP.z);
+      const lens = b.mesh(new CylinderGeometry(0.044, 0.044, 0.008, 20), tailLampMaterial);
+      lens.rotation.z = Math.PI / 2;
+      lens.position.set(b.x(TAILLAMP.x), TAILLAMP.y, s * TAILLAMP.z);
     }
     // Round lamps on top of the nose box, facing forward.
     const { y, z } = HEADLAMP;

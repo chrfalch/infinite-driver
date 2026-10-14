@@ -14,7 +14,7 @@ const BUTTONS = [
   { code: 'Space', label: 'Handbrake', area: 'hand', title: 'Handbrake', small: true },
   { code: 'ShiftLeft', label: 'Hold throttle', area: 'hold', title: 'Lock the throttle where it is', small: true },
   { code: 'KeyX', label: 'Diff lock', area: 'lock', title: 'Step the differential locks', small: true },
-  { code: 'KeyH', label: 'Lights', area: 'lights', title: 'Headlights on / off', small: true },
+  { code: 'KeyH', label: 'Lights', area: 'lights', title: 'Lights on / off', small: true },
 ];
 
 export function isTouchDevice() {
