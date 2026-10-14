@@ -46,6 +46,7 @@ import { createWater } from './render/water.js';
 import { setBuildingCutaway } from './render/building-mesh.js';
 import { loadTownKit } from './render/town-kit-mesh.js';
 import { createPropsView } from './render/props-mesh.js';
+import { createTrackMarkersView } from './render/track-markers-mesh.js';
 import { createPropPhysics } from './physics/props.js';
 import { GroundSurface, PATCH_N } from './render/ground-surface.js';
 import { showRutsOnSheet } from './render/rock-surface.js';
@@ -162,6 +163,8 @@ async function main() {
   // The sunny town's loose crates and cones: drawn here, simulated where the physics runs.
   const propsView = heightAt.buildingKit ? createPropsView(render.scene, heightAt) : null;
   const propPhysics = heightAt.buildingKit && physicsWorld ? createPropPhysics(RAPIER, physicsWorld, heightAt) : null;
+  // The dry river's course markers: flags, chevron boards, tyre stacks and the start gantry.
+  const trackMarkers = heightAt.beds ? createTrackMarkersView(render.scene, heightAt) : null;
 
   world.add(Time, Input, TerrainStreaming);
   world.get(Input).headlights = night;
@@ -325,6 +328,10 @@ async function main() {
       orbitCamera(readCameraKeys(), time.delta);
       timed('sys.followCamera', () => followCamera(world));
       const player = world.queryFirst(IsPlayer, Vehicle);
+      if (player && trackMarkers) {
+        const p = player.get(Vehicle).body.translation();
+        timed('sys.trackMarkers', () => trackMarkers.update(p.x, p.z));
+      }
       if (player && heightAt.town) {
         const p = player.get(Vehicle).body.translation();
         water?.update(p.x, p.z);
