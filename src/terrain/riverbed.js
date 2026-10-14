@@ -1,7 +1,7 @@
 // Dry river country: a winding, dry river bed floored with one continuous sheet of faceted sandstone
 // that rises into walls of tall boulders along its banks, with open gum forest either side, on
 // ground level with the bank tops. The bed only climbs (toward +x), in a staircase of level rock shelves and
-// short steep risers, and it narrows to a tight gap between the walls and opens out again along its
+// short steep risers (bunched into cascades here, spread into long level runs there), and it narrows to a tight gap between the walls and opens out again along its
 // length. Like the canyon, everything comes from one deterministic height
 // function, so physics colliders, the GPU tyre ground grid, tracks, soil and the render mesh agree.
 //
@@ -17,8 +17,14 @@
 // the drawn rock mesh (render/rock-surface.js) their shape. Toward the banks the domes grow tall and
 // steep into boulder walls the car cannot climb.
 //
-// Hard but drivable: shelves 5-10 m long, risers 2-3 m long climbing 0.6-2 m (about 15-35°, the
-// car climbs 30° in low range); the humps stand 15-45 cm over the creases between them. The bed is
+// The steps are worn like a real river's: their edges wander and lean across the bed, their risers
+// are bare rock with blocks along the lip and at the foot (the gravel lies on the shelves, in drifts
+// below the steps), and where the low channel crosses a step the water has carved a spillway into it
+// (a smooth slot worn back into the lip, gentler than the riser either side, with a plunge pool at
+// its foot).
+//
+// Hard but drivable: shelves 1.5-20 m long, risers 2-3 m long climbing 0.6-2 m (about 20-35°, the
+// car climbs 30° in low range; 12-20° up a spillway); the humps stand 15-45 cm over the creases between them. The bed is
 // 1.3-7.5 m either side of its centre line; its walls and banks move
 // with it, so everything shaped by the distance from the bed uses bankDistance: the distance as
 // if the bed were the usual BED_HALF_WIDTH.
@@ -32,16 +38,30 @@ export const ROCK_EDGE = 8.2;
 export const ROCK_REACH = 9.4;
 const SPACING = 360; // m between neighbouring beds
 const WIDTH_RANGE = [1.3, 7.5]; // m, the bed's half-width along its length
-// The staircase: a riser every STEP_PERIOD m (give or take STEP_JITTER), climbing STEP_RISE m
-// (give or take STEP_VARY) over 2-3 m, then a level shelf up to the next.
+// The staircase: a riser every STEP_PERIOD m (give or take STEP_JITTER) of a warped way along the
+// bed, climbing STEP_RISE m (give or take STEP_VARY) over 2-3 m, then a level shelf up to the next.
+// The warp (STEP_WARP m, over a few hundred metres) bunches the risers into cascades of short
+// shelves and spreads them into long level runs, so the stairs have no steady beat.
 const STEP_PERIOD = 10;
+const STEP_WARP = 42;
 const STEP_JITTER = 1.5;
 const STEP_RISE = 1.3;
 const STEP_VARY = 0.35;
 const RISER_LENGTH = [2, 3];
-const RISER_ANGLE = [22, 32]; // degrees: picks the riser's length for its rise (within RISER_LENGTH)
+const RISER_ANGLE = [21, 30]; // degrees: picks the riser's length for its rise (within RISER_LENGTH)
 const ARC_STEP = 1; // m of x per slice when measuring the way along a bed
-const RISER_ROUND = 0.12; // share of a riser's length its top and bottom edges are rounded over
+// Shares of a riser's length its top and bottom edges are rounded over: a sharp lip, a softer foot.
+const LIP_ROUND = 0.06;
+const FOOT_ROUND = 0.18;
+// The step edges are not straight across the bed: each wanders up and down the bed by about
+// EDGE_WANDER m, leans across it, and is cut back by EDGE_NOTCH m where the low channel crosses it.
+// There the water has carved a spillway: a slot worn back into the lip, its riser up to
+// SPILL_STRETCH times longer (so gentler: the line to drive), and a plunge pool scoured at its foot.
+const EDGE_WANDER = 1.3;
+const EDGE_LEAN = 0.3;
+const EDGE_NOTCH = 0.8;
+const SPILL_STRETCH = 1.9;
+const POOL_DEPTH = 0.28; // m per m of the next step's rise (at most 0.4 m)
 const SIDES = 7; // side planes per boulder
 // Soil pockets: firm earth fills the bed's creases and hollows up to a level that wanders between
 // none and about 1.3 x SOIL_LEVEL over the ground beneath, so the rock humps stand out of flat patches of soil.
@@ -129,6 +149,7 @@ export function createRiverField(seed = 4711) {
   const chipNoise = createNoise2D(rand);
   const soilNoise = createNoise2D(rand);
   const widthNoise = createNoise2D(rand);
+  const edgeNoise = createNoise2D(rand);
 
   // Warped coordinate across the beds; a bed is where it is a multiple of the spacing. Long gentle
   // bends plus shorter wiggles.
@@ -195,38 +216,113 @@ export function createRiverField(seed = 4711) {
   const widthAt = (s, k) =>
     Math.min(WIDTH_RANGE[1], Math.max(WIDTH_RANGE[0], BED_HALF_WIDTH + 4.4 * widthNoise(s * 0.0105, 0.5 + 9 * k) + 1.2 * widthNoise(s * 0.043, 7.5 + 9 * k)));
 
-  // The staircase. Riser i starts at edge(i) and climbs from shelf i - 1 to shelf i; the shelves
-  // stand at shelf(i), a steady climb plus a bounded wobble, so every riser goes up. Each bed (k)
-  // has its own.
+  // The staircase, on a warped way along the bed (w), which runs 0.5-1.5 m per metre of s: where
+  // it runs fast the risers bunch into a cascade, where it runs slow the shelves stretch out. Three
+  // waves of a few hundred metres, their phases per bed (k); `rate` is dw/ds.
+  const WAVES = [
+    [0.5, 0.0061],
+    [0.3, 0.017],
+    [0.2, 0.041],
+  ];
+  let phaseK = NaN;
+  const phases = [0, 0, 0];
+  // Sets warped.w and warped.rate at `s`.
+  const warped = { w: 0, rate: 1 };
+  const warpAt = (s, k) => {
+    if (k !== phaseK) {
+      for (let j = 0; j < 3; j++) phases[j] = 6.2832 * hash2(k, j, 504);
+      phaseK = k;
+    }
+    let w = s;
+    let r = 1;
+    for (let j = 0; j < 3; j++) {
+      const a = WAVES[j][1] * s + phases[j];
+      w += STEP_WARP * WAVES[j][0] * Math.sin(a);
+      r += STEP_WARP * WAVES[j][0] * WAVES[j][1] * Math.cos(a);
+    }
+    warped.w = w;
+    warped.rate = r;
+    return warped;
+  };
+  const warp = (s, k) => {
+    if (k !== phaseK) warpAt(0, k);
+    let w = s;
+    for (let j = 0; j < 3; j++) w += STEP_WARP * WAVES[j][0] * Math.sin(WAVES[j][1] * s + phases[j]);
+    return w;
+  };
+  // Riser i starts at edge(i) (in w) and climbs from shelf i - 1 to shelf i; the shelves stand at
+  // shelf(i), a steady climb plus a bounded wobble, so every riser goes up. Each bed (k) has its own.
   const edge = (i, k) => i * STEP_PERIOD + STEP_JITTER * (2 * hash2(i, k, 501) - 1);
+  // Where along the bed (s) riser i starts: where the warped way reaches its edge (cached).
+  const starts = new Map();
+  const start = (i, k) => {
+    const key = k * 1048576 + i;
+    let s = starts.get(key);
+    if (s === undefined) {
+      if (starts.size > 100000) starts.clear();
+      const e = edge(i, k);
+      s = e;
+      for (let n = 0; n < 6; n++) {
+        const at = warpAt(s, k);
+        s -= (at.w - e) / at.rate;
+      }
+      starts.set(key, s);
+    }
+    return s;
+  };
   const shelf = (i, k) => i * STEP_RISE + STEP_VARY * (2 * hash2(i, k, 502) - 1);
   const riser = (i, k) => {
     const rise = shelf(i, k) - shelf(i - 1, k);
     const angle = (RISER_ANGLE[0] + (RISER_ANGLE[1] - RISER_ANGLE[0]) * hash2(i, k, 503)) * (Math.PI / 180);
     return Math.min(RISER_LENGTH[1], Math.max(RISER_LENGTH[0], rise / Math.tan(angle)));
   };
-  // A riser's climb over t = 0..1 of its length: a straight ramp with its edges rounded over.
-  const c = RISER_ROUND;
+  // A riser's climb over t = 0..1 of its length: a straight ramp with its foot rounded over a
+  // little more than its lip.
   const ramp = (t) => {
-    const m = 1 / (1 - c); // the ramp's slope between the rounded edges
+    const a = FOOT_ROUND;
+    const c = LIP_ROUND;
+    const m = 1 / (1 - (a + c) / 2); // the ramp's slope between the rounded edges
     if (t <= 0) return 0;
     if (t >= 1) return 1;
-    if (t < c) return (m * t * t) / (2 * c);
+    if (t < a) return (m * t * t) / (2 * a);
     if (t > 1 - c) return 1 - (m * (1 - t) * (1 - t)) / (2 * c);
-    return m * (t - c / 2);
+    return m * (t - a / 2);
   };
-  // Bed floor height at `s` along the bed.
-  function floorAlong(s, k) {
-    let i = Math.floor(s / STEP_PERIOD) + 1;
-    while (edge(i, k) > s) i--;
-    const t = (s - edge(i, k)) / riser(i, k);
-    return shelf(i - 1, k) + (shelf(i, k) - shelf(i - 1, k)) * ramp(t);
+  // Where `s` along the bed is on the staircase: the floor height, and (in m along the bed) how far
+  // it is past the start of the riser it is on or above (`past`), that riser's length and rise,
+  // and how far it is to the start of the next riser up (`next`) and its rise. `stretch` lengthens the riser up
+  // the bed (a spillway), short of the next one.
+  const step = { y: 0, past: 0, len: 1, rise: 0, next: 0, nextRise: 0 };
+  function stairAt(s, k, stretch = 1) {
+    const w = warp(s, k);
+    let i = Math.floor(w / STEP_PERIOD) + 1;
+    while (edge(i, k) > w) i--;
+    const from = start(i, k);
+    const to = start(i + 1, k);
+    let len = riser(i, k);
+    if (stretch > 1) len = Math.min(len * stretch, Math.max(len, to - from - 1.5));
+    const past = s - from;
+    const lo = shelf(i - 1, k);
+    const hi = shelf(i, k);
+    step.y = lo + (hi - lo) * ramp(past / len);
+    step.past = past;
+    step.len = len;
+    step.rise = hi - lo;
+    step.next = to - s;
+    step.nextRise = shelf(i + 1, k) - hi;
+    return step;
   }
+  // Bed floor height at `s` along the bed.
+  const floorAlong = (s, k, stretch) => stairAt(s, k, stretch).y;
+  // How far the step edges are pushed up the bed (m of s) at `d` m across it (`channel`: how close
+  // to the low channel it is, 0-1).
+  const edgeShift = (d, s, k, channel) =>
+    EDGE_WANDER * (edgeNoise(d * 0.22, s * 0.012 + 7 * k) + 0.3 * edgeNoise(d * 0.75 + 20, s * 0.025 + 7 * k)) + (d && EDGE_LEAN * edgeNoise(s * 0.013, 40.5 + 7 * k) * d) + EDGE_NOTCH * channel;
   // The land far from the beds: their mean climb, blended between the two either side.
   function landAt(px, pz) {
     const f = across(px, pz) / SPACING;
     const k = Math.floor(f);
-    const climb = (kk) => (along(px, kk) * STEP_RISE) / STEP_PERIOD;
+    const climb = (kk) => (warp(along(px, kk), kk) * STEP_RISE) / STEP_PERIOD;
     return climb(k) + (climb(k + 1) - climb(k)) * smoothstep(0, 1, f - k);
   }
 
@@ -234,29 +330,57 @@ export function createRiverField(seed = 4711) {
   // Everything the renderer needs at a point; heightAt uses only .h.
   function sample(x, z) {
     const b = bed(x, z);
-    // The bed is level side to side: its floor is taken at the centre line (so the risers run
-    // straight across it), and so is the land either side, out to where the next bed takes over.
+    // The bed's floor goes by the way along it at the centre line (shifted by the step edges'
+    // wander, below), and so does the land either side, out to where the next bed takes over.
     const cxl = x - b.gx * b.d;
     const czl = z - b.gz * b.d;
     const s = along(cxl, b.k);
     // Distance from the bed as if it were BED_HALF_WIDTH wide: the walls and banks move with it.
-    const dist = Math.abs(b.d) - (widthAt(s, b.k) - BED_HALF_WIDTH);
-    const centre = floorAlong(s, b.k);
-    // The land is level with the bank tops: the bed is a channel cut into it, and it steps up with
-    // the bed's stairs. Past the bed's edge it goes by the floor a few metres further up (the floor
-    // only climbs), so the banks beside a riser stand over the shelf at its top as well as the one
-    // at its foot. Far out it eases onto the mean climb, blended with the next bed's.
-    const ahead = floorAlong(s + 6 * smoothstep(BED_HALF_WIDTH + 0.5, BED_HALF_WIDTH + 4.5, dist), b.k);
-    const far = smoothstep(120, 170, dist);
-    const floor = far > 0 ? ahead + (landAt(x, z) - ahead) * far : ahead;
-    const inBed = 1 - smoothstep(BED_HALF_WIDTH - 0.5, BED_HALF_WIDTH + 2.5, dist);
-
-    let h = floor;
+    const width = widthAt(s, b.k);
+    const dist = Math.abs(b.d) - (width - BED_HALF_WIDTH);
     // A shallow, meandering low channel down the bed (the last water ran there).
     const wander = 1.4 * wanderNoise(cxl * 0.02 + 11, czl * 0.02);
     const ch = b.d - wander;
     const channel = Math.exp(-(ch * ch) / 2.2);
-    h -= 0.12 * channel;
+    // The spillways, a little wider than the channel (the car fits in them).
+    const spill = Math.exp(-(ch * ch) / 3.2);
+    const spillAt = (sp) => 1 + (SPILL_STRETCH - 1) * sp;
+    // The way along the bed the staircase goes by here: shifted by the step edges' wander (the same
+    // either side of the bed's edge, out into the banks).
+    const reach = width + 1;
+    const sb = s - edgeShift(Math.max(-reach, Math.min(reach, b.d)), s, b.k, spill);
+    const spillC = Math.exp(-(wander * wander) / 3.2);
+    const centre = floorAlong(s - edgeShift(0, s, b.k, spillC), b.k, spillAt(spillC));
+    // The land is level with the bank tops: the bed is a channel cut into it, and it steps up with
+    // the bed's stairs. Past the bed's edge it goes by the floor a few metres further up (the floor
+    // only climbs), so the banks beside a riser stand over the shelf at its top as well as the one
+    // at its foot. Far out it eases onto the mean climb, blended with the next bed's.
+    // Around a step in the bed: `ledge` over the riser and just past its lip (bare rock, blocks),
+    // `foot` at its foot (blocks fallen off the lip, a shallow scour), and `bar` the gravel the
+    // last water dropped on the shelf below it, a couple of metres on.
+    const inBed = 1 - smoothstep(BED_HALF_WIDTH - 0.5, BED_HALF_WIDTH + 2.5, dist);
+    const st = stairAt(sb, b.k, spillAt(spill * inBed));
+    const tall = smoothstep(0.4, 0.9, st.rise); // (only steps of some size drop blocks)
+    // (Ragged: the bare rock runs on past some stretches of the lip, and the gravel lies in drifts.)
+    const ragged = edgeNoise(x * 0.4 + 31, z * 0.4);
+    const ledge = inBed * (1 - smoothstep(st.len + 0.2, st.len + 1.2, st.past - 1.2 * ragged));
+    // (Both fade out at the riser's start, so the ground stays continuous there.)
+    const foot = inBed * tall * smoothstep(0, 0.5, st.next) * Math.exp(-((st.next - 0.6) ** 2) / 0.8);
+    const bar = inBed * smoothstep(0.8, 2, st.next) * (1 - smoothstep(3.5, 6, st.next)) * smoothstep(-0.2, 0.5, -ragged);
+    // The plunge pool below the next spillway up, and `scour`: where the water wore the rock smooth
+    // (the spillway's slot and its pool), with no loose rocks or blocks.
+    const pool = inBed * spill * smoothstep(0.4, 0.9, st.nextRise) * smoothstep(0, 1.2, st.next) * Math.exp(-((st.next - 2.4) ** 2) / 2.9);
+    const poolDepth = Math.min(0.4, POOL_DEPTH * st.nextRise) * pool;
+    const scour = Math.max(pool, inBed * spill * (1 - smoothstep(st.len, st.len + 1.5, st.past)));
+    const stepRise = st.rise;
+    const lookAhead = 6 * smoothstep(BED_HALF_WIDTH + 0.5, BED_HALF_WIDTH + 4.5, dist);
+    const ahead = lookAhead > 0 ? floorAlong(sb + lookAhead, b.k) : st.y;
+    const far = smoothstep(120, 170, dist);
+    const floor = far > 0 ? ahead + (landAt(x, z) - ahead) * far : ahead;
+
+    let h = floor;
+    h -= 0.16 * channel;
+    h -= 0.08 * foot * stepRise + poolDepth;
     // Banks: rise 0.6-1.5 m off the bed edge, uneven along the bed.
     const bankRise = 0.6 + 0.9 * (0.5 + 0.5 * bankNoise(x * 0.018, z * 0.018));
     const bank = smoothstep(BED_HALF_WIDTH, BED_HALF_WIDTH + 4.5, dist);
@@ -283,23 +407,28 @@ export function createRiverField(seed = 4711) {
     if (zone > 0) {
       const wall = smoothstep(BED_HALF_WIDTH + 0.6, BED_HALF_WIDTH + 2.4, dist);
       // Patches of small rocks and of bigger boulders, changing every 20-30 m (walls: big).
-      const big = Math.max(wall, smoothstep(-0.35, 0.35, sizeNoise(x * 0.035, z * 0.035)));
+      // At a step: boulders only.
+      const big = Math.max(wall, ledge * (1 - scour), foot * (1 - scour), smoothstep(-0.35, 0.35, sizeNoise(x * 0.035, z * 0.035)));
       // Soil pockets: how high the soil lies here (a share of SOIL_LEVEL), in patches some metres
       // across, deeper in the low channel where the last water left its silt. Where it lies deep,
       // the small rocks are mostly buried, so the pockets run on for metres between boulders.
       const n = 0.5 + 0.5 * (0.75 * soilNoise(x * 0.045, z * 0.045) + 0.25 * soilNoise(x * 0.25 + 9, z * 0.25));
-      const want = (1 - wall) * (1.45 * n - 0.15 + 0.45 * channel);
+      // None on a riser (the water swept it bare), more on the bar below it.
+      const want = (1 - wall) * (1 - ledge) * Math.min(1.4, 1.45 * n - 0.15 + 0.45 * channel + 0.35 * bar);
       const buried = smoothstep(0.55, 0.95, want);
       // Small rocks, about a metre across.
       layer(x, z, 1.1, 100, (hx, hz) => {
         const r = hash2(hx, hz, 102);
-        return { tall: 0.26 * (0.75 + 0.5 * r) * (1 - 0.8 * big) * (1 - 0.75 * buried), steep: 1.1, a: 0.5 * (0.8 + 0.4 * r), b: 0.5 * (0.8 + 0.4 * r) };
+        return { tall: 0.26 * (0.75 + 0.5 * r) * (1 - 0.8 * big) * (1 - 0.75 * buried) * (1 - 0.8 * scour), steep: 1.1, a: 0.5 * (0.8 + 0.4 * r), b: 0.5 * (0.8 + 0.4 * r) };
       }, top);
       // Boulders, 2-3 m across, rising into the walls.
       layer(x, z, 2.2, 200, (hx, hz) => {
         const r = hash2(hx, hz, 202);
         const size = (0.9 + 0.3 * r) * (1 + 0.5 * wall);
-        return { tall: 0.45 * (0.75 + 0.5 * r) * (0.3 + 0.7 * big) + 1.2 * wall, steep: 0.9 + 0.9 * wall, a: size, b: size * (0.8 + 0.3 * hash2(hx, hz, 203)) };
+        // Blockier and taller along a step's lip and at its foot (the lip breaks up into them).
+        // Worn down to low smooth humps in a spillway and its pool.
+        const blocks = Math.max(ledge, foot) * (1 - wall) * (1 - scour);
+        return { tall: 0.45 * (0.75 + 0.5 * r) * (0.3 + 0.7 * big) * (1 + 0.3 * blocks) * (1 - 0.7 * scour) + 1.2 * wall, steep: 0.9 + 0.9 * wall + 0.5 * blocks, a: size, b: size * (0.8 + 0.3 * hash2(hx, hz, 203)) };
       }, top);
       // Big slabs, 8-11 m long and 3-4.5 m wide, in the bed only.
       if (wall < 1) {
@@ -308,7 +437,7 @@ export function createRiverField(seed = 4711) {
           const r = hash2(hx, hz, 302);
           // Flat-topped (a gentle upper ring), 0.4-0.7 m tall: under the car's belly (0.62 m), so
           // it climbs on rather than beaching on the edge.
-          return { tall: (0.4 + 0.3 * r) * (1 - wall), steep: 0.75, a: 4 + 1.5 * hash2(hx, hz, 303), b: 1.5 + 0.75 * r, gentle: 0.15 };
+          return { tall: (0.4 + 0.3 * r) * (1 - wall) * (1 - 0.8 * scour), steep: 0.75, a: 4 + 1.5 * hash2(hx, hz, 303), b: 1.5 + 0.75 * r, gentle: 0.15 };
         }, top);
       }
       // A rough, chipped skin over every boulder: V-shaped creases (|noise|) at two scales, a few
@@ -326,13 +455,13 @@ export function createRiverField(seed = 4711) {
       // here would stand), so the bed is a gorge cut into level ground.
       const flush = smoothstep(BED_HALF_WIDTH - 1, BED_HALF_WIDTH + 0.6, dist);
       if (flush > 0) {
-        const landTop = floorAlong(s + 6, b.k) + bankRise + forest * 0.5 * hill + 0.25 * bankNoise(x * 0.12, z * 0.12);
+        const landTop = floorAlong(sb + 6, b.k) + bankRise + forest * 0.5 * hill + 0.25 * bankNoise(x * 0.12, z * 0.12);
         const capped = Math.max(0.04 * zone, -smoothMax(-stone, under - landTop, 0.3));
         stone += (Math.min(stone, capped) - stone) * flush;
       }
       h += stone;
     }
-    return { h, under, stone, soil, stoneId: top.id, rockZone: zone, road: inBed, rut: channel * inBed, dist, rock, bank, cliff: ridge, bedY: centre };
+    return { h, under, stone, soil, stoneId: top.id, rockZone: zone, road: inBed, rut: channel * inBed, spill: scour, dist, rock, bank, cliff: ridge, bedY: centre };
   }
 
   const heightAt = (x, z) => sample(x, z).h;
