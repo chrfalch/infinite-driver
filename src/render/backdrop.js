@@ -39,6 +39,7 @@ const LOOKS = {
     steps: 8,
     scale: 0.75,
     haze: [0.55, 0.3],
+    fog: [120, 320],
   },
   // Snowfield, at night: a starry sky, a faint glow low on the horizon, and snow-capped ranges
   // standing dark against it. `night`: the scene is lit by the moon and the car's headlights;

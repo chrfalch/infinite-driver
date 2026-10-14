@@ -169,6 +169,12 @@ export function createTownField(seed = 31, world = 'town') {
   heightAt.paved = true;
   heightAt.waterLevel = WATER_LEVEL;
   heightAt.wildAt = wildAt;
+  // The two street families, for walking along a street (terrain/buildings.js): a street is where
+  // `across` is a multiple of `spacing`; it runs roughly along x (`alongX`) or z.
+  heightAt.streetFamilies = [
+    { across: acrossX, spacing: SPACING_X, alongX: true },
+    { across: (x, z) => acrossZ(x, z) + OFFSET_Z, spacing: SPACING_Z, alongX: false },
+  ];
   heightAt.town = true;
   heightAt.world = world;
   heightAt.buildingKit = world === 'daytown';

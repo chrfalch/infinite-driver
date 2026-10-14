@@ -9,13 +9,13 @@
 import { BufferAttribute, BufferGeometry, Color, Mesh } from 'three/webgpu';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { TOWN_KIT } from '../terrain/town-kit.js';
-import { WALLS } from '../terrain/buildings.js';
 import { kitBuildingMaterial } from './building-mesh.js';
 
+const KIT_BY_NAME = new Map(TOWN_KIT.map((k) => [k.name, k]));
 const MODEL_URL = () => `${(typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL) || '/'}models/town-kit.glb`;
 
-// Per kit name: { positions, normals, colors, glass, wall, index } in the model's frame (`wall`:
-// 1 on the main walls, which each building repaints).
+// Per kit name: { positions, normals, colors, glass, paint, index } in the model's frame (`paint`:
+// 1 on the main walls, 2 on the main roof, which each building may repaint).
 let prototypes = null;
 let loading = null;
 
@@ -55,7 +55,7 @@ function mergeParts(parts) {
   const normals = new Float32Array(vertices * 3);
   const colors = new Float32Array(vertices * 3);
   const glass = new Float32Array(vertices);
-  const wall = new Uint8Array(vertices);
+  const paint = new Uint8Array(vertices);
   const index = new Uint32Array(indices);
   let v = 0;
   let k = 0;
@@ -85,8 +85,9 @@ function mergeParts(parts) {
         colors[o] = col.getX(i);
         colors[o + 1] = col.getY(i);
         colors[o + 2] = col.getZ(i);
-        // The main walls are marked by half alpha (see scripts/town-kit/build_kit.py).
-        wall[v + i] = col.itemSize === 4 && col.getW(i) < 0.75 ? 1 : 0;
+        // The main walls are marked by alpha 0.5, the main roof by 0.25 (scripts/town-kit/build_kit.py).
+        const alpha = col.itemSize === 4 ? col.getW(i) : 1;
+        paint[v + i] = alpha < 0.375 ? 2 : alpha < 0.75 ? 1 : 0;
       } else colors.fill(1, o, o + 3);
       glass[v + i] = isGlass;
     }
@@ -94,11 +95,19 @@ function mergeParts(parts) {
     else for (let i = 0; i < pos.count; i++) index[k++] = i + v;
     v += pos.count;
   }
-  return { positions, normals, colors, glass, wall, index };
+  return { positions, normals, colors, glass, paint, index };
 }
 
-const KEEP = 0.35; // share of buildings in their model's own wall colour
+// Repaints, muted like the reference: stucco and stone, brick, and tile or slate roofs.
+const PAINTS = {
+  stucco: ['#ece2c8', '#e3d3ae', '#d9c39a', '#efe9dc', '#cfc6b4', '#e4d49f', '#d8c8b0', '#c4bba9', '#e8d9c0'],
+  brick: ['#a5583e', '#8f4b36', '#b06a4a', '#7f4a3a', '#9a5a44'],
+};
+const ROOF_PAINTS = ['#b9532f', '#c4663d', '#a9482c', '#8e4a32', '#4f5866', '#5c6470', '#454c57', '#636a73'];
+const KEEP = 0.3; // share of buildings in their model's own colours
 const wallColor = new Color();
+const roofColor = new Color();
+const pickPaint = (list, t) => list[Math.floor(((t - KEEP) / (1 - KEEP)) * list.length) % list.length];
 
 // The kit buildings among a chunk's rocks as one mesh (null if there are none, or the kit has not
 // loaded).
@@ -125,8 +134,10 @@ export function createKitBuildingsMesh(rocks, kit = prototypes) {
   let k = 0;
   for (const [b, proto] of placed) {
     // Model x -> along the street, y -> up, z (its front) -> toward the street.
-    const ax = b.ux;
-    const az = b.uz;
+    // Stretched along the street (straight-fronted models, to close up a row).
+    const sx = b.stretch ?? 1;
+    const ax = b.ux * sx;
+    const az = b.uz * sx;
     const fx = -b.nx;
     const fz = -b.nz;
     const n = proto.glass.length;
@@ -138,22 +149,31 @@ export function createKitBuildingsMesh(rocks, kit = prototypes) {
       positions[o] = b.x + ax * px + fx * pz;
       positions[o + 1] = b.ground + proto.positions[s + 1];
       positions[o + 2] = b.z + az * px + fz * pz;
-      const nx = proto.normals[s];
+      // Normals of a stretched model: scaled by the inverse stretch along x, then renormalised.
+      const nx = proto.normals[s] / sx;
+      const ny = proto.normals[s + 1];
       const nz = proto.normals[s + 2];
-      normals[o] = ax * nx + fx * nz;
-      normals[o + 1] = proto.normals[s + 1];
-      normals[o + 2] = az * nx + fz * nz;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      normals[o] = (b.ux * nx + fx * nz) / len;
+      normals[o + 1] = ny / len;
+      normals[o + 2] = (b.uz * nx + fz * nz) / len;
     }
     colors.set(proto.colors, v * 3);
-    // Some buildings keep their model's wall colour, the rest are painted from the town's palette.
-    if (b.wall >= KEEP) {
-      wallColor.set(WALLS[Math.floor(((b.wall - KEEP) / (1 - KEEP)) * WALLS.length) % WALLS.length]).offsetHSL(0, 0, (b.extra - 0.5) * 0.06);
+    // Some buildings keep their model's colours, the rest get walls from their model's palette
+    // (stucco or brick) and a tile or slate roof.
+    const kit = KIT_BY_NAME.get(b.kit);
+    const walls = b.wall >= KEEP && PAINTS[kit?.paint];
+    const roof = b.roofColor >= KEEP;
+    if (walls) wallColor.set(pickPaint(walls, b.wall)).offsetHSL(0, 0, (b.extra - 0.5) * 0.05);
+    if (roof) roofColor.set(pickPaint(ROOF_PAINTS, b.roofColor));
+    if (walls || roof) {
       for (let i = 0; i < n; i++) {
-        if (!proto.wall[i]) continue;
+        const c = proto.paint[i] === 1 && walls ? wallColor : proto.paint[i] === 2 && roof ? roofColor : null;
+        if (!c) continue;
         const o = (v + i) * 3;
-        colors[o] = wallColor.r;
-        colors[o + 1] = wallColor.g;
-        colors[o + 2] = wallColor.b;
+        colors[o] = c.r;
+        colors[o + 1] = c.g;
+        colors[o + 2] = c.b;
       }
     }
     glass.set(proto.glass, v);

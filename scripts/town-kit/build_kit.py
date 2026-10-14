@@ -8,8 +8,8 @@
 # front facing -y and the origin at the middle of its footprint on the ground; the exporter turns
 # that to glTF's y up, the front facing +z. The walls run down to PLINTH below the ground, so a
 # building on a slope never shows its underside. Colours are baked into a colour attribute
-# (COLOR_0), its alpha 0.5 on the main walls (the game can repaint those per building, 1
-# elsewhere); the window glass is its own material, so the game can tell it apart.
+# (COLOR_0), its alpha marking what the game may repaint per building: 0.5 on the main walls,
+# 0.25 on the main roof, 1 elsewhere; the window glass is its own material, so the game can tell it apart.
 import bpy, bmesh, json, math, sys
 from mathutils import Vector
 
@@ -39,23 +39,25 @@ C = dict(
     terra='#c9552e', terra_dk='#9a3d22', slate='#56607a', slate_dk='#3d4559', brick='#b0573d', brick_dk='#8a4030',
     teal='#3f9fae', copper='#5fae9a', gold='#d9b24a', wood='#5e3c24', green='#3f6e52', red='#b8423b',
     iron='#2c2c30', yellow='#ead88f', ochre='#d79a52', glass='#36587c',
+    stucco='#e6dac0', greystone='#c9c1af', flat='#9d9a92', machine='#bfbcb4', aqua='#5fc3cf', aqua_dk='#2f8f9e', mullion='#dfe8ea',
 )
 
 class Builder:
-    def __init__(self, name, wall):
+    def __init__(self, name, wall, roof=None):
         self.name = name
-        self.wall = wall  # the main wall colour (marked in the colour's alpha)
+        self.wall = wall  # the main wall and roof colours (marked in the colour's alpha)
+        self.roof = roof
         self.bm = bmesh.new()
         self.color = self.bm.loops.layers.color.new('Col')
         self.glass = []
 
     def poly(self, verts, faces, col, smooth=False):
         vs = [self.bm.verts.new(Vector(v)) for v in verts]
-        rgb = (*srgb(C[col]), 0.5 if col == self.wall else 1.0)
+        rgb = (*srgb(C[col]), 0.5 if col == self.wall else 0.25 if col == self.roof else 1.0)
         for f in faces:
             face = self.bm.faces.new([vs[i] for i in f])
             face.smooth = smooth
-            face.material_index = 1 if col == 'glass' else 0
+            face.material_index = 1 if col in ('glass', 'aqua') else 0
             for loop in face.loops:
                 loop[self.color] = rgb
 
@@ -187,7 +189,7 @@ def arch_contour(s, z0, w, h, segs, grow=0.0):
     pts.append((s + r, z0))
     return pts
 
-def window(B, f, s, z0, w, h, frame='trim', arch=True, segs=3, sill=True, key=False, shutters=None, depth=0.0):
+def window(B, f, s, z0, w, h, frame='trim', arch=False, segs=3, sill=True, key=False, shutters=None, depth=0.0, lintel=False, bars=True):
     # An arched (or square) window: glass set into the wall plane, a frame proud of it, a sill
     # and a keystone.
     n, u, off = f
@@ -208,8 +210,12 @@ def window(B, f, s, z0, w, h, frame='trim', arch=True, segs=3, sill=True, key=Fa
     verts = [to3(p, 0.07) for p in inner] + [to3(p, 0.07) for p in outer]
     B.poly(verts, [(i, i + 1, m + i + 1, m + i) for i in range(m - 1)], frame)
     # Glazing bars.
-    top = z0 + (h - w / 2 if arch else h)
-    B.obox(n * (off + 0.06) + u * s + Z * (z0 + (h if arch else h) / 2), u, n, 0.06, 0.08, h - 0.02, frame)
+    if bars:
+        B.obox(n * (off + 0.06) + u * s + Z * (z0 + h / 2), u, n, 0.06, 0.08, h - 0.02, frame)
+        if not arch:
+            B.obox(n * (off + 0.06) + u * s + Z * (z0 + h * 0.7), u, n, w, 0.08, 0.06, frame)
+    if lintel:
+        B.obox(n * (off + 0.08) + u * s + Z * (z0 + h + 0.2), u, n, w + 0.5, 0.16, 0.18, frame)
     if sill:
         B.obox(n * (off + 0.12) + u * s + Z * (z0 - 0.06), u, n, w + 0.4, 0.26, 0.12, frame)
     if key and arch:
@@ -259,7 +265,7 @@ def door(B, f, s, w, h, col='wood', frame='trim', depth=0.1):
     off += depth
     inner = arch_contour(s, 0.0, w, h, 5)
     B.poly([n * (off + 0.02) + u * p[0] + Z * p[1] for p in inner], [tuple(range(len(inner)))[::-1]], col)
-    window(B, (n, u, off), s, 0.0, w, h, frame=frame, sill=False, segs=5, key=True)
+    window(B, (n, u, off), s, 0.0, w, h, frame=frame, sill=False, segs=5, key=True, arch=True)
     B.obox(n * (off + 0.4) + u * s + Z * -0.1, u, n, w + 1.0, 0.8, 0.3, 'stone')
 
 def walls_rrect(B, hx, hy, r, z1, col, segs=3):
@@ -289,12 +295,15 @@ def rounded_hip(B, hx, hy, z, rise, col, r=0.8, over=0.45):
 
 KIT = []
 
-def entry(ob, w, d, eaves, storeys, size):
-    KIT.append({'name': ob.name, 'w': round(w, 2), 'd': round(d, 2), 'eaves': round(eaves, 2), 'storeys': storeys, 'size': size})
+# `size`: the lots it suits (small, mid, tall, or rare for a landmark); `paint`: the palette its
+# walls are repainted from (stucco, brick, or none); `stretch`: whether the game may widen or
+# narrow it along the street to close up a row (straight facades only).
+def entry(ob, w, d, eaves, storeys, size, paint='stucco', stretch=False):
+    KIT.append({'name': ob.name, 'w': round(w, 2), 'd': round(d, 2), 'eaves': round(eaves, 2), 'storeys': storeys, 'size': size, 'paint': paint, 'stretch': stretch})
 
 def turret_corner():
     # Four storeys of cream stone on a corner, a round turret with a cone roof on the front right.
-    B = Builder('Kit_TurretCorner', 'cream')
+    B = Builder('Kit_TurretCorner', 'cream', 'terra')
     W, D = 9.6, 9.0
     G, NF = 3.6, 3
     eaves = G + FLOOR * NF
@@ -330,13 +339,13 @@ def turret_corner():
         for name, f in fs.items():
             ss = {'front': front_s, 'right': right_s, 'back': [-2.9, 0.0, 2.9], 'left': [-2.6, 0.0, 2.6]}[name]
             for s in ss:
-                window(B, f, s, z0, 1.0, 1.9)
+                window(B, f, s, z0, 1.0, 1.9, lintel=True)
     # Ground floor: arched shop windows under red awnings, an arched door.
-    window(B, fs['front'], -3.3, 0.55, 1.6, 2.5, frame='green', key=False, sill=False)
+    window(B, fs['front'], -3.3, 0.55, 1.6, 2.5, frame='green', key=False, sill=False, arch=True)
     awning(B, fs['front'], -3.3, G - 0.35, 2.2, 0.9, 'red')
     door(B, fs['front'], -1.0, 1.3, 2.7, col='green')
     for s in right_s:
-        window(B, fs['right'], s, 0.55, 1.6, 2.5, frame='green', key=False, sill=False)
+        window(B, fs['right'], s, 0.55, 1.6, 2.5, frame='green', key=False, sill=False, arch=True)
         awning(B, fs['right'], s, G - 0.35, 2.2, 0.9, 'red')
     for name in ('back', 'left'):
         for s in (-2.6, 2.6):
@@ -350,7 +359,7 @@ def turret_corner():
 
 def bell_mansard():
     # Three storeys of sand render under a bell-curved slate mansard with round dormers.
-    B = Builder('Kit_BellMansard', 'yellow')
+    B = Builder('Kit_BellMansard', 'yellow', 'slate')
     W, D = 7.2, 8.6
     G, NF = 3.4, 2
     eaves = G + FLOOR * NF
@@ -384,7 +393,7 @@ def bell_mansard():
     # Ground floor: round-headed door with a fanlight, two shop windows.
     door(B, fs['front'], 0.0, 1.2, 2.6, col='teal', depth=0.14)
     for s in (-1.9, 1.9):
-        window(B, fs['front'], s, 0.7, 1.2, 2.2, key=True, depth=0.14)
+        window(B, fs['front'], s, 0.7, 1.2, 2.2, key=True, depth=0.14, arch=True)
     for name in ('left', 'right', 'back'):
         for s in (-2.4, 2.4):
             window(B, fs[name], s, 0.9, 1.0, 1.9, depth=0.14)
@@ -423,7 +432,7 @@ def bell_mansard():
 def cottage():
     # A small white cottage: a soft, bowed roof with deep rounded eaves, a round bay window, an
     # arched door under a hood and a round chimney.
-    B = Builder('Kit_Cottage', 'white')
+    B = Builder('Kit_Cottage', 'white', 'terra')
     W, D = 7.6, 7.0
     eaves = 4.4
     hx, hy = W / 2, D / 2
@@ -508,15 +517,15 @@ def dome_tower():
         z0 = G + FLOOR * i + 0.7
         for name, f in fs.items():
             for s in (-1.3, 1.3):
-                window(B, f, s, z0, 0.95, 1.9)
+                window(B, f, s, z0, 0.95, 1.9, lintel=True)
     for name, f in fs.items():
         if name == 'front':
             door(B, f, 0.0, 1.6, 3.0, col='wood', depth=0.14)
             for s in (-2.1, 2.1):
-                window(B, f, s, 0.8, 0.9, 2.2, depth=0.14)
+                window(B, f, s, 0.8, 0.9, 2.2, depth=0.14, arch=True)
         else:
             for s in (-1.4, 1.4):
-                window(B, f, s, 0.8, 1.0, 2.2, depth=0.14)
+                window(B, f, s, 0.8, 1.0, 2.2, depth=0.14, arch=True)
     # Drum with round windows, dome, lantern.
     zd = eaves + 1.0
     B.prism(circle(3.0, 16), eaves + 0.5, zd + 2.2, 'cream', smooth=True)
@@ -532,12 +541,12 @@ def dome_tower():
     B.dome(0, 0, 0.75, zl + 1.0, 'teal', n=8, rings=3)
     B.box(0, 0, zl + 1.7, 0.1, 0.1, 1.0, 'gold')
     ob = B.finish()
-    entry(ob, W + 0.8, D + 0.8, eaves, NF + 1, 'tall')
+    entry(ob, W + 0.8, D + 0.8, eaves, NF + 1, 'rare')
 
 def dutch_gable():
     # Three storeys of brick with a curly Dutch gable to the street (and the back), white arched
     # windows and half-round green awnings over the shop.
-    B = Builder('Kit_DutchGable', 'brick')
+    B = Builder('Kit_DutchGable', 'brick', 'slate')
     W, D = 8.0, 9.4
     G, NF = 3.6, 2
     eaves = G + FLOOR * NF
@@ -582,7 +591,7 @@ def dutch_gable():
             window(B, f, s, eaves + 0.5, 0.7, 1.3, frame='white')
     # Ground floor shop.
     for s in (-2.3, 2.3):
-        window(B, fs['front'], s, 0.55, 2.0, 2.4, frame='green', sill=False, segs=4)
+        window(B, fs['front'], s, 0.55, 2.0, 2.4, frame='green', sill=False, segs=4, arch=True)
         awning(B, fs['front'], s, G - 0.25, 2.6, 1.0, 'green', stripes='white')
     door(B, fs['front'], 0.0, 1.1, 2.6, col='wood')
     for name in ('back', 'left', 'right'):
@@ -590,13 +599,261 @@ def dutch_gable():
             window(B, fs[name], s, 0.9, 1.0, 1.9, frame='white')
     B.box(0.0, hy - 1.4, eaves, 0.7, 0.7, rise + 1.2, 'brick_dk')
     ob = B.finish()
-    entry(ob, W + 0.6, D + 0.8, eaves, NF + 1, 'mid')
+    entry(ob, W + 0.6, D + 0.8, eaves, NF + 1, 'mid', paint='brick')
+
+def flat_awning(B, f, s, z_top, w, out, col, stripes='trim', drop=0.55):
+    # A straight canvas awning sloping out from the wall, with a striped valance.
+    n, u, off = f
+    q = [n * off + u * (s - w / 2) + Z * z_top, n * off + u * (s + w / 2) + Z * z_top,
+         n * (off + out) + u * (s + w / 2) + Z * (z_top - drop), n * (off + out) + u * (s - w / 2) + Z * (z_top - drop)]
+    B.poly(q + [p - Z * 0.05 for p in q], [(0, 1, 2, 3), (7, 6, 5, 4), (3, 2, 6, 7)], col)
+    for k in range(int(w / 0.5)):
+        B.obox(n * (off + out) + u * (s - w / 2 + 0.25 + k * 0.5) + Z * (z_top - drop - 0.15), u, n, 0.46, 0.04, 0.28, stripes if k % 2 else col)
+
+def rooftop(B, hx, hy, z, seed=0):
+    # Rooftop clutter on a flat roof: a stair house, air-conditioning boxes, a skylight, a water
+    # tank or an aerial.
+    B.box(-hx * 0.45, hy * 0.25, z, 2.4, 2.6, 2.4, 'machine')
+    B.box(-hx * 0.45, hy * 0.25, z + 2.4, 2.7, 2.9, 0.15, 'flat')
+    B.box(-hx * 0.45 + 1.21, hy * 0.25, z, 0.02, 1.0, 2.0, 'wood')
+    for k, (ax, ay) in enumerate(((0.35, -0.35), (0.55, -0.1), (0.15, 0.45))):
+        B.box(hx * ax, hy * ay, z, 1.2, 0.9, 0.8, 'machine')
+        B.box(hx * ax, hy * ay, z + 0.8, 0.9, 0.6, 0.05, 'iron')
+    # Skylight: a glass ridge.
+    sx, sy = hx * 0.1, -hy * 0.45
+    B.poly([(sx - 1.2, sy - 0.7, z), (sx + 1.2, sy - 0.7, z), (sx + 1.2, sy, z + 0.6), (sx - 1.2, sy, z + 0.6),
+            (sx + 1.2, sy + 0.7, z), (sx - 1.2, sy + 0.7, z)], [(0, 1, 2, 3), (3, 2, 4, 5)], 'glass')
+    B.poly([(sx - 1.2, sy - 0.7, z), (sx - 1.2, sy, z + 0.6), (sx - 1.2, sy + 0.7, z), (sx + 1.2, sy - 0.7, z), (sx + 1.2, sy, z + 0.6), (sx + 1.2, sy + 0.7, z)], [(0, 1, 2), (5, 4, 3)], 'machine')
+    if seed % 2:
+        B.prism(circle(0.9, 8), z + 1.2, z + 3.0, 'wood', smooth=True, offset=(hx * 0.5, hy * 0.5))
+        B.cone(hx * 0.5, hy * 0.5, 1.0, z + 3.0, 0.6, 'iron', n=8)
+        for ax, ay in ((-0.6, -0.6), (0.6, -0.6), (0.6, 0.6), (-0.6, 0.6)):
+            B.box(hx * 0.5 + ax, hy * 0.5 + ay, z, 0.12, 0.12, 1.2, 'iron')
+    else:
+        B.box(hx * 0.6, hy * 0.6, z, 0.08, 0.08, 4.0, 'iron')
+        B.box(hx * 0.6, hy * 0.6, z + 3.2, 1.4, 0.06, 0.06, 'iron')
+        B.box(hx * 0.6, hy * 0.6, z + 3.7, 0.9, 0.06, 0.06, 'iron')
+
+def parapet(B, hx, hy, z, h, col, roof='flat'):
+    # A flat roof inside a parapet wall.
+    B.box(0, 0, z - 0.05, 2 * hx - 0.3, 2 * hy - 0.3, 0.1, roof)
+    for (cx, cy, sx, sy) in ((0, -hy + 0.12, 2 * hx, 0.24), (0, hy - 0.12, 2 * hx, 0.24), (-hx + 0.12, 0, 0.24, 2 * hy), (hx - 0.12, 0, 0.24, 2 * hy)):
+        B.box(cx, cy, z, sx, sy, h, col)
+        B.box(cx, cy, z + h, sx + (0.2 if sx > sy else 0.1), sy + (0.2 if sy > sx else 0.1), 0.12, 'trim')
+
+def shopfronts(B, f, ss, G, w=2.0, frame='green', awning_cols=('red', 'green')):
+    for k, s in enumerate(ss):
+        window(B, f, s, 0.45, w, G - 1.3, frame=frame, sill=False)
+        flat_awning(B, f, s, G - 0.55, w + 0.4, 1.1, awning_cols[k % len(awning_cols)])
+
+def flat_block():
+    # A wide five-storey block of cream stucco, the everyday building of the reference: shops under
+    # awnings, a regular grid of windows, cornice, parapet and a cluttered flat roof.
+    B = Builder('Kit_FlatBlock', 'stucco')
+    W, D = 13.0, 10.5
+    G, NF = 3.8, 4
+    eaves = G + FLOOR * NF
+    hx, hy = W / 2, D / 2
+    walls_rrect(B, hx, hy, 0.15, eaves, 'stucco', segs=1)
+    B.prism(rrect(hx + 0.08, hy + 0.08, 0.2, 1), -PLINTH, 0.4, 'plinth')
+    band(B, hx, hy, 0.15, G - 0.2, 0.3, 'trim', grow=0.12, segs=1)
+    band(B, hx, hy, 0.15, G + FLOOR - 0.1, 0.14, 'trim', grow=0.08, segs=1)
+    band(B, hx, hy, 0.15, eaves - 0.1, 0.35, 'trim', grow=0.25, segs=1)
+    fs = facades(W, D)
+    front = [-4.8, -2.4, 0.0, 2.4, 4.8]
+    side = [-3.2, -1.1, 1.1, 3.2]
+    for i in range(NF):
+        z0 = G + FLOOR * i + 0.75
+        for name, f in fs.items():
+            for s in (front if name in ('front', 'back') else side):
+                window(B, f, s, z0, 1.05, 1.75, lintel=(i < NF - 1) and name != 'back', bars=name != 'back', sill=True)
+    shopfronts(B, fs['front'], [-4.6, -1.8, 3.6], G, w=2.2)
+    door(B, fs['front'], 1.0, 1.2, 2.6, col='wood')
+    shopfronts(B, fs['right'], [-2.6, 1.6], G, w=2.4, awning_cols=('green',))
+    for name in ('left', 'back'):
+        for s in ((-3.6, 0.0, 3.6) if name == 'back' else (-2.4, 2.4)):
+            window(B, fs[name], s, 0.9, 1.1, 1.9, bars=False)
+    parapet(B, hx + 0.1, hy + 0.1, eaves + 0.25, 0.8, 'stucco')
+    rooftop(B, hx, hy, eaves + 0.25, seed=0)
+    ob = B.finish()
+    entry(ob, W, D, eaves, NF + 1, 'tall', stretch=True)
+
+def slate_block():
+    # Four storeys of grey stone under a straight slate mansard with gabled dormers, iron balconies
+    # on the first floor: the grey-roofed blocks of the reference.
+    B = Builder('Kit_SlateBlock', 'greystone', 'slate')
+    W, D = 12.0, 10.5
+    G, NF = 3.8, 3
+    eaves = G + FLOOR * NF
+    hx, hy = W / 2, D / 2
+    walls_rrect(B, hx, hy, 0.15, eaves, 'greystone', segs=1)
+    B.prism(rrect(hx + 0.1, hy + 0.1, 0.2, 1), -PLINTH, G - 0.2, 'stone')
+    for k in range(1, 6):
+        band(B, hx, hy, 0.15, k * 0.6 - 0.05, 0.05, 'plinth', grow=0.12, segs=1)
+    band(B, hx, hy, 0.15, G - 0.2, 0.3, 'trim', grow=0.15, segs=1)
+    band(B, hx, hy, 0.15, eaves - 0.15, 0.45, 'trim', grow=0.3, segs=1)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            B.box(sx * (hx - 0.25), sy * (hy - 0.25), G, 0.6, 0.6, eaves - G, 'trim')
+    fs = facades(W, D)
+    front = [-4.2, -2.1, 0.0, 2.1, 4.2]
+    side = [-3.2, -1.1, 1.1, 3.2]
+    for i in range(NF):
+        z0 = G + FLOOR * i + 0.7
+        for name, f in fs.items():
+            for s in (front if name in ('front', 'back') else side):
+                tall = i == 0 and name == 'front'
+                window(B, f, s, z0 - (0.45 if tall else 0), 1.0, 1.85 + (0.45 if tall else 0), lintel=True, bars=name != 'back', sill=not tall)
+    # Iron balconies on the first floor of the front.
+    n, u, off = fs['front']
+    for s in front:
+        B.obox(n * (off + 0.35) + u * s + Z * (G + 0.25), u, n, 1.6, 0.7, 0.14, 'trim')
+        B.obox(n * (off + 0.68) + u * s + Z * (G + 1.25), u, n, 1.6, 0.05, 0.05, 'iron')
+        for k in range(7):
+            B.obox(n * (off + 0.68) + u * (s - 0.75 + k * 0.25) + Z * (G + 0.8), u, n, 0.04, 0.04, 0.9, 'iron')
+    for s in (-4.2, -2.1, 2.1, 4.2):
+        window(B, fs['front'], s, 0.6, 1.3, 2.4, frame='trim', sill=False, arch=True, depth=0.12)
+    door(B, fs['front'], 0.0, 1.5, 3.0, col='wood', depth=0.14)
+    for name in ('back', 'left', 'right'):
+        for s in ((-4.2, 0.0, 4.2) if name == 'back' else (-2.6, 2.6)):
+            window(B, fs[name], s, 0.8, 1.1, 2.0, depth=0.12, bars=False)
+    # Straight mansard: steep lower slope, then a low hip.
+    z0 = eaves + 0.3
+    lower = [(rrect(hx + 0.2, hy + 0.2, 0.3, 1), z0), (rrect(hx - 0.6, hy - 0.6, 0.2, 1), z0 + 2.7)]
+    B.prism(rrect(hx + 0.2, hy + 0.2, 0.3, 1), z0 - 0.2, z0, 'slate_dk')
+    B.loft(lower, 'slate', cap=False)
+    rounded_hip(B, hx - 0.6, hy - 0.6, z0 + 2.7, 1.2, 'slate', r=0.2, over=0.0)
+    # Gabled dormers.
+    for name, (dn, du, doff) in fs.items():
+        for s in ((-3.6, 0.0, 3.6) if name in ('front', 'back') else (-2.4, 2.4)):
+            c = dn * (doff - 0.35) + du * s
+            B.obox(c + Z * (z0 + 0.8), du, dn, 1.2, 1.3, 1.6, 'greystone')
+            B.poly([c + dn * 0.65 + du * -0.75 + Z * (z0 + 1.6), c + dn * 0.65 + du * 0.75 + Z * (z0 + 1.6), c + dn * 0.65 + Z * (z0 + 2.3),
+                    c - dn * 0.65 + du * -0.75 + Z * (z0 + 1.6), c - dn * 0.65 + du * 0.75 + Z * (z0 + 1.6), c - dn * 0.65 + Z * (z0 + 2.3)],
+                   [(0, 2, 5, 3), (1, 4, 5, 2)], 'slate_dk')
+            B.poly([c + dn * 0.65 + du * -0.6 + Z * (z0 + 1.6), c + dn * 0.65 + du * 0.6 + Z * (z0 + 1.6), c + dn * 0.65 + Z * (z0 + 2.2)], [(0, 1, 2)], 'trim')
+            window(B, (dn, du, doff + 0.3), s, z0 + 0.35, 0.65, 1.0, bars=False, sill=False)
+    for cx, cy in ((-2.8, 1.5), (2.8, -1.5)):
+        B.box(cx, cy, eaves, 0.7, 1.4, 5.6, 'brick')
+        B.box(cx, cy, eaves + 5.6, 0.9, 1.6, 0.15, 'trim')
+    ob = B.finish()
+    entry(ob, W, D, eaves, NF + 1, 'tall', stretch=True)
+
+def brick_works():
+    # A red-brown brick block: pilasters between the bays, big arched openings below, white
+    # windows above, a flat roof with a water tank.
+    B = Builder('Kit_BrickWorks', 'brick')
+    W, D = 11.0, 10.0
+    G, NF = 4.2, 3
+    eaves = G + FLOOR * NF
+    hx, hy = W / 2, D / 2
+    walls_rrect(B, hx, hy, 0.1, eaves, 'brick', segs=1)
+    B.prism(rrect(hx + 0.08, hy + 0.08, 0.15, 1), -PLINTH, 0.6, 'stone')
+    fs = facades(W, D)
+    bays = [-3.75, -1.25, 1.25, 3.75]
+    sbays = [-3.4, -1.1, 1.1, 3.4]
+    for name, (n, u, off) in fs.items():
+        L = W if name in ('front', 'back') else D
+        nb = len(bays) if name in ('front', 'back') else len(sbays)
+        step = L / nb
+        for k in range(nb + 1):
+            s = -L / 2 + k * step
+            B.obox(n * (off + 0.12) + u * s + Z * (eaves / 2), u, n, 0.5, 0.24, eaves, 'brick_dk')
+    band(B, hx, hy, 0.1, G - 0.15, 0.25, 'stone', grow=0.25, segs=1)
+    band(B, hx, hy, 0.1, eaves - 0.2, 0.5, 'brick_dk', grow=0.3, segs=1)
+    for i in range(NF):
+        z0 = G + FLOOR * i + 0.7
+        for name, f in fs.items():
+            for s in (bays if name in ('front', 'back') else sbays):
+                window(B, f, s, z0, 1.3, 1.8, frame='white', bars=name != 'back', depth=0.0)
+    for name, f in fs.items():
+        for s in (bays if name in ('front', 'back') else sbays[1:3]):
+            if name == 'front' and s == 1.25:
+                door(B, f, s, 1.6, 3.2, col='green', frame='stone', depth=0.0)
+            else:
+                window(B, f, s, 0.7, 1.7, 2.9, frame='stone', arch=True, sill=False, segs=4)
+    parapet(B, hx, hy, eaves + 0.3, 0.5, 'brick_dk')
+    rooftop(B, hx, hy, eaves + 0.3, seed=1)
+    ob = B.finish()
+    entry(ob, W, D, eaves, NF + 1, 'mid', paint='brick', stretch=True)
+
+def townhouse():
+    # A narrow four-storey house with its gable to the street and a steep tile roof: the narrow
+    # fronts that close up a row.
+    B = Builder('Kit_Townhouse', 'stucco', 'terra')
+    W, D = 6.0, 10.0
+    G, NF = 3.5, 3
+    eaves = G + FLOOR * NF
+    hx, hy = W / 2, D / 2
+    walls_rrect(B, hx, hy, 0.05, eaves, 'stucco', segs=1)
+    B.prism(rrect(hx + 0.06, hy + 0.06, 0.1, 1), -PLINTH, 0.5, 'plinth')
+    band(B, hx, hy, 0.05, G - 0.15, 0.25, 'trim', grow=0.1, segs=1)
+    band(B, hx, hy, 0.05, eaves - 0.1, 0.25, 'trim', grow=0.15, segs=1)
+    fs = facades(W, D)
+    for i in range(NF):
+        z0 = G + FLOOR * i + 0.7
+        for s in (-1.3, 1.3):
+            window(B, fs['front'], s, z0, 1.0, 1.8, lintel=True, shutters='green' if i else None)
+            window(B, fs['back'], s, z0, 1.0, 1.8, bars=False)
+        for name in ('left', 'right'):
+            window(B, fs[name], 0.0, z0, 0.9, 1.6, bars=False)
+    window(B, fs['front'], -1.3, 0.6, 1.8, 2.3, frame='green', sill=False)
+    flat_awning(B, fs['front'], -1.3, G - 0.5, 2.2, 1.0, 'red')
+    door(B, fs['front'], 1.4, 1.1, 2.5, col='teal')
+    # Steep roof, ridge from front to back, gable ends to the street and the yard.
+    rise, over = 4.2, 0.35
+    for sx in (-1, 1):
+        B.poly([(sx * (hx + over), -hy - over, eaves - 0.25), (sx * (hx + over), hy + over, eaves - 0.25), (0, hy + over, eaves + rise), (0, -hy - over, eaves + rise)], [(0, 1, 2, 3)], 'terra')
+        B.poly([(sx * (hx + over), -hy - over, eaves - 0.25), (sx * (hx + over), hy + over, eaves - 0.25), (sx * (hx + over), hy + over, eaves - 0.45), (sx * (hx + over), -hy - over, eaves - 0.45)], [(0, 1, 2, 3)], 'terra_dk')
+    for sy in (-1, 1):
+        B.poly([(-hx, sy * hy, eaves - 0.1), (hx, sy * hy, eaves - 0.1), (0, sy * hy, eaves + rise * (hx / (hx + over)) - 0.2)], [(0, 1, 2)], 'stucco')
+        window(B, (Vector((0, sy, 0)), Vector((-sy, 0, 0)), hy), 0.0, eaves + 0.5, 0.9, 1.4, bars=False)
+    B.box(1.2, 2.5, eaves, 0.6, 0.6, rise + 1.0, 'brick')
+    ob = B.finish()
+    entry(ob, W, D, eaves, NF + 1, 'mid', stretch=True)
+
+def glass_block():
+    # The one modern building: a turquoise glass curtain wall between white fins and floor bands,
+    # on a recessed ground floor, machinery on its flat roof.
+    B = Builder('Kit_GlassBlock', None)
+    W, D = 10.0, 10.0
+    G, NF = 4.2, 6
+    eaves = G + 3.4 * NF
+    hx, hy = W / 2, D / 2
+    B.prism(rrect(hx - 0.6, hy - 0.6, 0.1, 1), -PLINTH, G, 'machine')
+    # Curtain wall: one glass box, white fins and floor bands proud of it.
+    B.prism(rrect(hx, hy, 0.05, 1), G, eaves, 'aqua')
+    for name, (n, u, off) in facades(W, D).items():
+        L = W
+        for k in range(8):
+            s = -L / 2 + 0.05 + k * (L - 0.1) / 7
+            B.obox(n * (off + 0.08) + u * s + Z * ((G + eaves) / 2), u, n, 0.14, 0.16, eaves - G, 'mullion')
+        for k in range(NF + 1):
+            B.obox(n * (off + 0.08) + Z * (G + 3.4 * k), u, n, L + 0.1, 0.16, 0.3, 'mullion')
+        # Ground floor glazing under the overhang, pillars at the corners.
+        B.obox(n * (off - 0.62) + Z * (G / 2), u, n, L - 1.3, 0.04, G - 0.4, 'glass')
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            B.box(sx * (hx - 0.3), sy * (hy - 0.3), -PLINTH, 0.5, 0.5, G + PLINTH, 'mullion')
+    B.box(0, -hy + 0.3, G - 0.6, W, 0.6, 0.6, 'mullion')
+    B.box(0, 0, eaves, W + 0.2, D + 0.2, 0.5, 'mullion')
+    B.box(0, 0, eaves + 0.5, 4.5, 3.5, 2.2, 'machine')
+    for k in range(3):
+        B.prism(circle(0.5, 8), eaves + 2.7, eaves + 3.1, 'iron', offset=(-1.4 + k * 1.4, 0.0))
+    ob = B.finish()
+    # Its glass is the facade itself: mark the aqua panels as glass for the game.
+    entry(ob, W, D, eaves, NF + 1, 'rare', paint='none')
 
 turret_corner()
 bell_mansard()
 cottage()
 dome_tower()
 dutch_gable()
+flat_block()
+slate_block()
+brick_works()
+townhouse()
+glass_block()
 
 objs = [bpy.data.objects[k['name']] for k in KIT]
 for k, o in zip(KIT, objs):
@@ -633,10 +890,11 @@ if MANIFEST:
         fh.write('// Generated by scripts/town-kit/build_kit.py (do not edit): the sunny town\'s building kit in\n')
         fh.write('// public/models/town-kit.glb. Per building: its footprint (w along the street, d away from it,\n')
         fh.write('// in m), the height of its eaves above the ground (the physics box\'s top), the highest point\n')
-        fh.write('// of its roof, its storeys, and which lots it suits (small, mid or tall).\n')
+        fh.write('// of its roof, its storeys, which lots it suits (small, mid, tall or rare), the palette its\n')
+        fh.write('// walls are repainted from, and whether it may be stretched along the street.\n')
         fh.write('export const TOWN_KIT = [\n')
         for k in KIT:
-            fh.write(f"  {{ name: '{k['name']}', w: {k['w']}, d: {k['d']}, eaves: {k['eaves']}, top: {k['top']}, storeys: {k['storeys']}, size: '{k['size']}', tris: {k['tris']} }},\n")
+            fh.write(f"  {{ name: '{k['name']}', w: {k['w']}, d: {k['d']}, eaves: {k['eaves']}, top: {k['top']}, storeys: {k['storeys']}, size: '{k['size']}', paint: '{k['paint']}', stretch: {str(k['stretch']).lower()}, tris: {k['tris']} }},\n")
         fh.write('];\n')
 
 if RENDER:

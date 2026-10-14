@@ -79,10 +79,22 @@ async function main() {
     render.scene.background.set('#e4e1d6');
     render.scene.fog.color.set('#e4e1d6');
   }
-  // The sunny town's haze is the pale blue of its horizon.
+  // The sunny town: a warm, bright sun with crisp shadows, as in the diorama, and only a light
+  // haze, the pale blue of its horizon.
   if (mode === 'daytown') {
     render.scene.background.set('#d6e4ea');
     render.scene.fog.color.set('#d6e4ea');
+    render.scene.fog.near = 170;
+    render.scene.fog.far = 330;
+    render.scene.traverse((o) => {
+      if (o.isHemisphereLight) {
+        o.color.set('#e4eef8');
+        o.groundColor.set('#8a8f6a');
+        o.intensity = 0.75;
+      }
+    });
+    render.sun.color.set('#ffe8c8');
+    render.sun.intensity = 3.9;
   }
   // Night worlds (the snowfield, the town): a dark blue haze, faint moonlight from the same direction as the
   // sun (so it still casts the shadows), a little skylight thrown back off the snow, and the car's

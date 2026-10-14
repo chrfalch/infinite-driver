@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createHeightField } from '../src/terrain/height.js';
-import { generateBuildings } from '../src/terrain/buildings.js';
+import { buildingsAround, generateBuildings, insideBuilding } from '../src/terrain/buildings.js';
 import { KERB } from '../src/terrain/town.js';
 import { TOWN_KIT } from '../src/terrain/town-kit.js';
 import { buildingsMeshData } from '../src/render/building-mesh.js';
@@ -43,6 +43,23 @@ function filterLow(p) {
 }
 
 describe('sunny town', () => {
+  it('lines its streets with rows of buildings', () => {
+    // Points just behind the sidewalks in town, away from junctions and the water: most are
+    // inside a building.
+    let n = 0;
+    let built = 0;
+    for (let x = -240; x < 240; x += 2) {
+      for (let z = -240; z < 240; z += 2) {
+        const s = town.sample(x, z);
+        if (s.wild > 0.2 || s.dist < KERB + 1.5 || s.dist > KERB + 2.5 || s.townHill > 0.5 || s.riverDist < s.riverHalf + 12 || s.mountain > 1 || s.other < 14) continue;
+        n++;
+        if (insideBuilding(buildingsAround(town, Math.floor(x / 64), Math.floor(z / 64)), x, z, 0.5)) built++;
+      }
+    }
+    expect(n).toBeGreaterThan(200);
+    expect(built / n).toBeGreaterThan(0.45);
+  });
+
   it('is the town by day, built from the kit', () => {
     expect(town.world).toBe('daytown');
     expect(town.town).toBe(true);
@@ -63,14 +80,38 @@ describe('sunny town', () => {
       expect(kit).toBeDefined();
       used.add(kit.name);
       expect(b.roof).toBe('kit');
-      expect([b.w, b.d, b.height]).toEqual([kit.w, kit.d, kit.eaves]);
+      // At the model's size; straight-fronted ones may be stretched a little along the street.
+      expect([b.d, b.height]).toEqual([kit.d, kit.eaves]);
+      expect(b.w).toBeCloseTo(kit.w * b.stretch, 6);
+      if (kit.stretch) expect(b.stretch).toBeGreaterThanOrEqual(0.85);
+      else expect(b.stretch).toBe(1);
+      expect(b.stretch).toBeLessThanOrEqual(1.15);
       for (const [a, c] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
         const x = b.x + b.ux * a * b.w * 0.5 + b.nx * c * b.d * 0.5;
         const z = b.z + b.uz * a * b.w * 0.5 + b.nz * c * b.d * 0.5;
         expect(town.roadDistance(x, z)).toBeGreaterThan(KERB);
       }
     }
-    expect(used.size).toBe(TOWN_KIT.length);
+    // Every everyday model shows up (the landmarks are rare).
+    for (const k of TOWN_KIT) if (k.size !== 'rare') expect(used.has(k.name)).toBe(true);
+    // None overlap (separating axis on the four edge directions).
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const a = all[i].building;
+        const b = all[j].building;
+        const apart = [[a.ux, a.uz], [a.nx, a.nz], [b.ux, b.uz], [b.nx, b.nz]].some(([ax, az]) => {
+          const reach = (r) => (Math.abs(r.ux * ax + r.uz * az) * r.w + Math.abs(r.nx * ax + r.nz * az) * r.d) / 2;
+          return Math.abs((b.x - a.x) * ax + (b.z - a.z) * az) > reach(a) + reach(b);
+        });
+        expect(apart).toBe(true);
+      }
+    }
+    // Every chunk agrees on the buildings standing in it, however it is reached (the rows and
+    // lots are cached; a fresh field builds the same).
+    const again = [];
+    const fresh = createHeightField({ mode: 'daytown' });
+    for (let cx = 3; cx >= -3; cx--) for (let cz = 3; cz >= -3; cz--) again.push(...generateBuildings(fresh, cx, cz));
+    expect(again.length).toBe(all.length);
     // None of them are drawn as the dark town's boxes.
     expect(buildingsMeshData(all)).toBeNull();
   });
@@ -93,14 +134,14 @@ describe('sunny town', () => {
       // Walls reach well below the ground (for slopes); the roof's top as listed.
       expect(lo[1]).toBeLessThan(-4);
       expect(hi[1]).toBeCloseTo(entry.top, 1);
-      expect(p.index.length / 3).toBeLessThan(3200);
+      expect(p.index.length / 3).toBeLessThan(4000);
       expect(p.glass.some((g) => g === 1)).toBe(true);
       // Coloured (the baked colours made it into the model): walls, roofs and trim differ.
       expect(new Set(Array.from(p.colors, (c) => c.toFixed(2))).size).toBeGreaterThan(8);
-      // The main walls are marked for repainting, and only they.
-      const walls = p.wall.reduce((n, w) => n + w, 0);
-      expect(walls).toBeGreaterThan(20);
-      expect(walls).toBeLessThan(p.wall.length / 2);
+      // The main walls (and roofs) are marked for repainting, and only they.
+      const walls = p.paint.reduce((n, w) => n + (w === 1 ? 1 : 0), 0);
+      if (entry.paint !== 'none') expect(walls).toBeGreaterThan(20);
+      expect(walls).toBeLessThan(p.paint.length / 2);
       for (let i = 0; i < p.normals.length; i += 3) expect(Math.hypot(p.normals[i], p.normals[i + 1], p.normals[i + 2])).toBeCloseTo(1, 2);
     }
   });
