@@ -40,13 +40,13 @@ import { createHeightField } from './terrain/height.js';
 import { worldMode } from './world.js';
 import { setGroundPatch, setTerrainWorld } from './render/terrain-mesh.js';
 import { SNOW_PATCH_N, SnowSurface } from './render/snow-surface.js';
-import { worldLook } from './render/backdrop.js';
+import { createDaylight } from './render/daylight.js';
+import { startHour } from './render/time-of-day.js';
 import { createWater } from './render/water.js';
-import { setBuildingCutaway, setBuildingNight } from './render/building-mesh.js';
+import { setBuildingCutaway } from './render/building-mesh.js';
 import { loadTownKit } from './render/town-kit-mesh.js';
 import { createPropsView } from './render/props-mesh.js';
 import { createPropPhysics } from './physics/props.js';
-import { setHeadlightBeams } from './render/headlights.js';
 import { GroundSurface, PATCH_N } from './render/ground-surface.js';
 import { showRutsOnSheet } from './render/rock-surface.js';
 import { DEFORM_CELL } from './terrain/deformation.js';
@@ -76,47 +76,12 @@ async function main() {
   let mode = worldMode();
   if (mode === 'ramp') mode = `ramp:${new URLSearchParams(location.search).get('slope') ?? 20}`;
   setTerrainWorld(mode);
-  // The dry river's isometric views get a paler, less dusty haze than the canyon.
-  if (mode === 'river') {
-    render.scene.background.set('#e4e1d6');
-    render.scene.fog.color.set('#e4e1d6');
-  }
-  // The sunny town: a warm, bright sun with crisp shadows, as in the diorama, and only a light
-  // haze, the pale blue of its horizon.
-  if (mode === 'daytown') {
-    render.scene.background.set('#d6e4ea');
-    render.scene.fog.color.set('#d6e4ea');
-    render.scene.fog.near = 170;
-    render.scene.fog.far = 330;
-    render.scene.traverse((o) => {
-      if (o.isHemisphereLight) {
-        o.color.set('#e4eef8');
-        o.groundColor.set('#8a8f6a');
-        o.intensity = 0.75;
-      }
-    });
-    render.sun.color.set('#ffe8c8');
-    render.sun.intensity = 3.9;
-  }
-  // Night worlds (the snowfield, the town): a dark blue haze, faint moonlight from the same direction as the
-  // sun (so it still casts the shadows), a little skylight thrown back off the snow, and the car's
-  // headlights on.
-  const night = !!worldLook(mode).night;
-  if (night) {
-    render.scene.background.set('#0b111c');
-    render.scene.fog.color.set('#0b111c');
-    render.scene.traverse((o) => {
-      if (o.isHemisphereLight) {
-        o.color.set('#41557c');
-        o.groundColor.set('#1d2638');
-        o.intensity = 0.13;
-      }
-    });
-    render.sun.color.set('#a9bde6');
-    render.sun.intensity = 0.15;
-    // The town's windows light up.
-    setBuildingNight(true);
-  }
+  // The light, sky and haze for the time of day (the panel's slider, ?time=18.5; render/time-of-day.js).
+  // After dark the headlights come on, and the town's windows light up.
+  const daylight = createDaylight(render, mode);
+  render.daylight = daylight;
+  daylight.set(startHour(mode));
+  const night = daylight.dark > 0.5;
   const heightAt = createHeightField({ mode });
   // The sunny town's buildings are models: loaded before its first chunk is built.
   if (heightAt.buildingKit) await loadTownKit();
@@ -167,7 +132,7 @@ async function main() {
 
   world.add(Time, Input, TerrainStreaming);
   world.get(Input).headlights = night;
-  setHeadlightBeams(night);
+  daylight.onDarkChange = (dark) => (world.get(Input).headlights = dark);
   world.add(Physics({ rapier: RAPIER, world: physicsWorld, remote, accumulator: 0, step: 1 / 120, stepMs: 0, simTime: 0, displayTime: 0 }));
   // Main-thread physics writes the audio feed itself; worker physics writes it in the worker.
   if (!remote) world.get(Physics).audioFeed = audioFeed;
@@ -180,7 +145,7 @@ async function main() {
   // Sand and dust grains on soil (not on snow: the powder spray is already fine).
   world.add(
     Soil({
-      particles: new SoilParticles(render.scene, heightAt.snow ? { drag: 3, powder: true, night } : undefined),
+      particles: new SoilParticles(render.scene, heightAt.snow ? { drag: 3, powder: true } : undefined),
       fines: heightAt.snow ? null : createFineParticles(render.scene),
       carry: [0, 0, 0, 0],
       spin: [0, 0, 0, 0],
@@ -333,7 +298,7 @@ async function main() {
         const vehicle = player.get(Vehicle);
         if (minimap) timed('sys.minimap', () => minimap.update(vehicle.body.translation(), vehicle.body.rotation()));
         audio?.update(vehicle, world.get(Soil), render.activeCamera);
-        gauges.update(vehicle, time.delta, { follow: isFollowCamera(), perf: CONTROLS.showPerf ? perfLines(vehicle) : null, throttleLock: world.get(Input).throttleLock });
+        gauges.update(vehicle, time.delta, { follow: isFollowCamera(), perf: CONTROLS.showPerf ? perfLines(vehicle) : null, throttleLock: world.get(Input).throttleLock, headlights: world.get(Input).headlights });
         { const v = player.get(Vehicle).body.linvel(); sample('speed.kmh', Math.hypot(v.x, v.z) * 3.6); }
       }
       timed('sys.glyph', () => glyph.shape());

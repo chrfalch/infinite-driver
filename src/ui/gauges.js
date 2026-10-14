@@ -1,6 +1,7 @@
 // Instrument cluster in the HUD: a drive plate (the car from above with its differential locks and
 // each wheel tinted by how much it slips, and 4H / 4L), speedometer, tachometer (with a red zone),
-// and a gear indicator between the dials, with a camera icon while the follow camera is on and an optional perf card. Drawn with plain meshes in the screen-space HUD scene (CSS pixels, y up, origin at
+// and a gear indicator between the dials, with a camera icon while the follow camera is on, a headlight lamp in the
+// speedometer (green when the lights are on, faint when off) and an optional perf card. Drawn with plain meshes in the screen-space HUD scene (CSS pixels, y up, origin at
 // the top-left corner) and Glyph text for the numbers.
 import { CircleGeometry, Group, Mesh, MeshBasicMaterial, PlaneGeometry, RingGeometry, Shape, ShapeGeometry } from 'three/webgpu';
 
@@ -19,6 +20,8 @@ const CAP = material('#2b2823');
 const GEAR_FACE = material('#1f1d19', 0.9);
 const CARD_FACE = material('#1f1d19', 0.82);
 const LINE = material('#b9af97', 0.8);
+const LAMP_ON = { color: '#5fd36e', opacity: 1 };
+const LAMP_OFF = { color: '#efe6d0', opacity: 0.22 };
 
 // Wheel tints on the drive plate by slip speed (m/s): rolling, slipping, spinning.
 const ROLLING = { r: 0.94, g: 0.9, b: 0.82 };
@@ -178,6 +181,29 @@ function cameraIcon(s) {
   return icon;
 }
 
+// The headlight tell-tale of width `s`, centred on the origin: a lamp dome facing right with
+// low-beam rays slanting down to the left. All parts share `mat`, so one colour switches it.
+function headlightIcon(s, mat) {
+  const icon = new Group();
+  const h = s * 0.72;
+  const dome = new Shape();
+  dome.moveTo(0, -h / 2);
+  dome.lineTo(0, h / 2);
+  dome.absellipse(0, 0, h * 0.62, h / 2, Math.PI / 2, -Math.PI / 2, true);
+  const lamp = layer(new Mesh(new ShapeGeometry(dome, 12), mat), 4);
+  lamp.position.x = s / 2 - h * 0.62;
+  icon.add(lamp);
+  const length = s * 0.42;
+  const thick = Math.max(1.2, h * 0.13);
+  for (let i = 0; i < 4; i++) {
+    const ray = layer(new Mesh(new PlaneGeometry(length, thick), mat), 4);
+    ray.position.set(-s / 2 + length / 2, h * (0.36 - i * 0.24) - length * 0.12, ray.position.z);
+    ray.rotation.z = 0.28;
+    icon.add(ray);
+  }
+  return icon;
+}
+
 // The drive plate: the car from above (four wheels, the axles and the driveshaft), a lock marker
 // on each differential (a ring when open, filled when locked), and 4H / 4L below. Width `w`,
 // height `h`, centred on the origin. Wheels are ordered FL, FR, RL, RR, the front at the top.
@@ -313,6 +339,10 @@ export function createGauges({ hud, font, scene }) {
   followIcon.visible = false;
   root.add(followIcon);
 
+  const lampMaterial = material(LAMP_OFF.color, LAMP_OFF.opacity);
+  const lightsIcon = new Group();
+  root.add(lightsIcon);
+
   // Perf card: two lines of stats on a dark plate, shown with P or the panel's switch.
   const perfCard = new Group();
   perfCard.visible = false;
@@ -357,6 +387,10 @@ export function createGauges({ hud, font, scene }) {
     const inset = safeInsets();
     const cy = top ? -(Math.max(12, inset.top) + PANEL_BAR + R) : -h + R + 22;
     speed.place(cx - boxW / 2 - gap - R, cy);
+    // Headlight tell-tale in the speedometer, between the hub and the readout.
+    lightsIcon.clear();
+    lightsIcon.add(headlightIcon(R * 0.2, lampMaterial));
+    lightsIcon.position.set(cx - boxW / 2 - gap - R, cy - R * 0.3, 0);
     plate.place(cx - boxW / 2 - 2 * gap - 2 * R - plateW / 2, cy, plateH);
     tach.place(cx + boxW / 2 + gap + R, cy);
     gearBox.position.set(cx, cy, 0);
@@ -396,8 +430,11 @@ export function createGauges({ hud, font, scene }) {
   };
 
   // `follow`: the follow camera is on. `perf`: two lines of stats, or null to hide the card.
-  // `throttleLock`: the throttle Shift holds (0..1), or null.
-  const update = (vehicle, dt, { follow = false, perf = null, throttleLock = null } = {}) => {
+  // `throttleLock`: the throttle Shift holds (0..1), or null. `headlights`: the lights are on.
+  const update = (vehicle, dt, { follow = false, perf = null, throttleLock = null, headlights = false } = {}) => {
+    const lamp = headlights ? LAMP_ON : LAMP_OFF;
+    lampMaterial.color.set(lamp.color);
+    lampMaterial.opacity = lamp.opacity;
     holdText.set(throttleLock === null ? '' : `HOLD ${Math.round(throttleLock * 100)}%`);
     followIcon.visible = follow;
     perfCard.visible = !!perf;

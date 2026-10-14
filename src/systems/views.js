@@ -182,7 +182,7 @@ export function syncEngine(world) {
 }
 
 // Brake lights: dim tail-light glow, bright red while braking (a quick fade, like a filament).
-// Headlights: on and off with H (Input.headlights).
+// Headlights and tail lamps: on and off with H (Input.headlights).
 export function syncLights(world) {
   const car = world.queryFirst(IsPlayer, Vehicle);
   if (!car) return;
