@@ -18,8 +18,8 @@ export const HEADLIGHT = Object.freeze({
   glowOn: 4,
 });
 
-// The beams are only cast in night worlds (setHeadlightBeams); by day the lamps just glow, and the
-// materials skip two lights they would not show.
+// The beams are only cast in the dark (setHeadlightBeams, from the time of day); by day the lamps
+// just glow, and the materials skip two lights they would not show.
 let beams = false;
 export function setHeadlightBeams(on) {
   beams = on;
@@ -44,6 +44,7 @@ export function createHeadlights() {
 
 // Fade the beams and the lens glow toward on or off (`level` 0..1 is kept on the group).
 export function updateHeadlights(group, on, delta) {
+  group.visible = beams;
   const k = Math.min(1, delta / 0.08);
   const level = (group.userData.level ?? 0) + ((on ? 1 : 0) - (group.userData.level ?? 0)) * k;
   group.userData.level = level;

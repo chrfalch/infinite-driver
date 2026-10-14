@@ -2,7 +2,7 @@ import { clearanceElevation } from '../camera-clearance.js';
 import { loadCameraView, restoreCameraView, saveCameraView } from '../camera-store.js';
 import { CameraTarget, HeightField, Render, Time, Transform, Vehicle } from '../ecs/traits.js';
 import { createBackdrop } from '../render/backdrop.js';
-import { VIEW_HEIGHT } from '../render/scene.js';
+import { SUN_DISTANCE, VIEW_HEIGHT } from '../render/scene.js';
 
 // Isometric by default: the camera looks down at 35.3° (the isometric elevation), following behind
 // the car (follow mode, C toggles it; off, it looks down the (-1, -1, -1) diagonal, azimuth 45°). ?az=<degrees> starts the view turned around the car. Dragging with the mouse
@@ -32,7 +32,6 @@ const offset = { x: 0, y: 0, z: 0 };
 // Below this elevation the view switches to perspective, with a horizon, sky and backdrop.
 const PERSPECTIVE_BELOW = (30 * Math.PI) / 180;
 let backdrop = null;
-let orthoFog = null;
 // The elevation the camera actually flies at: the chosen one, or higher while a ridge or mesa
 // between the camera and the car would hide the car (see followCamera).
 let clearance = 0;
@@ -222,7 +221,8 @@ export function followCamera(world) {
   const render = world.get(Render);
   const low = view.elevation < PERSPECTIVE_BELOW;
   backdrop ??= createBackdrop(render.scene, world.get(HeightField)?.heightAt?.world);
-  orthoFog ??= { color: render.scene.fog.color.clone(), near: render.scene.fog.near, far: render.scene.fog.far, background: render.scene.background };
+  // The haze and background colours come from the time of day (render/daylight.js).
+  const { daylight } = render;
   if (low) {
     const persp = render.perspective;
     const d = VIEW_HEIGHT / state.zoom / 2 / Math.tan((persp.fov * Math.PI) / 360);
@@ -234,45 +234,45 @@ export function followCamera(world) {
     persp.position.set(px, py, pz);
     persp.lookAt(state.x, state.y + 0.6, state.z);
     render.activeCamera = persp;
-    render.scene.fog.color.copy(backdrop.horizon);
-    [render.scene.fog.near, render.scene.fog.far] = backdrop.fog;
-    render.scene.background = backdrop.horizon;
   } else {
     render.activeCamera = camera;
-    render.scene.fog.color.copy(orthoFog.color);
-    render.scene.fog.near = orthoFog.near;
-    render.scene.fog.far = orthoFog.far;
-    render.scene.background = orthoFog.background;
+  }
+  if (daylight) {
+    const haze = low ? daylight.horizon : daylight.background;
+    render.scene.fog.color.copy(haze);
+    [render.scene.fog.near, render.scene.fog.far] = low ? daylight.perspectiveFog : daylight.orthoFog;
+    render.scene.background = haze;
   }
   backdrop.update(render.activeCamera, state, low);
 
-  // The sun and its shadow box travel with the car, moved in whole shadow-map texels (across the
-  // light direction). A box that slides smoothly resamples every shadow edge at a new sub-texel
-  // offset each frame, and the edges shimmer; snapped, they stay put as the car moves.
+  // The sun (or moon) and its shadow box travel with the car, moved in whole shadow-map texels
+  // (across the light direction). A box that slides smoothly resamples every shadow edge at a new
+  // sub-texel offset each frame, and the edges shimmer; snapped, they stay put as the car moves.
+  const [dir, right, up] = lightBasis(daylight?.lightDirection ?? DEFAULT_LIGHT);
   const box = sun.shadow.camera;
   const texel = (box.right - box.left) / sun.shadow.mapSize.x;
-  const a = Math.round((state.x * SUN_RIGHT[0] + state.y * SUN_RIGHT[1] + state.z * SUN_RIGHT[2]) / texel) * texel;
-  const b = Math.round((state.x * SUN_UP[0] + state.y * SUN_UP[1] + state.z * SUN_UP[2]) / texel) * texel;
-  const c = state.x * SUN_DIR[0] + state.y * SUN_DIR[1] + state.z * SUN_DIR[2];
-  const tx = SUN_RIGHT[0] * a + SUN_UP[0] * b + SUN_DIR[0] * c;
-  const ty = SUN_RIGHT[1] * a + SUN_UP[1] * b + SUN_DIR[1] * c;
-  const tz = SUN_RIGHT[2] * a + SUN_UP[2] * b + SUN_DIR[2] * c;
+  const a = Math.round((state.x * right[0] + state.y * right[1] + state.z * right[2]) / texel) * texel;
+  const b = Math.round((state.x * up[0] + state.y * up[1] + state.z * up[2]) / texel) * texel;
+  const c = state.x * dir[0] + state.y * dir[1] + state.z * dir[2];
+  const tx = right[0] * a + up[0] * b + dir[0] * c;
+  const ty = right[1] * a + up[1] * b + dir[1] * c;
+  const tz = right[2] * a + up[2] * b + dir[2] * c;
   sun.target.position.set(tx, ty, tz);
-  sun.position.set(tx - SUN_OFFSET[0], ty - SUN_OFFSET[1], tz - SUN_OFFSET[2]);
+  sun.position.set(tx + dir[0] * SUN_DISTANCE, ty + dir[1] * SUN_DISTANCE, tz + dir[2] * SUN_DISTANCE);
   sun.target.updateMatrixWorld();
 }
 
-// The sun shines along SUN_OFFSET (from the sun to the car); SUN_RIGHT and SUN_UP span the shadow
-// map's plane.
-const SUN_OFFSET = [35, -45, 25];
-const norm = (v) => {
-  const l = Math.hypot(...v);
-  return v.map((x) => x / l);
-};
-const SUN_DIR = norm(SUN_OFFSET);
-const SUN_RIGHT = norm([-SUN_DIR[2], 0, SUN_DIR[0]]); // SUN_DIR × world up
-const SUN_UP = [
-  SUN_RIGHT[1] * SUN_DIR[2] - SUN_RIGHT[2] * SUN_DIR[1],
-  SUN_RIGHT[2] * SUN_DIR[0] - SUN_RIGHT[0] * SUN_DIR[2],
-  SUN_RIGHT[0] * SUN_DIR[1] - SUN_RIGHT[1] * SUN_DIR[0],
-];
+// Toward the light, and two directions across it that span the shadow map's plane.
+const DEFAULT_LIGHT = { x: -0.5, y: 0.7, z: -0.4 };
+function lightBasis({ x, y, z }) {
+  const l = Math.hypot(x, y, z);
+  const dir = [x / l, y / l, z / l];
+  const h = Math.hypot(dir[0], dir[2]) || 1;
+  const right = [-dir[2] / h, 0, dir[0] / h];
+  const up = [
+    right[1] * dir[2] - right[2] * dir[1],
+    right[2] * dir[0] - right[0] * dir[2],
+    right[0] * dir[1] - right[1] * dir[0],
+  ];
+  return [dir, right, up];
+}

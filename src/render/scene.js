@@ -14,6 +14,7 @@ import { applyQuality } from './quality.js';
 export const VIEW_HEIGHT = 22; // metres visible vertically at zoom 1
 // Ground depth per metre of screen height: 1 / sin(35.26 deg) for the isometric view.
 const SHADOW_DEPTH_STRETCH = 1.75;
+export const SUN_DISTANCE = 100; // m from the car to the shadow-casting light
 
 export async function createRenderer(container) {
   const renderer = new WebGPURenderer({ antialias: true });
@@ -30,10 +31,13 @@ export async function createRenderer(container) {
   scene.background = sky;
   scene.fog = new Fog(sky, 125, 210);
 
-  scene.add(new HemisphereLight('#fff6e8', '#6f7d5e', 0.9));
+  // Daytime light until the time of day sets it (render/daylight.js). The sun (or the moon at
+  // night) sits SUN_DISTANCE from the car toward the light, so the shadow box reaches as far back.
+  const hemi = new HemisphereLight('#fff6e8', '#6f7d5e', 0.9);
+  scene.add(hemi);
   const sun = new DirectionalLight('#fff1dc', 3.2);
   sun.castShadow = true;
-  Object.assign(sun.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, near: 1, far: 130 });
+  Object.assign(sun.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, near: 1, far: SUN_DISTANCE + 120 });
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.03;
   scene.add(sun, sun.target);
@@ -83,5 +87,5 @@ export async function createRenderer(container) {
   resize();
   window.addEventListener('resize', resize);
 
-  return { renderer, scene, camera, perspective, activeCamera: camera, sun, hudScene, hudCamera, resize, quality };
+  return { renderer, scene, camera, perspective, activeCamera: camera, sun, hemi, hudScene, hudCamera, resize, quality };
 }

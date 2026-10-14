@@ -6,7 +6,7 @@ export const Time = trait(() => ({ delta: 0, elapsed: 0 }));
 export const Input = trait(() => ({ engineOn: false, throttle: 0, throttleLock: null, brake: 0, steer: 0, handbrake: false, headlights: false }));
 // simTime: seconds simulated so far; displayTime: the (slightly earlier) time the car is drawn at.
 export const Physics = trait(() => ({ rapier: null, world: null, accumulator: 0, step: 1 / 120, stepMs: 0, simTime: 0, displayTime: 0 }));
-export const Render = trait(() => ({ renderer: null, scene: null, camera: null, sun: null, hudScene: null, hudCamera: null }));
+export const Render = trait(() => ({ renderer: null, scene: null, camera: null, sun: null, hemi: null, daylight: null, hudScene: null, hudCamera: null }));
 // heightAt: the generated terrain; surfaceAt: terrain plus ruts and berms (see Deformation).
 export const HeightField = trait(() => ({ heightAt: null, surfaceAt: null }));
 export const Deformation = trait(() => ({ map: null }));
