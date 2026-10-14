@@ -212,6 +212,9 @@ export function createTuningPanel(world, { heightAt }) {
       render.quality = applyQuality(render.renderer, render.sun, resolveQuality());
       render.resize();
     });
+  controls.add(CONTROLS, 'depthOfField').name('Depth of field').onChange(saveControls);
+  controls.add(CONTROLS, 'dofRange', 5, 150, 1).name('Blur reaches full at (m behind car)').onChange(saveControls);
+  controls.add(CONTROLS, 'dofStrength', 0, 6, 0.1).name('Blur strength').onChange(saveControls);
   controls
     .add(CONTROLS, 'performance')
     .name('Performance preset')
