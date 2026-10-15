@@ -267,6 +267,8 @@ export function findSpawnSpot(world, heightAt, x0, z0, yaw0) {
   };
   const clear = (x, z) => obstaclesNear(world, x, z, 6).every((o) => Math.hypot(o.x - x, o.z - z) > o.r + HALF_LENGTH + 0.3);
   const facing = (h) => {
+    // A one-way circuit (the stadium): always the way round.
+    if (heightAt.oneWay) return h;
     const d = Math.atan2(Math.sin(h - yaw0), Math.cos(h - yaw0));
     return Math.abs(d) <= Math.PI / 2 ? h : h + Math.PI;
   };

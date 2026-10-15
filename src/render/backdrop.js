@@ -33,6 +33,12 @@ const LOOKS = {
     orthoFog: [170, 330],
     dayFog: [120, 320],
   },
+  // Stadium: a hazy summer sky over low, dusty brown hills beyond the stands.
+  stadium: {
+    day: { horizon: '#e6d8c2', top: '#4b8fd4', background: '#e8dccb', far: ['#7d6a58', '#b39c82'], near: ['#6e5a46', '#a08468'] },
+    steps: 6,
+    scale: 0.5,
+  },
   // Snowfield: snow-capped ranges, standing dark against a faint glow at night. `glow`: skylight
   // scattered back off the snow.
   snow: {

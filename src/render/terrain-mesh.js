@@ -350,6 +350,27 @@ function snowColor(h, x, z, out) {
   return out;
 }
 
+// Stadium palette: rust-brown dirt in patches, the lanes darker where the trucks have worn them
+// in, a deep brown bed under the water holes, the dead ground's mounds a dry, paler orange, and the
+// slope between its two levels a pinkish dirt.
+const ARENA_DIRT = new Color('#a2643a');
+const ARENA_DIRT_DARK = new Color('#8a5230');
+const ARENA_LANE = new Color('#7d4a2b');
+const ARENA_DRY = new Color('#bb7c4c');
+const ARENA_MUD = new Color('#4e3220');
+const ARENA_SLOPE = new Color('#c08a72'); // the slope's paler, pinkish dirt
+function stadiumColor(s, x, z, out) {
+  const p = patchNoise(x * 0.06, z * 0.06) * 0.6 + patchNoise(x * 0.18, z * 0.18) * 0.4;
+  out.copy(ARENA_DIRT).lerp(ARENA_DIRT_DARK, Math.min(1, Math.max(0, p * 0.7 + 0.35)));
+  // The lanes, darker toward the middle where the wheels run.
+  out.lerp(ARENA_LANE, s.lane * (0.45 + 0.25 * smoothstepJs(4, 0.5, s.dist)) * (0.8 + 0.2 * patchNoise(x * 0.3, z * 0.3)));
+  out.lerp(ARENA_DRY, Math.min(1, s.mound / 0.8) * 0.7);
+  out.lerp(ARENA_SLOPE, Math.min(1, s.slope * 1.3) * (0.75 + 0.25 * patchNoise(x * 0.2 + 3, z * 0.2)));
+  out.lerp(ARENA_MUD, s.puddle * 0.9);
+  out.offsetHSL(0, 0, fineNoise(x * 0.6, z * 0.6) * 0.025);
+  return out;
+}
+
 // Town palette: lush lawns and parks, paler paving in the busy streets' front yards,
 // sand along the water and a darkening bed under it, meadows and grey granite up the mountains with
 // snow on the highest peaks.
@@ -409,6 +430,7 @@ export function terrainColorAt(heightAt, x, z, out = new Color()) {
   if (heightAt.world === 'snow') return snowColor(heightAt(x, z), x, z, out);
   const slope = slopeAt(heightAt, x, z);
   if (heightAt.world === 'river') return riverColor(heightAt.sample(x, z), slope, x, z, out);
+  if (heightAt.world === 'stadium') return stadiumColor(heightAt.sample(x, z), x, z, out);
   if (heightAt.town) {
     const s = heightAt.sample(x, z);
     townColor(s, slope, x, z, out);
@@ -483,6 +505,10 @@ export function groundMeshData(heightAt, heights, x0, z0, step, resX, resZ = res
         lake[i] = s.side; // signed, for the centre line (see townStreet)
         marks = smoothstepJs(s.dist + 3, s.dist + 8, s.other);
       }
+      else if (heightAt.world === 'stadium') {
+        // No gravel road paint or rock strata: the dirt is in the colours.
+        stadiumColor(heightAt.sample(x, z), x, z, tmp);
+      }
       else if (heightAt.world === 'river') {
         // No gravel road paint in the river bed (roadDist stays far): the sand is in the colours.
         riverColor(heightAt.sample(x, z), slope, x, z, tmp);
@@ -496,7 +522,7 @@ export function groundMeshData(heightAt, heights, x0, z0, step, resX, resZ = res
       gravel[i] = heightAt.snowAt ? smoothstepJs(0.05, 0.9, heightAt.snowAt(x, z).firm) : 1 - Math.min(1, Math.max(0, (slope - 0.4) / 0.4));
       // In town: where the street's centre line shows (not at junctions, where `side` may jump).
       if (heightAt.town) gravel[i] = marks;
-      if (heightAt.sample) steep[i] = Math.min(1, Math.max(0, (slope - 0.55) / 0.5));
+      if (heightAt.sample && heightAt.world !== 'stadium') steep[i] = Math.min(1, Math.max(0, (slope - 0.55) / 0.5));
     }
   }
 

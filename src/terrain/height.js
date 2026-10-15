@@ -2,6 +2,7 @@ import { createNoise2D } from 'simplex-noise';
 import { createCanyonField } from './canyon.js';
 import { createRiverField } from './riverbed.js';
 import { createSnowField } from './snow.js';
+import { createStadiumField } from './stadium.js';
 import { createTownField } from './town.js';
 
 // Small seeded PRNG so the world is the same on every load.
@@ -22,6 +23,7 @@ export function createHeightField({ seed = 1337, mode = 'flat' } = {}) {
   if (mode === 'river') return createRiverField();
   if (mode === 'snow') return createSnowField();
   if (mode === 'daytown') return createTownField();
+  if (mode === 'stadium') return createStadiumField();
   // Test slope ('ramp:20'): flat for x < 6 m, then a steady climb of that many degrees along +x.
   if (mode.startsWith('ramp')) {
     const grade = Math.tan(((Number(mode.split(':')[1]) || 20) * Math.PI) / 180);

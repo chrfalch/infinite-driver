@@ -38,11 +38,13 @@ const PALETTES = {
   snow: { ground: [243, 246, 250], high: [222, 230, 240], road: [132, 132, 134], edge: [190, 198, 210], relief: 0.8 },
   // The sunny town: green lawns and hills, grey streets.
   daytown: { ground: [128, 168, 104], high: [150, 150, 140], road: [96, 98, 104], edge: [70, 96, 62], relief: 0.9 },
+  // The stadium: rust-brown dirt, the lanes a little darker.
+  stadium: { ground: [176, 112, 70], high: [196, 136, 92], road: [128, 76, 46], edge: [150, 92, 56], relief: 1 },
   plain: { ground: [180, 173, 132], high: [150, 150, 108], road: [236, 226, 200], edge: [120, 110, 90], relief: 1 },
 };
 const LAKE = [160, 194, 216];
 const FOREST = [104, 132, 110];
-const ROAD_HALF = { canyon: 3.2, river: 4, snow: 3.2, daytown: 4.2 }; // m, drawn at least two pixels wide
+const ROAD_HALF = { canyon: 3.2, river: 4, snow: 3.2, daytown: 4.2, stadium: 5 }; // m, drawn at least two pixels wide
 
 export function paletteFor(heightAt) {
   return PALETTES[heightAt.world] ?? PALETTES.plain;

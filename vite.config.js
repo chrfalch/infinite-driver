@@ -39,7 +39,7 @@ const noReloadOnReconnect = {
 
 export default defineConfig({
   plugins: [isolationEverywhere, noReloadOnReconnect],
-  server: { port: 8731, strictPort: true, host: '127.0.0.1', allowedHosts: ['endless-drift.tuft.host', 'endless-drift-audio.tuft.host'], headers: isolation },
+  server: { port: 8731, strictPort: true, host: '127.0.0.1', allowedHosts: ['endless-drift.tuft.host', 'endless-drift-audio.tuft.host', 'drift-stadium.tuft.host'], headers: isolation },
   preview: { headers: isolation },
   optimizeDeps: { exclude: ['@pmndrs/glyph'] },
   build: {

@@ -17,6 +17,7 @@ import { WHEELS, applyWheelSettings, createCarBody } from '../vehicle/physics.js
 import { createSoftCarBody } from '../vehicle/soft-vehicle.js';
 import { createColliderStreamer } from './colliders.js';
 import { createPropPhysics } from './props.js';
+import { createBarrierPhysics } from './barriers.js';
 import { AudioFeed } from '../audio/feed.js';
 
 const STEP = 1 / 120;
@@ -252,6 +253,7 @@ async function init(msg) {
   };
   colliders = createColliderStreamer({ rapier: RAPIER, world: physicsWorld, ecs: world, RockField, heightAt, rockCount: msg.rocks });
   if (heightAt.town) props = createPropPhysics(RAPIER, physicsWorld, heightAt);
+  if (heightAt.barriers) createBarrierPhysics(RAPIER, physicsWorld, heightAt);
   simLast = performance.now();
   postMessage({ type: 'ready' });
 }

@@ -227,11 +227,12 @@ export function gpuGroundKind(solver, x, z, out) {
   return out;
 }
 
-// Picks the rocks nearest to (x, z) and uploads them as convex shapes.
+// Picks the rocks nearest to (x, z) and uploads them as convex shapes. A rock may measure its own
+// distance (distanceTo: the stadium's long barriers, from their nearest side rather than middle).
 export function updateGpuRocks(solver, rocks, x, z, range = 14) {
   const near = rocks
-    .map((rock) => ({ rock, dist: Math.hypot(rock.x - x, rock.z - z) }))
-    .filter((r) => r.dist < range + r.rock.size * 2)
+    .map((rock) => ({ rock, dist: rock.distanceTo ? rock.distanceTo(x, z) : Math.hypot(rock.x - x, rock.z - z) }))
+    .filter((r) => r.dist < range + (r.rock.distanceTo ? 0 : r.rock.size * 2))
     .sort((a, b) => a.dist - b.dist)
     .map((r) => {
       r.rock.gpu ??= rockToGpu(r.rock);
