@@ -26,8 +26,9 @@ export const RigidBody = trait(() => ({ body: null }));
 // tires: the car's tyre model ('gpu', 'soft' or 'rigid', see TIRE_MODES in vehicle/config.js).
 // input: the driver's pedals and steering for a car other than the player's (the player's come
 // from the world's Input); null holds it still. id: the car's id (the worker's, with worker physics).
-// slot: its place in the shared tyre-track mesh (see Tracks).
-export const Vehicle = trait(() => ({ controller: null, body: null, drivetrain: null, steer: 0, speed: 0, tires: 'gpu', input: null, id: 0, slot: 0 }));
+// slot: its place in the shared tyre-track mesh (see Tracks). driver: an AI driver that sets `input`
+// every frame (ai/driver.js, systems/ai.js).
+export const Vehicle = trait(() => ({ controller: null, body: null, drivetrain: null, steer: 0, speed: 0, tires: 'gpu', input: null, id: 0, slot: 0, driver: null }));
 export const IsPlayer = trait();
 export const CameraTarget = trait();
 export const TerrainChunk = trait(() => ({ cx: 0, cz: 0, collider: null, heights: null }));
