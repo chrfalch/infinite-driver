@@ -105,18 +105,21 @@
       .race-count.go { color: #8fd14f; }
       .race-count.pop { animation: race-pop 1s ease-out both; }
       .race-count.go.pop { animation-duration: 0.8s; }
-      .race-count.frozen { animation-play-state: paused; }
+      .race-count.frozen { animation-play-state: paused; visibility: hidden; }
       @keyframes race-pop {
         0% { opacity: 0; transform: translate(-50%, -50%) scale(1.8); }
         15% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
         75% { opacity: 1; transform: translate(-50%, -50%) scale(0.92); }
         100% { opacity: 0; transform: translate(-50%, -50%) scale(0.85); }
       }
+      /* Clicks and drags go through to the canvas (orbit and zoom the camera), except on Resume. */
       .pause-screen {
-        position: fixed; inset: 0; z-index: 18; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
-        background: rgba(30, 24, 16, 0.45); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
-        color: #fff; font: 600 14px/1.2 system-ui, sans-serif;
+        position: fixed; inset: 0; z-index: 18; display: none; flex-direction: column; align-items: center; justify-content: flex-start; gap: 14px;
+        padding-top: calc(12vh + env(safe-area-inset-top)); pointer-events: none;
+        background: linear-gradient(rgba(30, 24, 16, 0.4), rgba(30, 24, 16, 0) 45%);
+        color: #fff; font: 600 14px/1.2 system-ui, sans-serif; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
       }
+      .pause-resume { pointer-events: auto; }
       .pause-screen.visible { display: flex; }
       .pause-title { font: 900 48px/1 system-ui, sans-serif; letter-spacing: 1px; text-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); }
       .pause-resume {

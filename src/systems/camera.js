@@ -163,11 +163,12 @@ export function attachZoom(target = window) {
   });
 }
 
-export function followCamera(world) {
+// `delta`: the frame's time; the game passes real time so the camera still eases (zoom, orbit)
+// while paused.
+export function followCamera(world, delta = world.get(Time).delta) {
   const target = world.queryFirst(CameraTarget, Transform);
   if (!target) return;
   const { camera, sun } = world.get(Render);
-  const { delta } = world.get(Time);
   const { position } = target.get(Transform);
   const speed = Math.abs(target.get(Vehicle)?.speed ?? 0);
 

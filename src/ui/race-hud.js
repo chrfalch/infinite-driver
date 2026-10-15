@@ -23,7 +23,7 @@ export function createRaceHud(race, { onPause = () => {}, onCount = () => {} } =
   resume.textContent = 'Resume';
   const hint = document.createElement('div');
   hint.className = 'pause-hint';
-  hint.textContent = 'Esc to resume';
+  hint.textContent = 'Drag to look around · Esc to resume';
   screen.append(title, resume, hint);
   document.body.append(pause, count, screen);
 
