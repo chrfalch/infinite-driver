@@ -43,7 +43,7 @@ const FEATURES = [
   { kind: 'washboard', leg: 0, at: 62, length: 16, height: 0.13, pitch: 2 },
   { kind: 'whoops', leg: 0, at: 84, count: 5, height: 0.38, pitch: 5.5 },
   { kind: 'tabletop', leg: 1, at: 14, up: 7, top: 12, down: 8, height: 1.5 },
-  { kind: 'double', leg: 2, at: 22, up: 6, down: 5, gap: 10, height: 1.3 },
+  { kind: 'double', leg: 2, at: 22, up: 6, down: 6, gap: 3, height: 1.2 },
   { kind: 'puddle', leg: 2, at: 82, length: 16 },
   { kind: 'tabletop', leg: 4, at: 30, up: 8, top: 2, down: 8, height: 1.9 }, // the pyramid
   { kind: 'puddle', leg: 4, at: 66, length: 12 },
