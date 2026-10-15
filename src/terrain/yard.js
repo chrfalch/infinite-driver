@@ -42,24 +42,25 @@ export function yardProps(heightAt, cx, cz) {
     if (!inRow(b)) continue;
     const r = (q) => hash(Math.round(b.x * 10), Math.round(b.z * 10), q);
     // A spot by the building: s along its front (from its middle), a out from its front toward
-    // the street: to the prop's back (against the wall), or to its middle if `mid` (negative: back
-    // beside the building). The fronts stand on the blocks' retaining walls: a prop against one
-    // stands on the sidewalk below it, its back to the wall's foot.
+    // the street (negative: back beside it), to the prop's middle; or as `at` says: 'wall', a is
+    // the gap from the front to the prop's back (on the sidewalk, clear of a retaining wall's foot
+    // where the front is set back), or 'top', along the top of the retaining wall beside the
+    // building (a ignored).
     const yawFront = Math.atan2(-b.nx, -b.nz);
-    const put = (kind, s, a, yawOffset = 0, mid = false) => {
+    const put = (kind, s, a, yawOffset = 0, at = 'mid') => {
       const k = YARD_BY_NAME.get(kind);
       const half = Math.abs(Math.cos(yawOffset)) * k.d / 2 + Math.abs(Math.sin(yawOffset)) * k.w / 2;
-      if (!mid) a += half;
+      if (at === 'wall') a += half;
       let x = b.x + b.ux * s - b.nx * (b.d / 2 + a);
       let z = b.z + b.uz * s - b.nz * (b.d / 2 + a);
       const yaw = yawFront + yawOffset;
-      if (!mid) {
-        const out = heightAt.sample(x, z).dist + half - WALL_FOOT;
-        if (out > 0) {
-          x -= b.nx * out;
-          z -= b.nz * out;
-        }
-      }
+      const mid = at !== 'wall';
+      // Moved out toward the street by this much (back, if negative).
+      let shift = 0;
+      if (at === 'wall') shift = Math.max(0, heightAt.sample(x, z).dist + half - WALL_FOOT);
+      if (at === 'top') shift = heightAt.sample(x, z).dist - half - WALL_TOP - 0.05;
+      x -= b.nx * shift;
+      z -= b.nz * shift;
       // Against a wall: stepped out from it until it stands level (on the sidewalk's flat).
       for (let step = 0; step < (mid ? 1 : 5); step++) {
         const y = fits(heightAt, around, out, k, x - b.nx * step * 0.2, z - b.nz * step * 0.2, yaw);
@@ -86,36 +87,36 @@ function facade(b, put, r) {
       const tables = half > 4 ? 2 : 1;
       for (let i = 0; i < tables; i++) {
         const s = tables === 1 ? side * Math.min(2.2, half - 1) : (i ? 1 : -1) * Math.min(3.2, half - 1);
-        if (!put('Yard_CafeTable', s, 1.25, 0, true)) continue;
-        put('Yard_Chair', s - 0.68, 1.25, Math.PI / 2 + (r(10 + i) - 0.5) * 0.5, true);
-        put('Yard_Chair', s + 0.68, 1.25, -Math.PI / 2 + (r(20 + i) - 0.5) * 0.5, true);
+        if (!put('Yard_CafeTable', s, 1.15, 0, 'mid')) continue;
+        put('Yard_Chair', s - 0.68, 1.15, Math.PI / 2 + (r(10 + i) - 0.5) * 0.5, 'mid');
+        put('Yard_Chair', s + 0.68, 1.15, -Math.PI / 2 + (r(20 + i) - 0.5) * 0.5, 'mid');
       }
-      put('Yard_Planter', 0, 0.1);
+      put('Yard_Planter', 0, 0.1, 0, 'wall');
     } else {
       // A grocer: fruit on a stand by the door, crates to the other side, a barrel.
-      put('Yard_FruitCrates', side * 1.6, 0.1);
-      put('Yard_CrateStack', -side * Math.min(half - 1.1, 3.0), 0.1, (r(5) - 0.5) * 0.3);
-      put('Yard_Barrel', side * Math.min(half - 0.5, 3.0), 0.1);
+      put('Yard_FruitCrates', side * 1.6, 0.1, 0, 'wall');
+      put('Yard_CrateStack', -side * Math.min(half - 1.1, 3.0), 0.1, (r(5) - 0.5) * 0.3, 'wall');
+      put('Yard_Barrel', side * Math.min(half - 0.5, 3.0), 0.1, 0, 'wall');
     }
     return;
   }
   // A home: pots or topiaries either side of the door, then a bench or a planter, and the bins.
   if (r(8) < 0.7) {
     const kind = r(9) < 0.75 ? 'Yard_FlowerPot' : 'Yard_Topiary';
-    put(kind, -1.0, 0.1);
-    put(kind, 1.0, 0.1);
+    put(kind, -1.0, 0.1, 0, 'wall');
+    put(kind, 1.0, 0.1, 0, 'wall');
   }
   if (half > 2.6) {
     const t = r(11);
-    if (t < 0.35) put('Yard_Bench', side * (half - 1.1), 0.1);
-    else if (t < 0.65) put('Yard_Planter', side * (half - 0.9), 0.1);
+    if (t < 0.35) put('Yard_Bench', side * (half - 1.1), 0.1, 0, 'wall');
+    else if (t < 0.65) put('Yard_Planter', side * (half - 0.9), 0.1, 0, 'wall');
   }
   if (r(12) < 0.45 && half > 2.2) {
     const s = -side * (half - 0.45);
-    put('Yard_WheelieBin', s, 0.1);
-    if (r(13) < 0.5) put('Yard_WheelieBin', s + side * 0.7, 0.1);
+    put('Yard_WheelieBin', s, 0.1, 0, 'wall');
+    if (r(13) < 0.5) put('Yard_WheelieBin', s + side * 0.7, 0.1, 0, 'wall');
   }
-  if (r(14) < 0.12) put('Yard_Gnome', (r(15) - 0.5) * 3, 0.5, (r(16) - 0.5));
+  if (r(14) < 0.12) put('Yard_Gnome', (r(15) - 0.5) * 3, 0.5, r(16) - 0.5, 'wall');
 }
 
 // The garden between this building and the next one along its row (on its +u side): a fence or
@@ -138,10 +139,10 @@ function garden(b, rows, put, r) {
   // Along the top of the retaining wall; a mailbox takes the place of a stretch of fence (a gap
   // for the gate).
   if (edge < 0.55) {
-    if (r(31) < 0.5) put('Yard_Mailbox', s0 + 0.4, -0.95, 0, true);
-    for (let i = 0; i < n; i++) put('Yard_PicketFence', mid + (i - (n - 1) / 2) * 2, -0.8, 0, true);
+    if (r(31) < 0.5) put('Yard_Mailbox', s0 + 0.4, 0, 0, 'top');
+    for (let i = 0; i < n; i++) put('Yard_PicketFence', mid + (i - (n - 1) / 2) * 2, 0, 0, 'top');
   } else if (edge < 0.85) {
-    for (let i = 0; i < n; i++) put('Yard_Hedge', mid + (i - (n - 1) / 2) * 2.05, -1.05, 0, true);
+    for (let i = 0; i < n; i++) put('Yard_Hedge', mid + (i - (n - 1) / 2) * 2.05, 0, 0, 'top');
   }
   // Behind the front line (a < 0), beside the house.
   const depth = Math.min(b.d, 7);
@@ -151,7 +152,7 @@ function garden(b, rows, put, r) {
     const kind = things[Math.floor(r(40 + i) * things.length)];
     const s = s0 + 0.3 + r(50 + i) * (gap - 0.6);
     const a = -1.9 - r(60 + i) * Math.max(0, depth - 2.6);
-    put(kind, s, a, (r(70 + i) - 0.5) * (kind === 'Yard_Doghouse' ? 0.8 : 1.2), true);
+    put(kind, s, a, (r(70 + i) - 0.5) * (kind === 'Yard_Doghouse' ? 0.8 : 1.2), 'mid');
   }
 }
 
