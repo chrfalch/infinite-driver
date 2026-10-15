@@ -5,6 +5,7 @@ import { GROUND, TIRE, currentSnow } from '../tire/config.js';
 import { digPatch } from '../terrain/deformation.js';
 import { CAR } from '../vehicle/config.js';
 import { surfaceAt as groundAt } from '../audio/wheels.js';
+import { createHeightCache } from '../terrain/height-cache.js';
 
 const landGround = { rock: 0, gravel: 0 };
 const fineGround = { rock: 0, gravel: 0 };
@@ -29,6 +30,11 @@ const DIG_PER_SLIP = 0.008;
 function fineShare(heightAt, x, z) {
   groundAt(heightAt, x, z, fineGround);
   return (1 - fineGround.rock) * (1 - 0.7 * fineGround.gravel);
+}
+
+function cachedSurface(heightAt, deformation) {
+  const groundHeight = createHeightCache(heightAt);
+  return deformation ? (x, z) => groundHeight(x, z) + deformation.at(x, z) : groundHeight;
 }
 
 // Throws `n` fine grains from (x, z): `dir` is the throw direction on the ground (unit), `speed`
@@ -69,10 +75,14 @@ export function updateSoil(world) {
   const particles = soil?.particles;
   if (!particles) return;
   const { delta } = world.get(Time);
-  const { heightAt, surfaceAt } = world.get(HeightField);
+  const { heightAt } = world.get(HeightField);
   // Bare rock (dry river) and bare asphalt (snowfield) throw nothing, and nothing piles up on them.
   const hardAt = heightAt.rockAt ?? heightAt.bareAt;
   const deformation = world.get(Deformation)?.map;
+  // Every grain in flight looks for the ground every frame: from a cache of the terrain's heights
+  // (terrain/height-cache.js), with the ruts and heaps on top as they are now.
+  soil.surfaceAt ??= cachedSurface(heightAt, deformation);
+  const { surfaceAt } = soil;
   const cellArea = deformation ? deformation.cell * deformation.cell : 1;
   const soilPerClump = 0.35; // share of a clump's volume that is moved in the height map
 

@@ -467,8 +467,12 @@ export function createMtTyreMesh(mesh) {
   const { nu, nv } = mesh;
   // The first sidewall point (j = nv / 4) tells which way the cross-section runs.
   const mirror = mesh.vertices[Math.round(nv / 4) * 3 + 2] < 0;
-  const { material, texture, rockTexture } = tyreMaterial(nu, nv, mirror ? -1 : 1);
+  const key = `${nu}x${nv}${mirror ? '-' : '+'}`;
+  const { material, texture, rockTexture } = freeTyreMaterials.get(key)?.pop() ?? tyreMaterial(nu, nv, mirror ? -1 : 1);
+  rockTexture.image.data.fill(0);
+  rockTexture.needsUpdate = true;
   const object = new Mesh(treadGeometry(nu, nv, mirror), material);
+  object.userData.materialKey = key;
   object.castShadow = true;
   object.receiveShadow = true;
   object.frustumCulled = false;
@@ -478,6 +482,19 @@ export function createMtTyreMesh(mesh) {
   // Start from the rest shape so the first frame is sensible.
   setLattice(object, mesh.vertices, 3);
   return object;
+}
+
+// Tyre materials of cars taken down, kept for the next car's tyres of the same lattice. Building a
+// new material's shader graph (and its shadow pass's) stalled every rebuild (any panel change) for
+// about 140 ms; a material used before is drawn again straight away.
+const freeTyreMaterials = new Map();
+
+// Takes a tyre mesh down: its geometry goes, its material and textures wait for the next tyre.
+export function releaseMtTyreMesh(object) {
+  object.geometry.dispose();
+  const { materialKey: key, lattice: texture, rocks: rockTexture } = object.userData;
+  if (!freeTyreMaterials.has(key)) freeTyreMaterials.set(key, []);
+  freeTyreMaterials.get(key).push({ material: object.material, texture, rockTexture });
 }
 
 // Uploads particle positions (stride 3 for xyz, 4 for the GPU solver's vec4) into the lattice.
