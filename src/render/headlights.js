@@ -37,17 +37,33 @@ export function setHeadlightDarkness(dark) {
   beamScale = DAY_BEAM + (1 - DAY_BEAM) * dark;
 }
 
+// The spot lights themselves, made once and reused by every car built after (only the player's car
+// has lights). three's lighting keys each lit material's shader on the scene's lights by their ids,
+// so new lights after a rebuild (any panel change) rebuilt every material in the scene: a half-second
+// stall. The same lights keep those shaders.
+let spotLights = null;
+function sharedSpotLights() {
+  spotLights ??= {
+    heads: [1, -1].map(() => new SpotLight('#fff3df', 0, HEADLIGHT.distance, HEADLIGHT.angle, HEADLIGHT.penumbra, HEADLIGHT.decay)),
+    tail: new SpotLight('#ff2414', 0, TAILLIGHT.distance, TAILLIGHT.angle, TAILLIGHT.penumbra, TAILLIGHT.decay),
+  };
+  return spotLights;
+}
+
 // The spot lights in the car's frame (+x forward), returned as a group to add to the car. `lamp`:
 // the headlamps' centre (design frame, right side), the round lamps' unless the body has its own.
+// The lights move into the new group (out of the last car's, which is being taken down).
 export function createHeadlights({ lamp = HEADLAMP } = {}) {
   const group = new Group();
   group.name = 'headlights';
   // The lights stay in the scene when off (at zero intensity): adding or taking them out changes
   // every lit material's shader, and switching them on stalled the drive while those compiled.
   // In the scene from the start, those shaders are compiled with the rest on the loading screen.
+  const shared = sharedSpotLights();
   const x = stretchX(lamp.x) + 0.02;
-  const lights = [1, -1].map((s) => {
-    const light = new SpotLight('#fff3df', 0, HEADLIGHT.distance, HEADLIGHT.angle, HEADLIGHT.penumbra, HEADLIGHT.decay);
+  const lights = [1, -1].map((s, i) => {
+    const light = shared.heads[i];
+    light.intensity = 0;
     light.position.set(x, lamp.y, s * lamp.z);
     light.target.position.set(x + HEADLIGHT.aim.x, lamp.y + HEADLIGHT.aim.y, s * (lamp.z + HEADLIGHT.toe * HEADLIGHT.aim.x));
     group.add(light, light.target);
@@ -55,7 +71,8 @@ export function createHeadlights({ lamp = HEADLAMP } = {}) {
   });
   // One red light between the tail lamps stands in for both.
   const tx = stretchX(TAILLAMP.x) - 0.03;
-  const tail = new SpotLight('#ff2414', 0, TAILLIGHT.distance, TAILLIGHT.angle, TAILLIGHT.penumbra, TAILLIGHT.decay);
+  const tail = shared.tail;
+  tail.intensity = 0;
   tail.position.set(tx, TAILLAMP.y, 0);
   tail.target.position.set(tx + TAILLIGHT.aim.x, TAILLAMP.y + TAILLIGHT.aim.y, 0);
   group.add(tail, tail.target);

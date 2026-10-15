@@ -16,6 +16,7 @@ import {
 } from '../ecs/traits.js';
 import { createCarMesh, createWheelRig } from '../render/car-mesh.js';
 import { createSoftTireMesh } from '../render/soft-tire-mesh.js';
+import { releaseMtTyreMesh } from '../render/mt-tyre.js';
 import { createInstanceBatcher } from '../render/instance-batcher.js';
 import { CONTROLS } from '../controls.js';
 import { effectiveGpuTire, effectiveTire, GPU_TIRE, TIRE } from '../tire/config.js';
@@ -158,11 +159,9 @@ export function despawnCar(world, car) {
     if (wheel.has(SoftTireView)) {
       const view = wheel.get(SoftTireView);
       scene.remove(view.object);
-      view.object.geometry.dispose();
-      // Each tyre has its own material and lattice/rock textures (see render/mt-tyre.js).
-      view.object.userData.lattice?.dispose();
-      view.object.userData.rocks?.dispose();
-      view.object.material?.dispose();
+      // Each tyre has its own material and lattice/rock textures (see render/mt-tyre.js), kept for
+      // the next car's tyres.
+      releaseMtTyreMesh(view.object);
     }
     wheel.destroy();
   });
