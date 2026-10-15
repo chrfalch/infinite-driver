@@ -18,7 +18,7 @@
 // The layout is shifted so the start, on the bottom straight, is the origin, facing +x.
 
 export const LANE_HALF = 5; // m of track either side of the centre line
-export const BARRIER = Object.freeze({ offset: LANE_HALF + 0.35, height: 0.85, thick: 0.3, piece: 2 });
+export const BARRIER = Object.freeze({ offset: LANE_HALF + 0.35, height: 1.1, thick: 0.3, piece: 2 });
 export const ARENA_WALL = Object.freeze({ height: 2.6, thick: 0.6, margin: 14 }); // margin: m beyond the outermost lane's centre
 export const WATER_LEVEL = -0.3; // m: the water holes' surface (the floor is at 0)
 const PUDDLE_DEPTH = 0.6; // m below the floor, so 0.3 m of water
@@ -41,13 +41,13 @@ const START = { x: -30, z: 45 };
 // straight begins (after the corner's arc).
 const FEATURES = [
   { kind: 'washboard', leg: 0, at: 62, length: 16, height: 0.13, pitch: 2 },
-  { kind: 'whoops', leg: 0, at: 84, count: 5, height: 0.38, pitch: 5.5 },
-  { kind: 'tabletop', leg: 1, at: 14, up: 7, top: 12, down: 8, height: 1.5 },
+  { kind: 'whoops', leg: 0, at: 84, count: 5, height: 0.3, pitch: 6 },
+  { kind: 'tabletop', leg: 1, at: 12, up: 7, top: 12, down: 11, height: 1.5 },
   { kind: 'double', leg: 2, at: 22, up: 6, down: 6, gap: 3, height: 1.2 },
   { kind: 'puddle', leg: 2, at: 82, length: 16 },
-  { kind: 'tabletop', leg: 4, at: 30, up: 8, top: 2, down: 8, height: 1.9 }, // the pyramid
+  { kind: 'tabletop', leg: 4, at: 26, up: 8, top: 2, down: 12, height: 1.6 }, // the pyramid
   { kind: 'puddle', leg: 4, at: 66, length: 12 },
-  { kind: 'whoops', leg: 6, at: 16, count: 6, height: 0.35, pitch: 5.5 },
+  { kind: 'whoops', leg: 6, at: 16, count: 5, height: 0.3, pitch: 6 },
   { kind: 'washboard', leg: 6, at: 68, length: 14, height: 0.13, pitch: 2 },
 ];
 
