@@ -204,6 +204,13 @@ export function createTuningPanel(world, { heightAt }) {
       requestRebuild(world);
     });
   controls
+    .add(CAR, 'trophyBody')
+    .name('Trophy-truck body')
+    .onChange(() => {
+      saveCar();
+      requestRebuild(world);
+    });
+  controls
     .add(CONTROLS, 'graphics', ['auto', 'high', 'low'])
     .name('Graphics quality')
     .onChange(() => {

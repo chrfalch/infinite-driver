@@ -7,6 +7,7 @@ import {
   BufferAttribute,
   CylinderGeometry,
   BufferGeometry,
+  DoubleSide,
   CurvePath,
   Group,
   LineCurve3,
@@ -213,7 +214,7 @@ const T = 0.031; // 62 mm OD: the chunky tube of the sand buggy
 const T2 = 0.025;
 const plateMat = new MeshStandardMaterial({ color: '#5f6367', roughness: 0.6, metalness: 0.45 });
 // Headlamp lens: a faint glow with the lights off, bright with them on (set per frame by the game).
-export const headlampMaterial = new MeshStandardMaterial({ color: '#fff4d6', emissive: '#fff1c2', emissiveIntensity: 0.6, roughness: 0.2 });
+export const headlampMaterial = new MeshStandardMaterial({ color: '#fff4d6', emissive: '#fff1c2', emissiveIntensity: 0.6, roughness: 0.2, side: DoubleSide });
 // The headlamp lenses' centre (design frame, right side; the builder stretches x), for the lights.
 export const HEADLAMP = Object.freeze({ x: 2.155, y: 0.22, z: 0.32 });
 const lampBody = new MeshStandardMaterial({ color: '#1d1e20', roughness: 0.4, metalness: 0.6 });
@@ -222,7 +223,7 @@ export const tailLampMaterial = new MeshStandardMaterial({ color: '#5a0c0c', emi
 // The round tail lamps' centre (design frame, right side; the builder stretches x), for the lights.
 export const TAILLAMP = Object.freeze({ x: -2.47, y: 0.1, z: 0.36 });
 // Brake light lens: a dim red glow while driving, bright when braking (set per frame by the game).
-export const brakeLightMaterial = new MeshStandardMaterial({ color: '#7a1010', emissive: '#ff2a1a', emissiveIntensity: 0.25, roughness: 0.3 });
+export const brakeLightMaterial = new MeshStandardMaterial({ color: '#7a1010', emissive: '#ff2a1a', emissiveIntensity: 0.25, roughness: 0.3, side: DoubleSide });
 
 // Sand buggy after the user's reference: few, thick tubes in long flowing bends; low wide rockers
 // that sweep up into a compact nose box; A-pillars that run in one line into the roof and down
@@ -232,7 +233,7 @@ const sandBuggy = {
   note: 'After your reference: chunky tube in long bends, a low nose box with a hoop bumper, A-pillars that run into a long roof and down to the rear hoop.',
   paint: '#f0643c',
   pickups: SAND_BUGGY_PICKUPS,
-  build(b, { independent = false } = {}) {
+  build(b, { independent = false, headlamps = true } = {}) {
     const F = -0.4; // floor tube centre
     // Nose box corners (right side): rear-bottom, rear-top, front-bottom, front-top.
     const NRB = [1.05, -0.3, 0.52];
@@ -340,9 +341,10 @@ const sandBuggy = {
       lens.rotation.z = Math.PI / 2;
       lens.position.set(b.x(TAILLAMP.x), TAILLAMP.y, s * TAILLAMP.z);
     }
-    // Round lamps on top of the nose box, facing forward.
+    // Round lamps on top of the nose box, facing forward (left off under the trophy-truck body,
+    // whose own headlamps take their place).
     const { y, z } = HEADLAMP;
-    for (const s of [1, -1]) {
+    for (const s of headlamps ? [1, -1] : []) {
       const body = b.mesh(new CylinderGeometry(0.075, 0.06, 0.08, 20), lampBody);
       body.rotation.z = Math.PI / 2;
       body.position.set(b.x(HEADLAMP.x - 0.045), y, s * z);

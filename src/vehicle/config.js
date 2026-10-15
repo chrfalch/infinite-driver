@@ -9,6 +9,8 @@ export const DEFAULT_CAR = Object.freeze({
   gpuTires: true,
   // Beam axles front and rear (articulating); false gives independent suspension at each corner.
   solidAxles: false,
+  // Trophy-truck body panels over the tube chassis (visual only; see render/trophy-body.js).
+  trophyBody: true,
   mass: 1800,
   // Physics box for the body tub and frame. The wheels stick out past it.
   halfExtents: { x: 1.95, y: 0.34, z: 0.6 },
