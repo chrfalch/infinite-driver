@@ -1,5 +1,6 @@
 // Tube chassis lab: shows one procedural tube chassis design with wheels, axles, shocks and seats
-// for scale. ?design=<index>&view=<3q|side|front|top|3qr>. Drag to orbit.
+// for scale. ?design=<index>&view=<3q|side|front|top|3qr>&body=1 (the trophy-truck body on the sand
+// buggy). Drag to orbit.
 import {
   ACESFilmicToneMapping,
   BoxGeometry,
@@ -19,10 +20,12 @@ import {
   WebGPURenderer,
 } from 'three/webgpu';
 import { DESIGNS, PICKUPS, createTubeChassis } from '../render/tube-chassis.js';
+import { createTrophyBody, setLivery } from '../render/trophy-body.js';
 
 const params = new URLSearchParams(location.search);
 const index = Number(params.get('design') ?? 0);
 const view = params.get('view') ?? '3q';
+const withBody = params.get('body') === '1';
 
 const renderer = new WebGPURenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(2, devicePixelRatio));
@@ -52,8 +55,14 @@ const RIDE = 0.89;
 const car = new (await import('three/webgpu')).Group();
 car.position.y = RIDE;
 scene.add(car);
-const { group, design } = createTubeChassis(index);
+const { group, design } = createTubeChassis(index, { headlamps: !withBody, trophyBody: withBody });
 car.add(group);
+if (withBody) {
+  if (params.get('livery')) setLivery(params.get('livery'));
+  const body = createTrophyBody({ stretch: 0 });
+  car.add(body.object);
+  await body.ready;
+}
 document.querySelector('#label h1').textContent = `${index + 1}. ${design.name}`;
 document.querySelector('#label p').textContent = design.note;
 
@@ -157,11 +166,11 @@ for (const s of [1, -1]) {
 }
 
 const camera = new PerspectiveCamera(32, innerWidth / innerHeight, 0.1, 100);
-const views = { ref: [4.6, 1.5, -5.4], '3q': [5.2, 2.6, 5.2], '3qr': [-5.2, 2.6, 5.4], side: [0, 1.2, 8.2], front: [8.2, 1.4, 0], top: [0.01, 9, 0] };
+const views = { ref: [4.6, 1.5, -5.4], '3q': [5.2, 2.6, 5.2], '3qr': [-5.2, 2.6, 5.4], side: [0, 1.2, 8.2], front: [8.2, 1.4, 0], back: [-8.2, 2.2, 0.01], top: [0.01, 9, 0] };
 const eye = views[view] ?? views['3q'];
 let az = Math.atan2(eye[2], eye[0]);
 let el = Math.atan2(eye[1], Math.hypot(eye[0], eye[2]));
-const dist = Math.hypot(...eye);
+const dist = Math.hypot(...eye) / Number(params.get('zoom') ?? 1);
 const target = new Vector3(0, 0.75, 0);
 const place = () => {
   camera.position.set(Math.cos(az) * Math.cos(el) * dist, Math.sin(el) * dist + target.y * 0.3, Math.sin(az) * Math.cos(el) * dist);
@@ -184,4 +193,4 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
 });
 renderer.setAnimationLoop(() => renderer.render(scene, camera));
-window.__lab = { designs: DESIGNS.length };
+window.__lab = { designs: DESIGNS.length, ready: true };

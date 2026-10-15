@@ -22,6 +22,7 @@ import { createTubeChassis } from './tube-chassis.js';
 import { createDragsterEngine } from './dragster-engine.js';
 import { mergeByMaterial } from './merge-geometry.js';
 import { createHeadlights } from './headlights.js';
+import { BODY_HEADLAMP, createTrophyBody } from './trophy-body.js';
 import { frameGeometry, ifsRack, suspensionMounts } from '../vehicle/frame-geometry.js';
 import { rimInnerFace } from './wheel-inset.js';
 
@@ -89,15 +90,15 @@ export function steeringJointAngles(geo = steeringGeometry()) {
 export const ENGINE = { x: -1.78, y: -0.15, scale: 0.92 };
 
 // Chassis-local: +x forward, +y up, +z right. Origin is the physics body origin.
-// A sand buggy with no body panels: one welded tube chassis (see tube-chassis.js), bucket seats,
-// steering, and running gear.
+// A sand buggy: one welded tube chassis (see tube-chassis.js), bucket seats, steering, and running
+// gear, with trophy-truck body panels over it unless they are switched off (CAR.trophyBody).
 export function createCarMesh() {
   const g = frameGeometry();
   const car = new Group();
   // Parts fixed to the chassis go into `body`, merged into one mesh per material at the end.
   const body = new Group();
   body.name = 'tube chassis';
-  body.add(createTubeChassis(0, { independent: !CAR.solidAxles, stretch: frameStretch() }).group);
+  body.add(createTubeChassis(0, { independent: !CAR.solidAxles, stretch: frameStretch(), headlamps: !CAR.trophyBody, trophyBody: CAR.trophyBody }).group);
 
   // Bucket seats on the floor, driver on the left (-z): cushion, back, and side bolsters.
   for (const z of [-0.3, 0.3]) {
@@ -154,6 +155,10 @@ export function createCarMesh() {
   car.add(engine.object);
   car.userData.engine = engine;
 
+  // Trophy-truck body panels over the frame (loaded with the model; the cage, seats and V8 show
+  // through the window openings and the open bed).
+  if (CAR.trophyBody) car.add(createTrophyBody({ stretch: frameStretch() }).object);
+
   const axles = createAxleRig();
   car.add(axles.group);
 
@@ -162,8 +167,8 @@ export function createCarMesh() {
   car.add(antenna.object);
   car.userData.antenna = antenna;
 
-  // Headlights in the nose lamps (switched by H, see syncLights).
-  const headlights = createHeadlights();
+  // Headlights in the nose lamps or the body's headlamps (switched by H, see syncLights).
+  const headlights = createHeadlights(CAR.trophyBody ? { lamp: BODY_HEADLAMP } : {});
   car.add(headlights);
   car.userData.headlights = headlights;
 

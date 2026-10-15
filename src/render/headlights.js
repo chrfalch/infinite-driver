@@ -1,4 +1,4 @@
-// The car's lights: a spot light in each of the round lamps on the nose box, aimed a little down
+// The car's lights: a spot light in each of the round lamps on the nose box (or the body's headlamps), aimed a little down
 // the road ahead, so they light up a wide pool in front of the car and the road a few tens of
 // metres on; and the round tail lamps at the back, which glow red and throw a faint red light on
 // the ground behind. H switches them all on and off at any time of day (Input.headlights); they
@@ -41,16 +41,17 @@ export function setHeadlightDarkness(dark) {
 // lights they would not show.
 const OFF = 0.002;
 
-// The spot lights in the car's frame (+x forward), returned as a group to add to the car.
-export function createHeadlights() {
+// The spot lights in the car's frame (+x forward), returned as a group to add to the car. `lamp`:
+// the headlamps' centre (design frame, right side), the round lamps' unless the body has its own.
+export function createHeadlights({ lamp = HEADLAMP } = {}) {
   const group = new Group();
   group.name = 'headlights';
   group.visible = false;
-  const x = stretchX(HEADLAMP.x) + 0.02;
+  const x = stretchX(lamp.x) + 0.02;
   const lights = [1, -1].map((s) => {
     const light = new SpotLight('#fff3df', 0, HEADLIGHT.distance, HEADLIGHT.angle, HEADLIGHT.penumbra, HEADLIGHT.decay);
-    light.position.set(x, HEADLAMP.y, s * HEADLAMP.z);
-    light.target.position.set(x + HEADLIGHT.aim.x, HEADLAMP.y + HEADLIGHT.aim.y, s * (HEADLAMP.z + HEADLIGHT.toe * HEADLIGHT.aim.x));
+    light.position.set(x, lamp.y, s * lamp.z);
+    light.target.position.set(x + HEADLIGHT.aim.x, lamp.y + HEADLIGHT.aim.y, s * (lamp.z + HEADLIGHT.toe * HEADLIGHT.aim.x));
     group.add(light, light.target);
     return light;
   });

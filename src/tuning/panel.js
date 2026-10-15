@@ -18,6 +18,7 @@ import {
 import { applyWheelSettings } from '../vehicle/physics.js';
 import { DRIVETRAIN, resetDrivetrain, saveDrivetrain } from '../vehicle/config.js';
 import { requestRebuild, requestRespawn } from '../vehicle/spawn.js';
+import { LIVERIES, setLivery } from '../render/trophy-body.js';
 import { setGravelAmount } from '../render/terrain-mesh.js';
 import { WORLDS, switchWorld, worldMode } from '../world.js';
 import { clock, saveHour } from '../render/time-of-day.js';
@@ -147,6 +148,7 @@ export function createTuningPanel(world, { heightAt }) {
     },
     reset: () => {
       resetCar();
+      setLivery(CAR.livery);
       resetTire();
       resetGpuTire();
       resetGround();
@@ -202,6 +204,20 @@ export function createTuningPanel(world, { heightAt }) {
       CAR.solidAxles = !suspension.independent;
       saveCar();
       requestRebuild(world);
+    });
+  controls
+    .add(CAR, 'trophyBody')
+    .name('Trophy-truck body')
+    .onChange(() => {
+      saveCar();
+      requestRebuild(world);
+    });
+  controls
+    .add(CAR, 'livery', Object.fromEntries(Object.entries(LIVERIES).map(([key, l]) => [l.name, key])))
+    .name('Body paint')
+    .onChange(() => {
+      setLivery(CAR.livery);
+      saveCar();
     });
   controls
     .add(CONTROLS, 'graphics', ['auto', 'high', 'low'])
