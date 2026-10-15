@@ -6,16 +6,52 @@
 // Exported in the chassis' frame on the design wheelbase (x forward, y up, z right); each vertex is
 // moved with the frame stretch here, like the tubes (see stretchX). The headlamp and tail lamp
 // lenses share the chassis' headlamp and brake light materials, so they light up with them.
-import { DoubleSide, Group, MeshStandardMaterial } from 'three/webgpu';
+import { Color, DoubleSide, Group, MeshStandardMaterial } from 'three/webgpu';
+import { abs, clamp, mix, positionLocal, step, uniform } from 'three/tsl';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { CAR } from '../vehicle/config.js';
 import { stretchX } from '../vehicle/physics.js';
 import { brakeLightMaterial, headlampMaterial } from './tube-chassis.js';
 
 // The headlamps' centre (design frame, right side), for the spot lights (see headlights.js).
 export const BODY_HEADLAMP = Object.freeze({ x: 2.1, y: 0.1, z: 0.86 });
 
+// Liveries: the body colour, a stripe down the middle of the hood and roof and along the sides
+// at the belt line, and pinstripes either side of it.
+export const LIVERIES = {
+  gulf: { name: 'Gulf blue', base: '#8fc6e4', stripe: '#f08a24', pin: '#1d3557' },
+  red: { name: 'Race red', base: '#c8202b', stripe: '#f4f1ea', pin: '#1e2022' },
+  yellow: { name: 'Baja yellow', base: '#f2c230', stripe: '#1e2022', pin: '#c8202b' },
+  black: { name: 'Black', base: '#202225', stripe: '#f08a24', pin: '#f4f1ea' },
+  white: { name: 'White', base: '#f2efe6', stripe: '#c8202b', pin: '#1d3557' },
+};
+
+const livery = { base: uniform(new Color()), stripe: uniform(new Color()), pin: uniform(new Color()) };
+export function setLivery(key) {
+  const l = LIVERIES[key] ?? LIVERIES.gulf;
+  livery.base.value.set(l.base);
+  livery.stripe.value.set(l.stripe);
+  livery.pin.value.set(l.pin);
+}
+setLivery(CAR.livery);
+
+// The paint, striped by where it is on the body (chassis frame; the stripes don't follow the
+// frame stretch, which only moves them along their length).
+function paintMaterial() {
+  const material = new MeshStandardMaterial({ roughness: 0.3, metalness: 0.05, side: DoubleSide });
+  const p = positionLocal;
+  const across = abs(p.z);
+  const band = (lo, hi, v) => step(lo, v).sub(step(hi, v));
+  const top = step(0.3, p.y).mul(step(across, 0.62)); // hood, roof
+  const sides = step(0.62, across).mul(step(across, 0.79)); // doors, bed sides (not the flares)
+  const stripe = band(0, 0.15, across).mul(top).add(band(0.05, 0.15, p.y).mul(sides));
+  const pin = band(0.15, 0.19, across).mul(top).add(band(0.02, 0.05, p.y).add(band(0.15, 0.18, p.y)).mul(sides));
+  material.colorNode = mix(mix(livery.base, livery.pin, clamp(pin, 0, 1)), livery.stripe, clamp(stripe, 0, 1));
+  return material;
+}
+
 const MATERIALS = {
-  Paint: new MeshStandardMaterial({ color: '#f2efe6', roughness: 0.32, metalness: 0.05, side: DoubleSide }),
+  Paint: paintMaterial(),
   Trim: new MeshStandardMaterial({ color: '#1e2022', roughness: 0.6, metalness: 0.1, side: DoubleSide }),
   Chrome: new MeshStandardMaterial({ color: '#c9ccd0', roughness: 0.2, metalness: 0.9, side: DoubleSide }),
   Glass: new MeshStandardMaterial({ color: '#1d2b33', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.45, depthWrite: false, side: DoubleSide }),

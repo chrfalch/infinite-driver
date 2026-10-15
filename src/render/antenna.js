@@ -10,6 +10,7 @@ import {
   TorusGeometry,
   Vector3,
 } from 'three/webgpu';
+import { CAR } from '../vehicle/config.js';
 import { stretchX } from '../vehicle/physics.js';
 
 // A fibreglass whip antenna with a pennant at the tip, on the rear of the roof. The whip's first
@@ -32,9 +33,11 @@ export const WHIP = {
 };
 
 // Chassis-local mount: on top of the left roof rail near its rear end (the sand buggy's roof in
-// tube-chassis.js runs from the main hoop at x -0.6 back to -1.5), moved back with the frame stretch.
+// tube-chassis.js runs from the main hoop at x -0.6 back to -1.5; under the trophy-truck body the
+// rail runs lower, from the main hoop's top at -0.47 down to -1.35), moved back with the frame
+// stretch.
 export function antennaMount() {
-  return new Vector3(stretchX(-1.3), 0.875, -0.484);
+  return CAR.trophyBody ? new Vector3(stretchX(-1.2), 0.652, -0.469) : new Vector3(stretchX(-1.3), 0.875, -0.484);
 }
 
 const UP = new Vector3(0, 1, 0);

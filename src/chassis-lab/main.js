@@ -20,7 +20,7 @@ import {
   WebGPURenderer,
 } from 'three/webgpu';
 import { DESIGNS, PICKUPS, createTubeChassis } from '../render/tube-chassis.js';
-import { createTrophyBody } from '../render/trophy-body.js';
+import { createTrophyBody, setLivery } from '../render/trophy-body.js';
 
 const params = new URLSearchParams(location.search);
 const index = Number(params.get('design') ?? 0);
@@ -55,9 +55,10 @@ const RIDE = 0.89;
 const car = new (await import('three/webgpu')).Group();
 car.position.y = RIDE;
 scene.add(car);
-const { group, design } = createTubeChassis(index, { headlamps: !withBody });
+const { group, design } = createTubeChassis(index, { headlamps: !withBody, trophyBody: withBody });
 car.add(group);
 if (withBody) {
+  if (params.get('livery')) setLivery(params.get('livery'));
   const body = createTrophyBody({ stretch: 0 });
   car.add(body.object);
   await body.ready;

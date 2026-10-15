@@ -98,7 +98,7 @@ export function createCarMesh() {
   // Parts fixed to the chassis go into `body`, merged into one mesh per material at the end.
   const body = new Group();
   body.name = 'tube chassis';
-  body.add(createTubeChassis(0, { independent: !CAR.solidAxles, stretch: frameStretch(), headlamps: !CAR.trophyBody }).group);
+  body.add(createTubeChassis(0, { independent: !CAR.solidAxles, stretch: frameStretch(), headlamps: !CAR.trophyBody, trophyBody: CAR.trophyBody }).group);
 
   // Bucket seats on the floor, driver on the left (-z): cushion, back, and side bolsters.
   for (const z of [-0.3, 0.3]) {

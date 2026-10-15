@@ -7,13 +7,13 @@
 # Kept: the body panels (hood, front quarters, cab, doors, stepside bed sides), the windshield and
 # back window, grille, lamps and mirrors. Dropped: the interior, running gear, frame, bumpers (the
 # chassis has tube ones), tailgate and bed floor (the V8 sits in the open bed), side glass (window
-# nets look), badges and stickers. The body is then bent onto the chassis' frame (x forward, y up,
-# z right; metres, on the 2.7 m design wheelbase): each stretch of its length is mapped between
-# landmarks (nose, front axle, windshield foot, windshield top, cab back, rear axle, tail) so the
-# axles land on ours and the cab goes round the cage, it is raised so the roof clears the roof
-# tubes, and the fenders and bed sides are pushed out to cover the 2.1 m track. Big wheel arches
-# for the 0.92 m tyres and their travel are cut out and edged with black flare lips. Materials are
-# reduced to a few the game sets up: Paint, Trim, Chrome, Glass, Headlamp, Signal and Tail.
+# nets look), badges and stickers. The truck keeps its own shape: it is scaled evenly (0.86) into
+# the chassis' frame (x forward, y up, z right; metres, on the 2.7 m design wheelbase) with its
+# front axle on ours, and the tube chassis' trophy-truck cage is built to fit inside it (see
+# TROPHY_CAGE in src/render/tube-chassis.js). Its wheel openings are cut out big for the 0.92 m
+# tyres and their travel, and wide fibreglass fender flares over each wheel reach out over the
+# 2.1 m track, as on a trophy truck. Materials are reduced to a few the game sets up: Paint (the
+# livery, painted by the game), Trim, Chrome, Glass, Headlamp, Signal and Tail.
 import bpy, bmesh, math, sys
 from mathutils import Vector
 
@@ -48,68 +48,17 @@ COLORS = {  # sRGB, roughness, metalness, alpha
 # Source frame: Blender z up, nose toward -y, driver (left) on +x, centre line at x = -0.06; wheels
 # r 0.375 at z -0.33, axles at y -1.8 and +1.485. u is the distance forward (-y).
 CENTRE_X = -0.06
-# Landmarks along the length, source u -> chassis x. Near each axle the map is uniform, so the
-# arches stay round; the cab and the nose take up the difference.
-U_MAP = [
-    (-2.70, -2.47),
-    (-2.58, -2.40),  # tail
-    (-2.07, -1.90),  # back of the rear fender
-    (-1.485, -1.35),  # rear axle
-    (-0.90, -0.80),  # front of the rear fender
-    (-0.49, -0.76),  # cab back
-    (-0.32, -0.66),  # back of the roof, over the main hoop (x -0.6)
-    (0.72, 0.30),  # top of the windshield, ahead of the header (x 0.25)
-    (1.46, 0.80),  # windshield foot; the glass clears the A-pillars all the way up
-    (1.80, 1.35),  # front axle
-    (2.27, 1.95),  # front of the front fender
-    (2.62, 2.16),  # nose
-    (2.70, 2.21),
-]
-# Height: the rocker's foot to the floor tubes' bottom, the roof to just over the roof tubes.
-ROCKER, ROOF = (-0.37, -0.45), (0.96, 0.975)
-# Half width: the cab's sides go just outside the rockers and side bars (0.69-0.72); the fenders
-# and bed sides go out over the tyres (outer face at 1.22). Inside the inner width the body keeps
-# its width (the hood, grille and roof; the bed rails), past it it is spread out to the target.
-SRC_HALF = 0.91
-CAB = (0.42, 0.80)  # (inner, half width)
-FENDER = (0.60, 1.29)
-
-
-def lerp_map(table, v):
-    if v <= table[0][0]:
-        (a0, b0), (a1, b1) = table[0], table[1]
-    elif v >= table[-1][0]:
-        (a0, b0), (a1, b1) = table[-2], table[-1]
-    else:
-        for (a0, b0), (a1, b1) in zip(table, table[1:]):
-            if a0 <= v <= a1:
-                break
-    return b0 + (v - a0) * (b1 - b0) / (a1 - a0)
-
-
-def smoothstep(a, b, x):
-    t = max(0.0, min(1.0, (x - a) / (b - a)))
-    return t * t * (3 - 2 * t)
-
-
-# Inner and half width along the (chassis) length: fenders, the cab between them, the bed sides.
-def widths(x):
-    front = smoothstep(0.72, 0.98, x)  # the front fender starts just ahead of the door
-    rear = 1 - smoothstep(-0.84, -0.74, x)  # the bed side starts behind the cab
-    t = max(front, rear)
-    return CAB[0] + (FENDER[0] - CAB[0]) * t, CAB[1] + (FENDER[1] - CAB[1]) * t
+SCALE = 0.86
+# The source u that lands on x = 0: its front axle (u 1.8) goes on ours (x 1.35); the cab's back
+# (u -0.49) then lands at -0.62, behind the main hoop.
+U0 = 1.8 - 1.35 / SCALE
+# Height: the rockers' foot (source z -0.37) at y -0.34, a little above the floor tubes, so the
+# roof (0.96) comes to 0.80, just over the cage's roof tubes.
+ROCKER_Y = -0.34
 
 
 def to_chassis(co):
-    u = -co.y
-    x = lerp_map(U_MAP, u)
-    y = ROCKER[1] + (co.z - ROCKER[0]) * (ROOF[1] - ROCKER[1]) / (ROOF[0] - ROCKER[0])
-    s = -(co.x - CENTRE_X)  # right is -x in the source
-    a = abs(s)
-    inner, half = widths(x)
-    if a > inner:
-        a = inner + (a - inner) * (half - inner) / (SRC_HALF - inner)
-    return x, y, math.copysign(a, s)
+    return (-co.y - U0) * SCALE, ROCKER_Y + (co.z + 0.37) * SCALE, -(co.x - CENTRE_X) * SCALE  # right is -x in the source
 
 
 def B(x, y, z):  # chassis frame -> Blender (z up); the glTF exporter turns it back
@@ -177,7 +126,7 @@ body.select_set(True)
 # Wheel arches: a cylinder across each wheel cuts the fenders, the doors' corners and the bed
 # sides (outboard of the chassis only, so nothing over the middle is touched).
 WHEEL_X, WHEEL_Y, ARCH_R = 1.35, -0.45, 0.70
-CUT_IN, CUT_OUT = 0.62, 1.8
+CUT_IN, CUT_OUT = 0.4, 1.8
 for ax in (WHEEL_X, -WHEEL_X):
     for s in (1, -1):
         bpy.ops.mesh.primitive_cylinder_add(vertices=96, radius=ARCH_R, depth=CUT_OUT - CUT_IN,
@@ -192,29 +141,44 @@ for ax in (WHEEL_X, -WHEEL_X):
         bpy.ops.object.modifier_apply(modifier=mod.name)
         bpy.data.objects.remove(cyl, do_unlink=True)
 
-# Flare lips: the panels' cut edges round each arch turned out into a black flange, out from the
-# side and a little out from the wheel.
+# Fender flares: a fibreglass hood over each wheel from the body's side out past the tyre, swept
+# round the arch; its section (radius out from the wheel, height across the car) rises from the
+# body side, rolls over and ends in a black lip at the arch. They stop at the nose (front) and the
+# tail; the front ones reach back over the doors' lower corners.
+FLARE = [(0.15, 0.72), (0.15, 0.84), (0.135, 0.98), (0.11, 1.1), (0.075, 1.2), (0.035, 1.27), (0.0, 1.3)]
+LIP = [(0.0, 1.3), (-0.01, 1.285), (-0.012, 1.24)]
+paint, trim = slot['Paint'], slot['Trim']
 bm = bmesh.new()
 bm.from_mesh(me)
-def on_arch(v):
-    x, z, y = v.co.x, -v.co.y, v.co.z
-    if abs(z) < CUT_IN + 0.005:
-        return None
-    for ax in (WHEEL_X, -WHEEL_X):
-        if abs(math.hypot(x - ax, y - WHEEL_Y) - ARCH_R) < 0.004:
-            return ax
-    return None
-edges = [e for e in bm.edges if e.is_boundary and on_arch(e.verts[0]) is not None and on_arch(e.verts[1]) is not None]
-ret = bmesh.ops.extrude_edge_only(bm, edges=edges)
-for v in [g for g in ret['geom'] if isinstance(g, bmesh.types.BMVert)]:
-    x, z, y = v.co.x, -v.co.y, v.co.z
-    ax = on_arch(v)
-    dx, dy = x - ax, y - WHEEL_Y
-    r = math.hypot(dx, dy)
-    k = (r + 0.035) / r
-    v.co = B(ax + dx * k, WHEEL_Y + dy * k, math.copysign(abs(z) + 0.06, z))
-for f in [g for g in ret['geom'] if isinstance(g, bmesh.types.BMFace)]:
-    f.material_index = lip
+# The boolean leaves a few slivers hanging from the cut (on the panels' open edges); nothing of
+# the body itself reaches below the rockers' foot.
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if min(v.co.z for v in f.verts) < ROCKER_Y - 0.03], context='FACES')
+bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+
+
+def sweep(ax, side, a0, a1, section, mat, n=56):
+    rows = []
+    for i in range(n + 1):
+        a = math.radians(a0 + (a1 - a0) * i / n)
+        c, sn = math.cos(a), math.sin(a)
+        rows.append([bm.verts.new(B(ax + c * (ARCH_R + dr), WHEEL_Y + sn * (ARCH_R + dr), side * z)) for dr, z in section])
+    for r0, r1 in zip(rows, rows[1:]):
+        for j in range(len(section) - 1):
+            f = [r0[j], r1[j], r1[j + 1], r0[j + 1]]
+            f = bm.faces.new(f if side > 0 else list(reversed(f)))
+            f.material_index = mat
+            f.smooth = True
+    return rows
+
+
+for ax, (a0, a1) in ((WHEEL_X, (36, 152)), (-WHEEL_X, (16, 166))):
+    for side in (1, -1):
+        rows = sweep(ax, side, a0, a1, FLARE, paint)
+        sweep(ax, side, a0, a1, LIP, trim)
+        # Close the flare's ends down to its root.
+        for row in (rows[0], rows[-1]):
+            f = bm.faces.new(row)
+            f.material_index = paint
 bm.to_mesh(me)
 bm.free()
 for p in me.polygons:

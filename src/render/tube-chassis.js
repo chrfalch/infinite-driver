@@ -225,6 +225,31 @@ export const TAILLAMP = Object.freeze({ x: -2.47, y: 0.1, z: 0.36 });
 // Brake light lens: a dim red glow while driving, bright when braking (set per frame by the game).
 export const brakeLightMaterial = new MeshStandardMaterial({ color: '#7a1010', emissive: '#ff2a1a', emissiveIntensity: 0.25, roughness: 0.3, side: DoubleSide });
 
+// The sand buggy's cage, and the same cage fitted inside the trophy-truck body (design frame, right
+// side). The trophy cage's roof sits under the body's roof (0.80), its A-pillars bend at the cowl so
+// they stay behind the windshield, its main hoop leans forward to clear the cab's sloping back,
+// and its nose box ends under the grille (2.05) with the bumper just ahead of it.
+const BUGGY_CAGE = {
+  noseX: 2.05,
+  bumperX: 2.25,
+  hoopX: -0.6,
+  hoopTop: [-0.6, 0.9, 0.5],
+  header: [0.25, 0.88, 0.52],
+  pillar: [],
+  roofEnd: [-1.5, 0.84, 0.48],
+  harness: [-0.6, 0.38, 0.6],
+};
+const TROPHY_CAGE = {
+  noseX: 1.85,
+  bumperX: 2.12,
+  hoopX: -0.58,
+  hoopTop: [-0.47, 0.72, 0.48],
+  header: [0.4, 0.72, 0.48],
+  pillar: [[0.93, 0.38, 0.55]],
+  roofEnd: [-1.35, 0.6, 0.46],
+  harness: [-0.49, 0.48, 0.6],
+};
+
 // Sand buggy after the user's reference: few, thick tubes in long flowing bends; low wide rockers
 // that sweep up into a compact nose box; A-pillars that run in one line into the roof and down
 // into the rear frame; a shoulder bar; diamond-plate floor; round lamps.
@@ -233,17 +258,24 @@ const sandBuggy = {
   note: 'After your reference: chunky tube in long bends, a low nose box with a hoop bumper, A-pillars that run into a long roof and down to the rear hoop.',
   paint: '#f0643c',
   pickups: SAND_BUGGY_PICKUPS,
-  build(b, { independent = false, headlamps = true } = {}) {
+  // trophyBody: the cage fitted inside the trophy-truck body (render/trophy-body.js): a shorter
+  // nose box under its hood, the A-pillars behind its windshield, a lower roof under its roof and
+  // the main hoop leaning forward inside its cab, the rear cage out over its bed. The rockers,
+  // suspension and engine mounts are the same.
+  build(b, { independent = false, headlamps = true, trophyBody = false } = {}) {
     const F = -0.4; // floor tube centre
-    // Nose box corners (right side): rear-bottom, rear-top, front-bottom, front-top.
+    const C = trophyBody ? TROPHY_CAGE : BUGGY_CAGE;
+    // Nose box corners (right side): rear-bottom, rear-top, front-bottom, front-top; its sides
+    // narrow toward the front (z 0.52 at x 1.05, 0.12 less per metre).
+    const noseZ = 0.52 - 0.12 * (C.noseX - 1.05);
     const NRB = [1.05, -0.3, 0.52];
     const NRT = [1.05, 0.12, 0.54];
-    const NFB = [2.05, -0.3, 0.4];
-    const NFT = [2.05, 0.12, 0.4];
+    const NFB = [C.noseX, -0.3, noseZ];
+    const NFT = [C.noseX, 0.12, noseZ];
     // Main hoop feet and top, windshield header, rear hoop.
-    const MHF = [-0.6, F, 0.66];
-    const MHT = [-0.6, 0.9, 0.5];
-    const HDR = [0.25, 0.88, 0.52];
+    const MHF = [C.hoopX, F, 0.66];
+    const MHT = C.hoopTop;
+    const HDR = C.header;
     const RHT = [-2.4, 0.12, 0.44];
     const RHB = [-2.4, -0.25, 0.44];
 
@@ -260,19 +292,21 @@ const sandBuggy = {
     b.cross(NFB, T2);
     b.cross([1.22, 0.12, 0.51], T2); // front shock cross member
     // Hoop bumper wrapped round the front of the nose box.
-    b.tube([[2.05, -0.12, 0.4], [2.25, -0.12, 0.32], [2.25, -0.12, -0.32], [2.05, -0.12, -0.4]], T2, 0.14);
+    const bx = C.bumperX;
+    b.tube([[C.noseX, -0.12, noseZ], [bx, -0.12, 0.32], [bx, -0.12, -0.32], [C.noseX, -0.12, -noseZ]], T2, 0.14);
     // A-pillars: from the top of the nose box up to the header, back along the roof, over the
     // main hoop, and down in one long bend to the rear hoop.
-    const RRF = [-1.5, 0.84, 0.48]; // rear end of the roof
-    b.sym([NRT, HDR, MHT, RRF, RHT, RHB], T, 0.2);
+    const RRF = C.roofEnd; // rear end of the roof
+    b.sym([NRT, ...C.pillar, HDR, MHT, RRF, RHT, RHB], T, 0.2);
     b.cross(HDR, T2);
     b.cross(RRF, T2);
     // Main hoop and harness bar.
     b.tube([MHF, MHT, [MHT[0], MHT[1], -MHT[2]], [MHF[0], MHF[1], -MHF[2]]], T, 0.18);
-    b.cross([-0.6, 0.38, 0.6], T2);
+    b.cross(C.harness, T2);
     // Side bars: nose box to main hoop, slightly bowed out, then on to the rear hoop.
-    b.sym([NRT, [0.25, 0.17, 0.69], [-0.6, 0.2, 0.655]], T, 0.4);
-    b.sym([[-0.6, 0.2, 0.655], [-1.2, 0.2, 0.6], RHT], T2, 0.2);
+    const side = [C.hoopX + ((0.2 - F) / (MHT[1] - F)) * (MHT[0] - C.hoopX), 0.2, 0.655]; // on the hoop's leg
+    b.sym([NRT, [0.25, 0.17, 0.69], side], T, 0.4);
+    b.sym([side, [-1.2, 0.2, 0.6], RHT], T2, 0.2);
     // Rear posts from the lower rail up through the shock mount to the rear of the roof.
     b.sym([[-1.2, -0.33, 0.58], [-1.2, 0.2, 0.6], RRF], T2, 0.08);
     b.cross([-1.2, 0.2, 0.6], T2);
@@ -289,7 +323,7 @@ const sandBuggy = {
     // Dash bar between the A-pillars.
     b.cross([0.69, 0.46, 0.53], T2);
     // Floor cross members and link mounts.
-    for (const x of [0.72, 0.1, -0.6]) b.cross([x, F, 0.66], T2);
+    for (const x of [0.72, 0.1, C.hoopX]) b.cross([x, F, 0.66], T2);
     for (const f of [1, -1]) {
       b.tab(sandBuggy.pickups.shockTop(f > 0), 'z');
       if (independent) {
@@ -321,7 +355,7 @@ const sandBuggy = {
       b.tab(sandBuggy.pickups.lowerLink(f > 0));
     }
     // Diamond-plate floor between the rockers.
-    b.plate([[0.72, F + 0.02, 0.64], [0.72, F + 0.02, -0.64], [-0.6, F + 0.02, -0.64], [-0.6, F + 0.02, 0.64]], plateMat);
+    b.plate([[0.72, F + 0.02, 0.64], [0.72, F + 0.02, -0.64], [C.hoopX, F + 0.02, -0.64], [C.hoopX, F + 0.02, 0.64]], plateMat);
     // Tail and brake lights on the rear hoop, facing back. The lens material is shared, so the
     // game dims and brightens it (see brakeLightMaterial).
     for (const s of [1, -1]) {
