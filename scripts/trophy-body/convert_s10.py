@@ -11,9 +11,10 @@
 # the chassis' frame (x forward, y up, z right; metres, on the 2.7 m design wheelbase) with its
 # front axle on ours, and the tube chassis' trophy-truck cage is built to fit inside it (see
 # TROPHY_CAGE in src/render/tube-chassis.js). Its wheel openings are cut out big for the 0.92 m
-# tyres and their travel, and slim fibreglass fender flares over each wheel reach out over the
-# 2.1 m track, as on a trophy truck. Materials are reduced to a few the game sets up: Paint (the
-# livery, painted by the game), Trim, Chrome, Glass, Headlamp, Signal and Tail.
+# tyres and their travel, and narrow fibreglass fender flares over each wheel stand about 10 cm
+# out from the body's sides (the tyres stick out past them). Materials are reduced to a few the
+# game sets up: Paint (the livery, painted by the game), Trim, Chrome, Glass, Headlamp, Signal and
+# Tail.
 import bpy, bmesh, math, sys
 from mathutils import Vector
 
@@ -141,12 +142,12 @@ for ax in (WHEEL_X, -WHEEL_X):
         bpy.ops.object.modifier_apply(modifier=mod.name)
         bpy.data.objects.remove(cyl, do_unlink=True)
 
-# Fender flares: a slim fibreglass eyebrow over each wheel from the body's side out to just past
-# the tyre, swept round the arch; its section (radius out from the wheel, height across the car)
-# leaves the body side, rolls over and ends in a black lip at the arch. Its top stays under the
-# fenders' top line. They stop short of the nose, the doors and the tail.
-FLARE = [(0.085, 0.74), (0.085, 0.86), (0.075, 1.0), (0.055, 1.12), (0.03, 1.2), (0.01, 1.24), (0.0, 1.25)]
-LIP = [(0.0, 1.25), (-0.008, 1.24), (-0.01, 1.2)]
+# Fender flares: a narrow fibreglass lip over each wheel, about 10 cm out from the body's side
+# (the tyres stick out past it), swept round the arch; its section (radius out from the wheel,
+# height across the car) leaves the body side, rolls over and ends in a black edge at the arch.
+# They stop short of the nose, the doors and the tail.
+FLARE = [(0.05, 0.74), (0.05, 0.8), (0.042, 0.845), (0.025, 0.87), (0.008, 0.882), (0.0, 0.885)]
+LIP = [(0.0, 0.885), (-0.006, 0.88), (-0.008, 0.86)]
 paint, trim = slot['Paint'], slot['Trim']
 bm = bmesh.new()
 bm.from_mesh(me)
