@@ -11,7 +11,7 @@
 # the chassis' frame (x forward, y up, z right; metres, on the 2.7 m design wheelbase) with its
 # front axle on ours, and the tube chassis' trophy-truck cage is built to fit inside it (see
 # TROPHY_CAGE in src/render/tube-chassis.js). Its wheel openings are cut out big for the 0.92 m
-# tyres and their travel, and wide fibreglass fender flares over each wheel reach out over the
+# tyres and their travel, and slim fibreglass fender flares over each wheel reach out over the
 # 2.1 m track, as on a trophy truck. Materials are reduced to a few the game sets up: Paint (the
 # livery, painted by the game), Trim, Chrome, Glass, Headlamp, Signal and Tail.
 import bpy, bmesh, math, sys
@@ -125,7 +125,7 @@ body.select_set(True)
 
 # Wheel arches: a cylinder across each wheel cuts the fenders, the doors' corners and the bed
 # sides (outboard of the chassis only, so nothing over the middle is touched).
-WHEEL_X, WHEEL_Y, ARCH_R = 1.35, -0.45, 0.70
+WHEEL_X, WHEEL_Y, ARCH_R = 1.35, -0.45, 0.66  # tyre 0.46 + 0.18 bump travel, a little room
 CUT_IN, CUT_OUT = 0.4, 1.8
 for ax in (WHEEL_X, -WHEEL_X):
     for s in (1, -1):
@@ -141,12 +141,12 @@ for ax in (WHEEL_X, -WHEEL_X):
         bpy.ops.object.modifier_apply(modifier=mod.name)
         bpy.data.objects.remove(cyl, do_unlink=True)
 
-# Fender flares: a fibreglass hood over each wheel from the body's side out past the tyre, swept
-# round the arch; its section (radius out from the wheel, height across the car) rises from the
-# body side, rolls over and ends in a black lip at the arch. They stop at the nose (front) and the
-# tail; the front ones reach back over the doors' lower corners.
-FLARE = [(0.15, 0.72), (0.15, 0.84), (0.135, 0.98), (0.11, 1.1), (0.075, 1.2), (0.035, 1.27), (0.0, 1.3)]
-LIP = [(0.0, 1.3), (-0.01, 1.285), (-0.012, 1.24)]
+# Fender flares: a slim fibreglass eyebrow over each wheel from the body's side out to just past
+# the tyre, swept round the arch; its section (radius out from the wheel, height across the car)
+# leaves the body side, rolls over and ends in a black lip at the arch. Its top stays under the
+# fenders' top line. They stop short of the nose, the doors and the tail.
+FLARE = [(0.085, 0.74), (0.085, 0.86), (0.075, 1.0), (0.055, 1.12), (0.03, 1.2), (0.01, 1.24), (0.0, 1.25)]
+LIP = [(0.0, 1.25), (-0.008, 1.24), (-0.01, 1.2)]
 paint, trim = slot['Paint'], slot['Trim']
 bm = bmesh.new()
 bm.from_mesh(me)
@@ -171,7 +171,7 @@ def sweep(ax, side, a0, a1, section, mat, n=56):
     return rows
 
 
-for ax, (a0, a1) in ((WHEEL_X, (36, 152)), (-WHEEL_X, (16, 166))):
+for ax, (a0, a1) in ((WHEEL_X, (30, 150)), (-WHEEL_X, (22, 158))):
     for side in (1, -1):
         rows = sweep(ax, side, a0, a1, FLARE, paint)
         sweep(ax, side, a0, a1, LIP, trim)
