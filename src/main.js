@@ -61,7 +61,7 @@ import { createTuningPanel } from './tuning/panel.js';
 import { loadPanelOpen, panelStartsOpen, savePanelOpen } from './tuning/panel-state.js';
 import { updateInstanceBatchers } from './render/instance-batcher.js';
 import { createPhysicsClient, workerGpuSupported } from './physics/client.js';
-import { ROCK_COUNT, loadTerrain, startChunkWorker } from './systems/terrain.js';
+import { ROCK_COUNT, connectSnowTiles, loadTerrain, startChunkWorker } from './systems/terrain.js';
 import { playerTires } from './vehicle/config.js';
 import { configuredRivals, gridSlot } from './vehicle/cars.js';
 import { createCourse, gridSpot } from './ai/course.js';
@@ -248,6 +248,7 @@ export async function main(loading) {
 
   // The chunk worker first, so the initial load can hand it the rock sheets (dry river).
   startChunkWorker({ mode });
+  connectSnowTiles(groundSurface.tiles);
   await loadTerrain(world, {
     onProgress: (done, total) => {
       loading?.set('terrain', total ? done / total : 1);
@@ -449,6 +450,8 @@ export async function main(loading) {
     // Rebuilds every car in place, as a settings change does.
     rebuild: () => requestRebuild(world),
     heightAt,
+    // The ground (or snow) patch around the car, with its ruts.
+    groundSurface,
     audio,
     audioFeed,
     minimap,

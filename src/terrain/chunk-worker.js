@@ -10,6 +10,7 @@ import { createHeightField } from './height.js';
 import { generatePebbles, generateRocks } from './rocks.js';
 import { generatePlants } from './vegetation.js';
 import { rockSheetData } from './rock-sheet.js';
+import { sampleSnowTile } from './snow-tiles.js';
 
 let heightAt = null;
 let rockCount = 70;
@@ -29,6 +30,12 @@ self.onmessage = (e) => {
     const transfer = sheet ? [sheet.positions.buffer, sheet.normals.buffer, sheet.colors.buffer, sheet.ground.buffer, sheet.aboveBed.buffer, sheet.indices.buffer] : [];
     if (pebbles) transfer.push(pebbles.buffer);
     postMessage({ type: 'sheet', cx: msg.cx, cz: msg.cz, sheet, pebbles }, transfer);
+    return;
+  }
+  // The snowfield's snow in a 16 m tile, for the snow surface around the car (terrain/snow-tiles.js).
+  if (msg.type === 'snowTile') {
+    const data = sampleSnowTile(heightAt, msg.tx, msg.tz);
+    postMessage({ type: 'snowTile', tx: msg.tx, tz: msg.tz, data }, [data.buffer]);
     return;
   }
   if (msg.type !== 'chunk') return;

@@ -210,6 +210,8 @@ export function createSnowField(seed = 2024) {
   };
   const heightAt = (x, z) => ground(x, z) + snowAt(x, z).depth;
   heightAt.world = 'snow';
+  // The ground under the snow (heightAt less the snow's depth), for samplers that already have the snow.
+  heightAt.groundBelowSnow = ground;
   heightAt.snow = SNOW;
   heightAt.snowAt = snowAt;
   heightAt.roadDistance = roadDistance;
