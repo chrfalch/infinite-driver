@@ -392,7 +392,7 @@ export async function main(loading) {
       timed('sys.updateBushes', () => updateBushes(world));
       orbitCamera(readCameraKeys(), realDelta);
       raceHud.update();
-      timed('sys.followCamera', () => followCamera(world));
+      timed('sys.followCamera', () => followCamera(world, realDelta));
       const player = world.queryFirst(IsPlayer, Vehicle);
       if (player && trackMarkers) {
         const p = player.get(Vehicle).body.translation();
