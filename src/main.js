@@ -60,6 +60,7 @@ import { applyPendingCarAction, footprint, requestDespawn, requestRebuild, reque
 import { createTuningPanel } from './tuning/panel.js';
 import { loadPanelOpen, panelStartsOpen, savePanelOpen } from './tuning/panel-state.js';
 import { updateInstanceBatchers } from './render/instance-batcher.js';
+import { warmInstancedMeshes } from './render/instance-pool.js';
 import { createPhysicsClient, workerGpuSupported } from './physics/client.js';
 import { ROCK_COUNT, connectSnowTiles, loadTerrain, startChunkWorker } from './systems/terrain.js';
 import { playerTires } from './vehicle/config.js';
@@ -429,6 +430,7 @@ export async function main(loading) {
       reportError(error);
     }
     timed('draw', draw);
+    warmInstancedMeshes();
     sample('frame.js', performance.now() - fStart);
     loading?.frame(now);
   };
