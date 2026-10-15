@@ -148,6 +148,7 @@ export function createTuningPanel(world, { heightAt }) {
     },
     reset: () => {
       resetCar();
+      setLivery(CAR.livery);
       resetTire();
       resetGpuTire();
       resetGround();
