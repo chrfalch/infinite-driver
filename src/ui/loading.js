@@ -8,7 +8,8 @@
 // browser driven by a script), the screen goes as soon as everything is ready. No sound plays
 // before then: main.js arms it in finish's start().
 //
-// A row of worlds to pick from sits under the title the whole time; picking one reloads into it.
+// A row of worlds to pick from sits under the title the whole time. Until one is picked nothing
+// loads: the screen shows just the title, the buggy and the row (screen.levels).
 
 const STEPS = { gpu: 0.12, world: 0.08, physics: 0.08, car: 0.04, terrain: 0.36, hud: 0.04, warmup: 0.12, sound: 0.16 };
 
@@ -47,7 +48,7 @@ export function createLoadingScreen() {
   const levels = $('levels');
   const progress = Object.fromEntries(Object.keys(STEPS).map((key) => [key, 0]));
   const details = {};
-  const started = performance.now();
+  let started = performance.now();
 
   let shown = -1;
   const showQuip = () => {
@@ -60,8 +61,12 @@ export function createLoadingScreen() {
     quip.textContent = QUIPS[next];
     quip.classList.add('in');
   };
-  showQuip();
-  const quipTimer = setInterval(showQuip, 2600);
+  let quipTimer;
+  const begin = () => {
+    started = performance.now();
+    showQuip();
+    quipTimer = setInterval(showQuip, 2600);
+  };
 
   const render = () => {
     let total = 0;
@@ -94,29 +99,43 @@ export function createLoadingScreen() {
       }),
   };
 
-  // The worlds to pick from ({ label: mode }), the one being loaded marked; pick(mode) switches.
-  screen.levels = (worlds, current, pick) => {
-    levels.replaceChildren(
-      ...Object.entries(worlds).map(([label, mode]) => {
+  // The worlds to pick from ({ label: mode }). With ask, nothing else shows until one is clicked
+  // (`current`, the last one driven, marked as a hint); without, `current` is the one loading.
+  // Resolves with the world to load, and the loading starts on the screen.
+  screen.levels = (worlds, current, { ask = false } = {}) =>
+    new Promise((resolve) => {
+      const buttons = Object.entries(worlds).map(([label, mode]) => {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'loading-level';
         button.textContent = label;
-        if (mode === current) {
+        if (mode === current) button.classList.add('last');
+        button.addEventListener('click', () => {
+          if (levels.classList.contains('picked')) return;
           button.setAttribute('aria-pressed', 'true');
-        } else {
-          button.addEventListener('click', () => {
-            levels.classList.add('picked');
-            button.setAttribute('aria-pressed', 'true');
-            step.textContent = `Off to the ${label.toLowerCase()}`;
-            pick(mode);
-          });
-        }
+          pick(mode, `Off to the ${label.toLowerCase()}`);
+        });
         return button;
-      }),
-    );
-    levels.hidden = false;
-  };
+      });
+      const pick = (mode, label) => {
+        levels.classList.add('picked');
+        root.classList.remove('asking');
+        // Keys go to the drive prompt from here (the gesture there skips the picker's buttons).
+        if (levels.contains(document.activeElement)) document.activeElement.blur();
+        step.textContent = label;
+        begin();
+        resolve(mode);
+      };
+      levels.replaceChildren(...buttons);
+      levels.hidden = false;
+      if (ask) {
+        root.classList.add('asking');
+        step.textContent = 'Pick a world to drive';
+      } else {
+        buttons.find((b) => b.classList.contains('last'))?.setAttribute('aria-pressed', 'true');
+        pick(current, 'Getting ready');
+      }
+    });
 
   // Called every frame of the game until the drive runs smoothly.
   let frames = 0;
@@ -169,7 +188,7 @@ export function createLoadingScreen() {
     setTimeout(() => root.remove(), 700);
   };
 
-  // A failed start: the error shows instead (main.js).
+  // A failed start: the error shows instead (start.js).
   screen.remove = () => {
     clearInterval(quipTimer);
     root.remove();

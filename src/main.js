@@ -37,7 +37,7 @@ import { TireTracks } from './render/tracks.js';
 import { GROUND, setPavedRoads, setSnowCover } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
 import { createHeightField } from './terrain/height.js';
-import { WORLDS, switchWorld, worldMode } from './world.js';
+import { worldMode } from './world.js';
 import { setGroundPatch, setTerrainWorld } from './render/terrain-mesh.js';
 import { SNOW_PATCH_N, SnowSurface } from './render/snow-surface.js';
 import { createDaylight } from './render/daylight.js';
@@ -61,20 +61,16 @@ import { ROCK_COUNT, loadTerrain, startChunkWorker } from './systems/terrain.js'
 import { CAR } from './vehicle/config.js';
 import { updateGpuGround, updateGpuRocks } from './tire/gpu-tires.js';
 import { createTouchControls } from './ui/touch-controls.js';
-import { createLoadingScreen } from './ui/loading.js';
 import { count, reportError, sample, startOverlay, timed } from './perf.js';
 import { AudioFeed, createFeedBuffer } from './audio/feed.js';
 import { createAudio } from './audio/audio.js';
 import { AUDIO } from './audio/config.js';
 
-// The loading screen, until the drive is ready (ui/loading.js).
-const loading = createLoadingScreen();
-
-async function main() {
+// The game, loaded by start.js once a world is picked; `loading` is the loading screen
+// (ui/loading.js), up until the drive is ready.
+export async function main(loading) {
   const container = document.getElementById('app');
   const params = new URLSearchParams(location.search);
-  // The world picker on the loading screen (the panel has one too).
-  loading?.levels(WORLDS, worldMode(), (mode) => (location.href = switchWorld(mode)));
   // The engine sound reads every physics step from here (audio/feed.js); ?sound=0 turns it off.
   // Its recordings load and decode alongside everything else; it starts only as the loading screen
   // goes (armed then), not on taps while loading.
@@ -418,12 +414,3 @@ function syncRemoteSolver(world) {
     solver.rockCentre = { x: p.x, z: p.z };
   }
 }
-
-main().catch((error) => {
-  console.error(error);
-  loading?.remove();
-  const pre = document.createElement('pre');
-  pre.className = 'fatal';
-  pre.textContent = String(error?.stack ?? error);
-  document.body.append(pre);
-});

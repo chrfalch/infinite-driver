@@ -125,6 +125,7 @@
         color: #4a4538; font: 600 12px/1 system-ui, -apple-system, sans-serif; cursor: pointer; -webkit-tap-highlight-color: transparent; }
       .loading-level:hover { background: #f6eedd; border-color: rgba(74, 69, 56, 0.4); }
       .loading-level[aria-pressed='true'] { background: #9a5b2c; border-color: #9a5b2c; color: #fff; cursor: default; }
+      .loading-level.last:not([aria-pressed='true']) { border-color: #9a5b2c; }
       .loading-levels.picked .loading-level { pointer-events: none; }
       .loading-levels.picked .loading-level:not([aria-pressed='true']) { opacity: 0.45; }
       .loading-bar { height: 8px; margin: 18px 0 10px; border-radius: 4px; overflow: hidden; background: rgba(74, 69, 56, 0.12); }
@@ -136,6 +137,7 @@
       .loading-go { margin-top: 14px; padding: 12px 22px; border: 0; border-radius: 22px; background: #d9683f; color: #fff; font: 700 15px/1 system-ui, -apple-system, sans-serif; cursor: pointer;
         box-shadow: 0 4px 14px rgba(217, 104, 63, 0.35); animation: loading-pulse 1.2s ease-in-out infinite alternate; }
       .loading-go[hidden] { display: none; }
+      .loading.asking .loading-bar, .loading.asking .loading-detail, .loading.asking .loading-quip { visibility: hidden; }
       .loading.ready .loading-bar, .loading.ready .loading-detail { opacity: 0.35; }
       .loading.ready .loading-quip { display: none; }
       @media (max-height: 460px) {
@@ -159,7 +161,7 @@
   </head>
   <body>
     <div id="app"></div>
-    <div id="loading" class="loading" role="status" aria-live="polite">
+    <div id="loading" class="loading asking" role="status" aria-live="polite">
       <div class="loading-card">
         <h1 class="loading-title">Drift</h1>
         <p class="loading-sub">an endless drive</p>
@@ -191,6 +193,6 @@
         <button class="loading-go" type="button" hidden>Tap or press any key to drive</button>
       </div>
     </div>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/start.js"></script>
   </body>
 </html>
