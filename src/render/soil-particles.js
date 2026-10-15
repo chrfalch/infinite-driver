@@ -42,7 +42,8 @@ export class SoilParticles {
     this.landed = new Float32Array(capacity); // seconds since settling, or -1 in flight
     this.bounced = new Uint8Array(capacity);
     this.spin = new Float32Array(capacity * 2);
-    this.color = new Float32Array(capacity * 3);
+    // Colours are written into the instance colours as clumps are thrown, and move with them.
+    this.color = this.mesh.instanceColor.array;
     this.count = 0;
   }
 
@@ -57,6 +58,7 @@ export class SoilParticles {
     this.bounced[i] = 0;
     this.spin.set([Math.random() * 6, Math.random() * 6], i * 2);
     this.color.set([color.r, color.g, color.b], i * 3);
+    this.colorsChanged = true;
     return true;
   }
 
@@ -71,10 +73,10 @@ export class SoilParticles {
     this.age[i] = this.age[last];
     this.landed[i] = this.landed[last];
     this.bounced[i] = this.bounced[last];
+    this.colorsChanged = true;
   }
 
   update(dt, surfaceAt, onLand) {
-    const tmp = new Color();
     for (let i = this.count - 1; i >= 0; i--) {
       const o = i * 3;
       this.age[i] += dt;
@@ -115,12 +117,20 @@ export class SoilParticles {
       q.setFromAxisAngle(v3.set(this.spin[i * 2], 1, this.spin[i * 2 + 1]).normalize(), tumble * 8);
       m4.compose(v3.set(this.pos[o], this.pos[o + 1], this.pos[o + 2]), q, s3.set(s, s * 0.7, s));
       this.mesh.setMatrixAt(i, m4);
-      tmp.setRGB(this.color[o], this.color[o + 1], this.color[o + 2]);
-      this.mesh.setColorAt(i, tmp);
     }
     this.mesh.count = this.count;
-    this.mesh.instanceMatrix.needsUpdate = true;
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    // Only the live clumps go to the GPU (the pools hold up to 8000).
+    const { instanceMatrix, instanceColor } = this.mesh;
+    if (!this.count) return;
+    instanceMatrix.clearUpdateRanges();
+    instanceMatrix.addUpdateRange(0, this.count * 16);
+    instanceMatrix.needsUpdate = true;
+    if (this.colorsChanged) {
+      instanceColor.clearUpdateRanges();
+      instanceColor.addUpdateRange(0, this.count * 3);
+      instanceColor.needsUpdate = true;
+      this.colorsChanged = false;
+    }
   }
 
   clear() {
