@@ -1,7 +1,8 @@
 // The cars on the road besides the player's: each runs its own tyre model (see TIRE_MODES), so
 // a GPU-tyred player can share the road with rigid-wheeled cars that cost next to nothing.
 //
-// ?rivals=rigid,gpu adds one car per entry, `mode[:livery]` (e.g. ?rivals=rigid:red,gpu:yellow).
+// ?rivals=rigid,gpu adds one car per entry, `mode[:livery]` (e.g. ?rivals=rigid:red,gpu:yellow);
+// without it a world may have its own (DEFAULT_RIVALS: three on the stadium).
 // The cars line up behind the player's at the start (see gridSlot) and stand still until something
 // drives them through their Vehicle's `input` (see systems/physics.js).
 import { TIRE_MODES } from './config.js';
@@ -24,9 +25,14 @@ export function parseRivals(value) {
   return rivals;
 }
 
-// The other cars this page asked for.
-export function configuredRivals(search = globalThis.location?.search ?? '') {
-  return parseRivals(new URLSearchParams(search).get('rivals'));
+// The other cars in a world when the page names none: the stadium is a race, three rivals on
+// rigid wheels (cheap to simulate).
+export const DEFAULT_RIVALS = { stadium: 'rigid,rigid,rigid' };
+
+// The other cars this page asked for, or the world's own (an empty ?rivals= asks for none).
+export function configuredRivals(search = globalThis.location?.search ?? '', mode = null) {
+  const params = new URLSearchParams(search);
+  return parseRivals(params.has('rivals') ? params.get('rivals') : DEFAULT_RIVALS[mode]);
 }
 
 // Grid slot `n` (1, 2, … behind the car at slot 0) for a car starting at (x, z) facing `yaw`:

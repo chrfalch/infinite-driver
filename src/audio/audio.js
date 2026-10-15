@@ -179,6 +179,8 @@ export function createAudio({ feed = null, preset = null, button = true, armed =
   audio.unlock = () => {};
   audio.arm = () => {};
   audio.preload = () => Promise.resolve();
+  audio.setPaused = () => {};
+  audio.beep = () => {};
   const removeButton = button && typeof document !== 'undefined' ? createSoundButton(audio) : () => {};
   if (!Context || typeof AudioWorkletNode === 'undefined' || !globalThis.isSecureContext) {
     audio.state = 'unsupported';
@@ -192,7 +194,9 @@ export function createAudio({ feed = null, preset = null, button = true, armed =
   let rivals = null;
   let staleReports = 0;
 
-  const level = () => (AUDIO.enabled ? AUDIO.volume : 0);
+  // Paused (the game's pause), the engines fade out; the context keeps running.
+  let paused = false;
+  const level = () => (AUDIO.enabled && !paused ? AUDIO.volume : 0);
   const fadeTo = (value) => {
     if (!ctx || !master) return;
     const now = ctx.currentTime;
@@ -419,6 +423,29 @@ export function createAudio({ feed = null, preset = null, button = true, armed =
   audio.updateRivals = (player, others, camera) => {
     if (!rivals || !camera || !player?.body || ctx?.state !== 'running') return;
     rivals.port.postMessage({ type: 'cars', cars: rivalVoices(camera, player, others) });
+  };
+
+  audio.setPaused = (value) => {
+    paused = !!value;
+    fadeTo(level());
+  };
+
+  // The race countdown's beeps: a short low one for each number, a long high one for 'GO!'.
+  audio.beep = (go = false) => {
+    if (!ctx || ctx.state !== 'running' || !AUDIO.enabled) return;
+    const t = ctx.currentTime;
+    const length = go ? 0.6 : 0.22;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.value = go ? 880 : 440;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.12 * AUDIO.volume, t + 0.01);
+    gain.gain.setValueAtTime(0.12 * AUDIO.volume, t + length - 0.08);
+    gain.gain.linearRampToValueAtTime(0, t + length);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + length);
   };
 
   audio.dispose = () => {

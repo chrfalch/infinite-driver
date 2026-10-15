@@ -67,6 +67,8 @@ import { configuredRivals, gridSlot } from './vehicle/cars.js';
 import { createCourse, gridSpot } from './ai/course.js';
 import { createDriver } from './ai/driver.js';
 import { updateDrivers } from './systems/ai.js';
+import { HOLD, createRace } from './systems/race.js';
+import { createRaceHud } from './ui/race-hud.js';
 import { updateGpuGround, updateGpuRocks } from './tire/gpu-tires.js';
 import { createTouchControls } from './ui/touch-controls.js';
 import { count, reportError, sample, startOverlay, timed } from './perf.js';
@@ -140,8 +142,9 @@ export async function main(loading) {
   loading?.set('world', 1, 'Starting the physics');
   await loading?.pause();
 
-  // The other cars (?rivals=rigid,gpu: each its own tyre model; see vehicle/cars.js).
-  const rivals = configuredRivals();
+  // The other cars (?rivals=rigid,gpu: each its own tyre model; three on the stadium by default;
+  // see vehicle/cars.js).
+  const rivals = configuredRivals(location.search, mode);
   // The AI drivers' pace (a share of the course's speed profile) and, for tuning, the cornering and
   // braking the profile allows (m/s², see speedProfile).
   const aiPace = Number(params.get('aipace') ?? 1);
@@ -227,6 +230,9 @@ export async function main(loading) {
   const course = createCourse(heightAt);
   const spot = (n) => (course && rivals.length ? gridSpot(course, n) : { ...gridSlot(0, 0, startYaw, n), yaw: startYaw });
   const ai = course && params.get('ai') !== '0';
+  // With other cars, every car waits on the grid for a 3-2-1 countdown (?countdown=0 skips it);
+  // the game can be paused anywhere (systems/race.js).
+  const race = createRace({ countdown: rivals.length > 0 && params.get('countdown') !== '0' });
   const first = spot(0);
   spawnCar(world, startPose(first.x, first.z, playerTires(), first.yaw));
   rivals.forEach((rival, i) => {
@@ -267,6 +273,8 @@ export async function main(loading) {
   const gauges = createGauges({ hud, font: inter, scene: render.hudScene });
   // Round map of the ground around the car, bottom left (?map=0 hides it).
   const minimap = params.get('map') === '0' ? null : createMinimap(heightAt);
+  // The countdown's numbers (with a beep each) and the pause button; paused, the engines fade out.
+  const raceHud = createRaceHud(race, { onPause: (paused) => audio?.setPaused(paused), onCount: (label) => audio?.beep(label === 'GO!') });
   loading?.set('hud', 1, 'Warming up the engine');
 
   // The perf card's two lines (P or the panel's switch shows it).
@@ -315,15 +323,26 @@ export async function main(loading) {
       // Queued rebuilds and respawns run here, never while physics awaits the GPU.
       applyPendingCarAction();
       readInput(world);
+      holdPlayer();
       await stepPhysics(world, Math.min(delta, 0.1));
     } catch (error) {
       console.error(error);
     } finally {
       busy = false;
       // A new task (not a microtask), so a chain of slow batches never starves the animation frame.
-      if (!document.hidden && performance.now() - simLast >= physicsStep * 1000) setTimeout(() => busy || simulate(), 0);
+      if (!document.hidden && !race.paused && performance.now() - simLast >= physicsStep * 1000) setTimeout(() => busy || race.paused || simulate(), 0);
     }
   };
+  // On the grid until the countdown ends: the player's car on the handbrake (it can still steer and
+  // the throttle still opens, for a launch on 'GO!'), the AI cars likewise.
+  const holdPlayer = () => {
+    if (race.held()) Object.assign(world.get(Input), { throttle: 0, brake: 0, handbrake: true });
+  };
+  const holdDrivers = () =>
+    world.query(Vehicle).forEach((car) => {
+      const vehicle = car.get(Vehicle);
+      if (vehicle.driver) vehicle.input = { ...HOLD };
+    });
   startOverlay();
   const frame = (now) => {
     const fStart = performance.now();
@@ -331,24 +350,32 @@ export async function main(loading) {
     if (now - last > 50) count('longFrames');
     count('wallSeconds', Math.min((now - last) / 1000, 0.1));
     const time = world.get(Time);
-    time.delta = Math.min((now - last) / 1000, 0.1);
+    // Paused, the world's clock stands still (physics, AI, particles); the camera still turns.
+    const realDelta = Math.min((now - last) / 1000, 0.1);
+    race.update(realDelta);
+    time.delta = race.paused ? 0 : realDelta;
     time.elapsed += time.delta;
     last = now;
     // Safari shows a white canvas for any animation frame that draws nothing, so an error in a
     // system must not skip the draw: it is logged (and counted in the ?perf overlay) instead.
     try {
       // The AI drivers set their cars' inputs for this frame's physics.
-      timed('sys.ai', () => updateDrivers(world));
+      if (race.held()) holdDrivers();
+      else timed('sys.ai', () => updateDrivers(world));
       if (remote) {
         // The worker steps on its own clock; send it this frame's input and take its newest time.
-        applyPendingCarAction();
-        readInput(world);
-        remote.tick(world.get(Input), otherInputs(world));
+        // Paused, it gets no ticks and so does not step.
+        if (!race.paused) {
+          applyPendingCarAction();
+          readInput(world);
+          holdPlayer();
+          remote.tick(world.get(Input), otherInputs(world));
+        }
         const physics = world.get(Physics);
         physics.simTime = remote.simTime;
         physics.stepMs = remote.stepMs;
         syncRemoteSolver(world);
-      } else if (!busy) simulate();
+      } else if (!busy && !race.paused) simulate();
 
       timed('sys.syncBodies', () => syncBodies(world));
       timed('sys.streamTerrain', () => streamTerrain(world));
@@ -363,7 +390,8 @@ export async function main(loading) {
       timed('sys.updateSoil', () => updateSoil(world));
       timed('sys.groundSurface', () => updateGroundSurface(world, groundSurface));
       timed('sys.updateBushes', () => updateBushes(world));
-      orbitCamera(readCameraKeys(), time.delta);
+      orbitCamera(readCameraKeys(), realDelta);
+      raceHud.update();
       timed('sys.followCamera', () => followCamera(world));
       const player = world.queryFirst(IsPlayer, Vehicle);
       if (player && trackMarkers) {
@@ -409,11 +437,14 @@ export async function main(loading) {
   // The drive starts as soon as everything is in. The sound starts with it on the context the
   // world pick started (browsers start sound only from a gesture); without one (a world from the
   // URL or the panel's reload), on the first tap or key press. M turns it on and off.
+  // The countdown starts with it.
   const startSound = () => {
     audio?.arm();
     if (earlyContext) audio?.unlock();
+    race.start();
   };
-  loading?.finish({ sound: soundLoaded, start: startSound });
+  if (loading) loading.finish({ sound: soundLoaded, start: startSound });
+  else race.start();
 
   // Handy for debugging from the console.
   window.__game = {
@@ -431,6 +462,9 @@ export async function main(loading) {
     },
     // The course the AI drivers drive (null in worlds without one).
     course,
+    // The countdown and the pause: race.phase, race.paused; pause(true/false) as the button does.
+    race,
+    pause: (paused = true) => raceHud.setPaused(paused),
     // Another car at (x, z) facing `yaw`, on tyre model `tires` (see TIRE_MODES); drive it by setting
     // its Vehicle's `input` ({ throttle, brake, steer, handbrake }), or give it an AI driver
     // (`ai: true`, or options for createDriver; on a course). Returns its entity.

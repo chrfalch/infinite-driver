@@ -5,7 +5,7 @@ import { RockField } from '../src/ecs/traits.js';
 import { createColliderStreamer } from '../src/physics/colliders.js';
 import { CHUNK_SIZE } from '../src/terrain/chunk.js';
 import { createHeightField } from '../src/terrain/height.js';
-import { MAX_RIVALS, RIVAL_LIVERIES, gridSlot, parseRivals } from '../src/vehicle/cars.js';
+import { MAX_RIVALS, RIVAL_LIVERIES, configuredRivals, gridSlot, parseRivals } from '../src/vehicle/cars.js';
 import { CAR, playerTires } from '../src/vehicle/config.js';
 
 describe('other cars', () => {
@@ -20,6 +20,15 @@ describe('other cars', () => {
     // Unknown tyre models are skipped, and there is a limit.
     expect(parseRivals('hover,rigid')).toEqual([{ tires: 'rigid', livery: RIVAL_LIVERIES[0] }]);
     expect(parseRivals(new Array(20).fill('rigid').join(','))).toHaveLength(MAX_RIVALS);
+  });
+
+  it('puts three rivals on the stadium unless ?rivals= says otherwise', () => {
+    expect(configuredRivals('', 'stadium')).toHaveLength(3);
+    expect(new Set(configuredRivals('', 'stadium').map((r) => r.livery)).size).toBe(3);
+    expect(configuredRivals('?rivals=gpu', 'stadium')).toEqual([{ tires: 'gpu', livery: RIVAL_LIVERIES[0] }]);
+    expect(configuredRivals('?rivals=', 'stadium')).toEqual([]);
+    expect(configuredRivals('', 'canyon')).toEqual([]);
+    expect(configuredRivals('')).toEqual([]);
   });
 
   it("takes the player's tyre model from the car settings", () => {

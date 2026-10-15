@@ -87,6 +87,44 @@
       @media (max-width: 700px) {
         .lil-gui.tuning { --width: 250px; max-height: 60vh; }
       }
+      /* The pause button, the countdown and the paused screen (src/ui/race-hud.js). */
+      .pause-button {
+        position: fixed; z-index: 20; left: calc(12px + env(safe-area-inset-left)); top: calc(12px + env(safe-area-inset-top));
+        width: 44px; height: 44px; border-radius: 50%; padding: 0;
+        border: 1px solid rgba(74, 69, 56, 0.25); background: rgba(250, 246, 238, 0.7); color: #4a4538;
+        font: 700 15px/1 system-ui, sans-serif; letter-spacing: -2px; cursor: pointer;
+        box-shadow: 0 2px 10px rgba(60, 50, 30, 0.15); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+        -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+      }
+      .pause-button.active { letter-spacing: 0; background: rgba(217, 104, 63, 0.85); color: #fff; }
+      .race-count {
+        position: fixed; z-index: 15; left: 50%; top: 32%; transform: translate(-50%, -50%); pointer-events: none;
+        font: 900 clamp(96px, 22vmin, 200px)/1 system-ui, sans-serif; color: #fff;
+        text-shadow: 0 0 3px rgba(60, 40, 20, 0.7), 0 2px 0 rgba(60, 40, 20, 0.5), 0 6px 24px rgba(40, 25, 10, 0.45);
+      }
+      .race-count.go { color: #8fd14f; }
+      .race-count.pop { animation: race-pop 1s ease-out both; }
+      .race-count.go.pop { animation-duration: 0.8s; }
+      .race-count.frozen { animation-play-state: paused; }
+      @keyframes race-pop {
+        0% { opacity: 0; transform: translate(-50%, -50%) scale(1.8); }
+        15% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        75% { opacity: 1; transform: translate(-50%, -50%) scale(0.92); }
+        100% { opacity: 0; transform: translate(-50%, -50%) scale(0.85); }
+      }
+      .pause-screen {
+        position: fixed; inset: 0; z-index: 18; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+        background: rgba(30, 24, 16, 0.45); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+        color: #fff; font: 600 14px/1.2 system-ui, sans-serif;
+      }
+      .pause-screen.visible { display: flex; }
+      .pause-title { font: 900 48px/1 system-ui, sans-serif; letter-spacing: 1px; text-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); }
+      .pause-resume {
+        padding: 12px 36px; border: 0; border-radius: 24px; cursor: pointer;
+        background: #d9683f; color: #fff; font: 700 18px/1 system-ui, sans-serif; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+      }
+      .pause-hint { opacity: 0.75; }
+      body.touch-mode .pause-hint { display: none; }
       /* The loading screen (src/ui/loading.js). Its animations are transforms and opacity only, so
          they keep running while the page is busy. */
       .loading {
