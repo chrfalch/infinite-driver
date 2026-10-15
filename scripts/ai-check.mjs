@@ -30,8 +30,14 @@ await p.evaluate(() => {
       const input = update(state, others, dt);
       const d = v.driver;
       w.worst = Math.max(w.worst, Math.abs(d.d));
-      if (d.mode === 'reverse' && mode !== 'reverse') w.reverses++;
-      if (d.respawn) w.respawns++;
+      if (d.mode === 'reverse' && mode !== 'reverse') {
+        w.reverses++;
+        (w.where ??= []).push(`rev@${Math.round(d.s)}`);
+      }
+      if (d.respawn) {
+        w.respawns++;
+        (w.where ??= []).push(`resp@${Math.round(d.s)}`);
+      }
       mode = d.mode;
       if (d.lap > lap) {
         const now = (performance.now() - t0) / 1000;
@@ -46,7 +52,7 @@ await p.evaluate(() => {
 for (let t = 0; t < seconds; t += 15) {
   await p.waitForTimeout(Math.min(15, seconds - t) * 1000);
   const rows = await p.evaluate(() =>
-    window.__ai.map((w) => ({ tires: w.tires, lap: w.driver.lap, m: Math.round(w.driver.progress), worstD: +w.worst.toFixed(1), rev: w.reverses, resp: w.respawns, laps: w.laps.join(' ') })),
+    window.__ai.map((w) => ({ tires: w.tires, lap: w.driver.lap, m: Math.round(w.driver.progress), worstD: +w.worst.toFixed(1), rev: w.reverses, resp: w.respawns, laps: w.laps.join(' '), where: (w.where ?? []).join(' ') })),
   );
   console.log(`t=${Math.min(seconds, t + 15)}s`, JSON.stringify(rows));
 }

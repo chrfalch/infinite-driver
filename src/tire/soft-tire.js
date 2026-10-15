@@ -1,7 +1,8 @@
 import { TIRE } from './config.js';
 
 // Collision groups: the tyre touches the world but not its own rim or the car.
-export const GROUP = { WORLD: 0x0001, RIM: 0x0002, TIRE: 0x0004, CHASSIS: 0x0008 };
+// CAR: the shell every car has for running into other cars (see addCarShell in vehicle/physics.js).
+export const GROUP = { WORLD: 0x0001, RIM: 0x0002, TIRE: 0x0004, CHASSIS: 0x0008, CAR: 0x0010 };
 export const groups = (member, filter) => (member << 16) | filter;
 
 // Torus around the local z axis (the axle), with an elliptical tube: half-width across, half-height radially.

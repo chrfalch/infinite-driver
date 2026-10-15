@@ -22,7 +22,8 @@ import {
 } from './ecs/traits.js';
 import { createRenderer } from './render/scene.js';
 import { createGauges } from './ui/gauges.js';
-import { createMinimap } from './ui/minimap.js';
+import { createMinimap, forwardOf } from './ui/minimap.js';
+import { LIVERIES } from './render/trophy-body.js';
 import { attachZoom, followCamera, isFollowCamera, orbitCamera, toggleFollowCamera } from './systems/camera.js';
 import { attachKeyboard, readCameraKeys, readInput } from './systems/input.js';
 import { CONTROLS } from './controls.js';
@@ -383,8 +384,13 @@ export async function main(loading) {
         const canvas = render.renderer.domElement;
         gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible(), minimap?.root.offsetWidth ?? 0);
         const vehicle = player.get(Vehicle);
-        if (minimap) timed('sys.minimap', () => minimap.update(vehicle.body.translation(), vehicle.body.rotation()));
+        if (minimap) timed('sys.minimap', () => minimap.update(vehicle.body.translation(), vehicle.body.rotation(), otherCars(world)));
         audio?.update(vehicle, world.get(Soil), render.activeCamera);
+        if (audio) {
+          const others = [];
+          world.query(Vehicle).forEach((car) => car.has(IsPlayer) || others.push(car.get(Vehicle)));
+          audio.updateRivals(vehicle, others, render.activeCamera);
+        }
         gauges.update(vehicle, time.delta, { follow: isFollowCamera(), perf: CONTROLS.showPerf ? perfLines(vehicle) : null, throttleLock: world.get(Input).throttleLock, headlights: world.get(Input).headlights });
         { const v = player.get(Vehicle).body.linvel(); sample('speed.kmh', Math.hypot(v.x, v.z) * 3.6); }
       }
@@ -482,6 +488,20 @@ function syncRemoteSolver(world) {
       solver.rockCentre = { x: p.x, z: p.z };
     }
   });
+}
+
+// The other cars for the minimap: where each is, which way it faces, its paint.
+function otherCars(world) {
+  const cars = [];
+  world.query(Vehicle, View).forEach((car) => {
+    if (car.has(IsPlayer)) return;
+    const { body } = car.get(Vehicle);
+    const p = body.translation();
+    const f = forwardOf(body.rotation());
+    const livery = LIVERIES[car.get(View).object.userData.spec?.livery] ?? LIVERIES.red;
+    cars.push({ x: p.x, z: p.z, fx: f.x, fz: f.z, colour: livery.base });
+  });
+  return cars;
 }
 
 // The other cars' drivers for the worker: [id, input] for each car with an input of its own.

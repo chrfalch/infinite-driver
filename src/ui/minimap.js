@@ -1,6 +1,7 @@
 // Round minimap in the bottom left corner: the ground around the car from above (shaded relief,
 // the road or river bed, the snowfield's lake and forest), turned so the car always points up,
-// with the car as an arrow in the middle, a fading dark trail behind it and N on the rim.
+// with the car as an arrow in the middle, a fading dark trail behind it and N on the rim. The other
+// cars are smaller arrows in their paint, pinned to the rim when they are off the map.
 //
 // The ground is sampled from the height field into a square tile around the car, a few rows per
 // frame so building it never stalls a frame; the tile is redrawn around the car before it drives
@@ -18,8 +19,12 @@
 import { funPlaces } from '../terrain/fun.js';
 import { generateBuildings } from '../terrain/buildings.js';
 import { CHUNK_SIZE } from '../terrain/chunk.js';
+import { LANE_HALF } from '../terrain/stadium.js';
 
 export const VIEW_RADIUS = 140; // m, from the middle of the map to its rim
+// The stadium is small (about 95 x 70 m): the map shows it closer, with its lanes drawn over the
+// ground (the ground tile's 2.5 m pixels blur them at this scale).
+const ARENA_VIEW_RADIUS = 60;
 export const TILE_HALF = 280; // m, half the tile's side
 export const TILE_PX = 224; // tile pixels per side (2.5 m each)
 const REBUILD_AT = TILE_HALF - VIEW_RADIUS - 30; // m from the tile's centre
@@ -282,6 +287,54 @@ function drawBuildings(ctx, buildings, x, z, reach, lineWidth) {
   ctx.restore();
 }
 
+// The stadium's loop as a closed path in world metres (x, z), from its lines and arcs.
+function trackPath(track) {
+  const path = new Path2D();
+  let first = true;
+  for (const seg of track.segments) {
+    const steps = Math.max(1, Math.ceil(seg.length));
+    for (let i = 0; i <= steps; i++) {
+      const a = (i / steps) * seg.length;
+      let x;
+      let z;
+      if (seg.kind === 'line') {
+        x = seg.x0 + seg.tx * a;
+        z = seg.z0 + seg.tz * a;
+      } else {
+        const ang = seg.a0 + (a / seg.r) * Math.sign(seg.sweep);
+        x = seg.cx + Math.cos(ang) * seg.r;
+        z = seg.cz + Math.sin(ang) * seg.r;
+      }
+      if (first) path.moveTo(x, z);
+      else path.lineTo(x, z);
+      first = false;
+    }
+  }
+  path.closePath();
+  return path;
+}
+
+// A car's arrow at (x, y), turned by `turn` (radians from pointing up), `a` px long from its middle.
+function drawArrow(ctx, x, y, turn, a, colour, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.rotate(turn);
+  ctx.beginPath();
+  ctx.moveTo(0, -a);
+  ctx.lineTo(a * 0.72, a * 0.8);
+  ctx.lineTo(0, a * 0.42);
+  ctx.lineTo(-a * 0.72, a * 0.8);
+  ctx.closePath();
+  ctx.fillStyle = colour;
+  ctx.strokeStyle = 'rgba(31, 29, 25, 0.85)';
+  ctx.lineWidth = Math.max(1.2, a * 0.22);
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  ctx.fill();
+  ctx.restore();
+}
+
 export function createMinimap(heightAt) {
   const root = document.createElement('div');
   root.className = 'minimap';
@@ -291,6 +344,8 @@ export function createMinimap(heightAt) {
   document.body.append(root);
   const ctx = canvas.getContext('2d');
   const palette = paletteFor(heightAt);
+  const viewRadius = heightAt.arena ? ARENA_VIEW_RADIUS : VIEW_RADIUS;
+  const lanes = heightAt.track ? trackPath(heightAt.track) : null;
   const background = `rgb(${palette.ground.join(',')})`;
 
   let tile = null; // { canvas, cx, cz, half }
@@ -355,8 +410,9 @@ export function createMinimap(heightAt) {
     building = null;
   };
 
-  // `position`, `rotation`: the car body's world position and orientation (quaternion).
-  const update = (position, rotation) => {
+  // `position`, `rotation`: the car body's world position and orientation (quaternion). `others`:
+  // the other cars, [{ x, z, fx, fz (forward), colour }].
+  const update = (position, rotation, others = []) => {
     const { x, z } = position;
     const forward = forwardOf(rotation);
     // A new tile around the car before it reaches the old one's edge (the old one stays up meanwhile).
@@ -405,7 +461,7 @@ export function createMinimap(heightAt) {
 
     angle ??= 0;
     const R = size / 2;
-    const scale = R / VIEW_RADIUS; // CSS px per metre
+    const scale = R / viewRadius; // CSS px per metre
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, size, size);
     ctx.save();
@@ -422,7 +478,17 @@ export function createMinimap(heightAt) {
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(tile.canvas, tile.cx - tile.half, tile.cz - tile.half, tile.half * 2, tile.half * 2);
     }
-    drawBuildings(ctx, buildings, x, z, VIEW_RADIUS * 1.45, 1.2 / scale);
+    drawBuildings(ctx, buildings, x, z, viewRadius * 1.45, 1.2 / scale);
+    if (lanes) {
+      // The lanes, with a dark edge for the barriers.
+      ctx.lineCap = ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(31, 29, 25, 0.55)';
+      ctx.lineWidth = 2 * LANE_HALF + 1.4;
+      ctx.stroke(lanes);
+      ctx.strokeStyle = 'rgb(214, 168, 120)';
+      ctx.lineWidth = 2 * LANE_HALF;
+      ctx.stroke(lanes);
+    }
     if (visits) {
       ctx.globalAlpha = 0.42;
       ctx.drawImage(visits.canvas, visits.cx - visits.half, visits.cz - visits.half, visits.half * 2, visits.half * 2);
@@ -473,6 +539,31 @@ export function createMinimap(heightAt) {
         off = true;
       }
       drawPlace(ctx, place.kind, R + sx, R + sy, off ? icon * 0.8 : icon, off ? 0.75 : 1);
+    }
+    ctx.restore();
+
+    // The other cars, under the player's.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(R, R, R, 0, Math.PI * 2);
+    ctx.clip();
+    const small = Math.max(5, size * 0.042);
+    for (const o of others) {
+      const dx = o.x - x;
+      const dz = o.z - z;
+      let sx = (dx * cos - dz * sin) * scale;
+      let sy = (dx * sin + dz * cos) * scale;
+      const d = Math.hypot(sx, sy);
+      const rim = R - small * 1.3;
+      const off = d > rim;
+      if (off) {
+        sx *= rim / d;
+        sy *= rim / d;
+      }
+      // Its heading on the map, turned as the map is.
+      const hx = o.fx * cos - o.fz * sin;
+      const hy = o.fx * sin + o.fz * cos;
+      drawArrow(ctx, R + sx, R + sy, Math.atan2(hy, hx) + Math.PI / 2, off ? small * 0.8 : small, o.colour, off ? 0.7 : 1);
     }
     ctx.restore();
 
