@@ -69,9 +69,9 @@ describe('yard kit', () => {
     expect(n).toBeGreaterThan(400);
     // Most of the kit is used.
     expect(kinds.size).toBeGreaterThan(14);
-    // The same every time, and part of the chunk's props; none in the dark town.
+    // The same every time, and part of the chunk's props; none outside town.
     expect(yardProps(createHeightField({ mode: 'daytown' }), 1, -1)).toEqual(yardProps(town, 1, -1));
     expect(generateProps(town, 1, -1).filter((p) => p.kind.startsWith('Yard_'))).toEqual(yardProps(town, 1, -1));
-    expect(yardProps(createHeightField({ mode: 'town' }), 0, 0)).toEqual([]);
+    expect(yardProps(createHeightField({ mode: 'canyon' }), 0, 0)).toEqual([]);
   });
 });

@@ -6,9 +6,10 @@ import { buildingsAround, generateBuildings, insideBuilding } from '../src/terra
 import { generatePlants } from '../src/terrain/vegetation.js';
 import { generateProps } from '../src/terrain/props.js';
 import { funPlaces } from '../src/terrain/fun.js';
-import { KERB } from '../src/terrain/town.js';
+import { KERB, WATER_LEVEL } from '../src/terrain/town.js';
+import { generateRocks } from '../src/terrain/rocks.js';
+import { rocksMeshData } from '../src/render/rock-mesh.js';
 import { TOWN_KIT } from '../src/terrain/town-kit.js';
-import { buildingsMeshData } from '../src/render/building-mesh.js';
 import { createKitBuildingsMesh, prototypesFrom } from '../src/render/town-kit-mesh.js';
 
 const town = createHeightField({ mode: 'daytown' });
@@ -133,7 +134,7 @@ describe('sunny town', () => {
     for (const p of props) expect(Math.abs(p.y - town(p.x, p.z))).toBeLessThan(3.1); // stacked at most two crates up
     const fresh = createHeightField({ mode: 'daytown' });
     expect(generateProps(fresh, 1, -1)).toEqual(generateProps(town, 1, -1));
-    expect(generateProps(createHeightField({ mode: 'town' }), 0, 0)).toEqual([]);
+    expect(generateProps(createHeightField({ mode: 'canyon' }), 0, 0)).toEqual([]);
   });
 
   it('lists its fun places for the minimap', () => {
@@ -150,7 +151,7 @@ describe('sunny town', () => {
       if (p.kind === 'jump') expect(s.jump).toBeGreaterThan(0.8);
       if (p.kind === 'gap') expect(s.gapLift).toBeGreaterThan(2.4);
     }
-    expect(funPlaces(createHeightField({ mode: 'town' }), 0, 0, 280).step()).toEqual([]);
+    expect(funPlaces(createHeightField({ mode: 'canyon' }), 0, 0, 280).step()).toEqual([]);
   });
 
   it('lines its streets with rows of buildings', () => {
@@ -170,24 +171,60 @@ describe('sunny town', () => {
     expect(built / n).toBeGreaterThan(0.45);
   });
 
-  it('is the town by day, built from the kit', () => {
+  it('is the town, starting on a street, the same on every load', () => {
     expect(town.world).toBe('daytown');
     expect(town.town).toBe(true);
-    expect(town.buildingKit).toBe(true);
-    // A denser street grid than the dark town's: more streets crossed along a line.
-    const dark = createHeightField({ mode: 'town' });
-    expect(dark.buildingKit).toBe(false);
-    const crossings = (field) => {
-      let n = 0;
-      let on = false;
-      for (let z = -600; z < 600; z += 1) {
-        const now = field.roadDistance(37, z) < 1;
-        if (now && !on) n++;
-        on = now;
+    expect(town.roadDistance(0, 0)).toBeLessThan(0.01);
+    expect(createHeightField({ mode: 'daytown' })(123.4, -56.7)).toBe(town(123.4, -56.7));
+  });
+
+  it('has water, mountains and town districts', () => {
+    let wet = 0;
+    let peaks = 0;
+    let townish = 0;
+    let n = 0;
+    for (let x = -1200; x <= 1200; x += 12) {
+      for (let z = -1200; z <= 1200; z += 12) {
+        const s = town.sample(x, z);
+        n++;
+        if (s.h < WATER_LEVEL - 0.3) wet++;
+        if (s.h > 25) peaks++;
+        if (s.wild < 0.2) townish++;
       }
-      return n;
-    };
-    expect(crossings(town)).toBeGreaterThan(crossings(dark) * 1.3);
+    }
+    expect(wet / n).toBeGreaterThan(0.01);
+    // (Fewer than the canyon's: the blocks are small, the mountains only rise in the middle of them.)
+    expect(peaks / n).toBeGreaterThan(0.001);
+    expect(townish / n).toBeGreaterThan(0.3);
+  });
+
+  it('gives buildings to the rocks (solid), not drawn as rocks', () => {
+    const rocks = generateRocks(town, 0, 0);
+    const buildings = rocks.filter((r) => r.building);
+    expect(buildings.length).toBeGreaterThan(0);
+    expect(buildings).toEqual(generateBuildings(town, 0, 0));
+    for (const rock of buildings) {
+      expect(rock.vertices.length).toBe(24);
+      expect(rock.faces).toEqual([]);
+    }
+    const rockMesh = rocksMeshData(rocks);
+    const natural = rocks.filter((r) => !r.building).reduce((n, r) => n + r.faces.length, 0);
+    expect(rockMesh ? rockMesh.positions.length / 9 : 0).toBe(natural);
+  });
+
+  it('grows trees and shrubs outside the buildings and off the streets', () => {
+    let trees = 0;
+    for (let cx = -2; cx <= 2; cx++) {
+      for (let cz = -2; cz <= 2; cz++) {
+        const buildings = buildingsAround(town, cx, cz);
+        for (const p of generatePlants(town, cx, cz)) {
+          expect(town.roadDistance(p.x, p.z)).toBeGreaterThan(KERB);
+          expect(insideBuilding(buildings, p.x, p.z)).toBe(false);
+          if (p.kind === 'tree') trees++;
+        }
+      }
+    }
+    expect(trees).toBeGreaterThan(50);
   });
 
   it('puts kit buildings at their models\' size on the lots, off the sidewalks', () => {
@@ -232,8 +269,6 @@ describe('sunny town', () => {
     const fresh = createHeightField({ mode: 'daytown' });
     for (let cx = 3; cx >= -3; cx--) for (let cz = 3; cz >= -3; cz--) again.push(...generateBuildings(fresh, cx, cz));
     expect(again.length).toBe(all.length);
-    // None of them are drawn as the dark town's boxes.
-    expect(buildingsMeshData(all)).toBeNull();
   });
 
   it('has a model for every kit entry, matching its footprint, within the triangle budget', async () => {

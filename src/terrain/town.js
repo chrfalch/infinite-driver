@@ -1,25 +1,22 @@
-// Dark town: a diorama-like world of winding asphalt streets with sidewalks, rows of houses
-// and towers along them (terrain/buildings.js), parks and ponds in the blocks, a river through the
-// lowlands, and wild districts where forested hills rise into grey granite mountains. Everything
-// comes from one deterministic height function, so physics, tyres, tracks and the render mesh agree.
+// Sunny town: a diorama-like world of a nearly square grid of asphalt streets with sidewalks, rows
+// of modelled houses and blocks along them (terrain/buildings.js), raised blocks behind retaining
+// walls, stunt parks and ponds in the blocks, a river through the lowlands, and wild districts where
+// forested hills rise into grey granite mountains. Everything comes from one deterministic height
+// function, so physics, tyres, tracks and the render mesh agree.
 //
 // The streets are the zero lines of two warped periodic fields, as in the canyon (terrain/canyon.js),
-// closer together and more winding. A third, wider family is the river. The origin is on a street.
+// closer together and nearly straight. A third, wider family is the river. The origin is on a street.
 import { createNoise2D } from 'simplex-noise';
 import { mulberry32 } from './height.js';
 
 export const ROAD_HALF_WIDTH = 3.4; // m of asphalt either side of the centre line
 export const KERB = 5.2; // m from the centre line to the sidewalk's outer edge
 export const WATER_LEVEL = 0; // m, the river's and the ponds' surface
-const SPACING_X = 150; // m between east-west streets
-const SPACING_Z = 190; // m between north-south streets
-// The sunny town is a denser, more regular grid of smaller blocks, as in the reference diorama.
-const DAY_SPACING_X = 100;
-const DAY_SPACING_Z = 120;
-// Its streets are nearly straight, a square grid with long straights for speed: only a gentle
-// long bend (a fraction of the dark town's), none of its short wiggles.
-const DAY_WARP = 0.15;
-const DAY_WIGGLE = 0;
+// A dense, regular grid of small blocks, as in the reference diorama.
+const SX = 100; // m between east-west streets
+const SZ = 120; // m between north-south streets (with a side street midway, see `streets`)
+// Nearly straight streets, a square grid with long straights for speed: only a gentle long bend.
+const WARP = 0.15;
 const RIVER_SPACING = 640; // m between rivers
 const RIVER_DEPTH = 1.3; // m of water in the middle of the river (shallow enough to ford)
 
@@ -28,7 +25,7 @@ const smoothstep = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 
-// How high a sunny-town block's plinth stands (m), by its row and column of the street grid.
+// How high a block's plinth stands (m), by its row and column of the street grid.
 const RAISES = [0, 0, 1.2, 1.8, 2.6, 3.4];
 function blockRaise(i, j) {
   let h = (Math.imul(i, 374761393) + Math.imul(j, 668265263) + 0x5bd1e995) | 0;
@@ -36,7 +33,7 @@ function blockRaise(i, j) {
   return RAISES[((h ^ (h >>> 16)) >>> 0) % RAISES.length];
 }
 
-// Whether street k of family fi jumps river kr in the sunny town (about half do).
+// Whether street k of family fi jumps river kr (about half do).
 function riverGap(fi, k, kr) {
   let h = (Math.imul(k * 2 + fi, 2246822519) + Math.imul(kr, 3266489917) + 0x2f6b) | 0;
   h = Math.imul(h ^ (h >>> 15), 668265263);
@@ -50,7 +47,7 @@ function riverGapSide(fi, k, kr) {
   return ((h ^ (h >>> 16)) >>> 0) % 2 === 0 ? 1 : -1;
 }
 
-// Sunny town stunt parks: about one town block in seven (never the origin's).
+// Stunt parks: about one town block in seven (never the origin's).
 function isPark(i, j) {
   if (i === 0 && j === 0) return false;
   let h = (Math.imul(i, 668265263) + Math.imul(j, 374761393) + 0x27d4eb2d) | 0;
@@ -66,8 +63,8 @@ function isPark(i, j) {
 // around it all, a mogul field on one side and a bowl on the other.
 export const PARK_FLOOR = 1.6;
 export function parkHeight(px, pz, e) {
-  const sideX = DAY_SPACING_X / 2 - Math.abs(px); // to the east-west streets
-  const sideZ = DAY_SPACING_Z / 2 - Math.abs(pz);
+  const sideX = SX / 2 - Math.abs(px); // to the east-west streets
+  const sideZ = SZ / 2 - Math.abs(pz);
   const along = sideX < sideZ ? Math.abs(pz) : Math.abs(px);
   const gate = smoothstep(10, 7, along);
   const bank = 3.6 * smoothstep(10, 1.2, e) ** 1.5 * (1 - gate);
@@ -135,14 +132,7 @@ function terrace(v, steps, riser = 0.7) {
   return (k + (f < riser ? 0 : smoothstep(riser, 1, f))) / steps;
 }
 
-// `world`: 'town' (the dark town, at night) or 'daytown' (the sunny town, by day, with the
-// modelled buildings of the kit, see terrain/buildings.js).
-export function createTownField(seed = 31, world = 'town') {
-  const day = world === 'daytown';
-  const SX = day ? DAY_SPACING_X : SPACING_X;
-  const SZ = day ? DAY_SPACING_Z : SPACING_Z;
-  const warp = day ? DAY_WARP : 1;
-  const wiggle = day ? DAY_WIGGLE : 1;
+export function createTownField(seed = 31) {
   const rand = mulberry32(seed);
   const warpA = createNoise2D(rand);
   const warpB = createNoise2D(rand);
@@ -156,9 +146,9 @@ export function createTownField(seed = 31, world = 'town') {
 
   // Warped coordinates across each family; a road (or the river) is where one is a multiple of
   // its spacing. The east-west family is shifted so a street runs through the origin.
-  const a0 = warp * 38 * warpA(0, 0) + wiggle * 10 * warpB(0, 0);
-  const acrossX = (x, z) => z + warp * 38 * warpA(x * 0.005, z * 0.004) + wiggle * 10 * warpB(x * 0.017, z * 0.017) - a0;
-  const acrossZ = (x, z) => x + warp * 45 * warpB(x * 0.004 + 40, z * 0.0055) + wiggle * 9 * warpA(x * 0.018 + 9, z * 0.018);
+  const a0 = WARP * 38 * warpA(0, 0);
+  const acrossX = (x, z) => z + WARP * 38 * warpA(x * 0.005, z * 0.004) - a0;
+  const acrossZ = (x, z) => x + WARP * 45 * warpB(x * 0.004 + 40, z * 0.0055);
   const acrossR = (x, z) => 0.6 * x - 0.8 * z + 110 * riverWarp(x * 0.0022, z * 0.0022) + 28 * riverWarp(x * 0.008 + 3, z * 0.008);
   const OFFSET_Z = SZ * 0.41;
   // The river runs half its spacing away from the origin.
@@ -174,12 +164,11 @@ export function createTownField(seed = 31, world = 'town') {
     const k = Math.round(a / spacing);
     return { d: (a - k * spacing) / g, gx: gx / g, gz: gz / g };
   }
-  // The sunny town has a side street midway between each pair of north-south streets, except
-  // through a stunt park (which keeps its whole block; the side street ends at it).
-  const SZ_STREETS = day ? SZ / 2 : SZ;
+  // A side street midway between each pair of north-south streets, except through a stunt park
+  // (which keeps its whole block; the side street ends at it).
+  const SZ_STREETS = SZ / 2;
   const streets = (x, z) => {
     const f0 = family(acrossX, x, z, SX, 0);
-    if (!day) return [f0, family(acrossZ, x, z, SZ, OFFSET_Z)];
     const a1 = acrossZ(x, z) + OFFSET_Z;
     const side = Math.round(a1 / SZ_STREETS) % 2 !== 0;
     const throughPark = side && isPark(Math.floor(acrossX(x, z) / SX), Math.floor(a1 / SZ));
@@ -209,9 +198,9 @@ export function createTownField(seed = 31, world = 'town') {
     const other = r === both[0] ? both[1] : both[0];
     const dist = Math.abs(r.d);
     const wild = wildAt(x, z);
-    // Sunny town: some blocks are stunt parks (see `parkHeight`), away from the wild and the river.
-    const block = day ? [Math.floor(acrossX(x, z) / SX), Math.floor((acrossZ(x, z) + OFFSET_Z) / SZ)] : null;
-    const park = day && isPark(block[0], block[1]) ? (1 - smoothstep(0.15, 0.3, wild)) * (1 - smoothstep(-60, -40, -(Math.abs(riverAt(x, z).d) - riverHalfAt(x, z)))) : 0;
+    // Some blocks are stunt parks (see `parkHeight`), away from the wild and the river.
+    const block = [Math.floor(acrossX(x, z) / SX), Math.floor((acrossZ(x, z) + OFFSET_Z) / SZ)];
+    const park = isPark(block[0], block[1]) ? (1 - smoothstep(0.15, 0.3, wild)) * (1 - smoothstep(-60, -40, -(Math.abs(riverAt(x, z).d) - riverHalfAt(x, z)))) : 0;
     // Streets are graded level from side to side: near a street the floor is taken at its centre
     // line, blending into the local floor further out (and both gradings where two streets meet).
     let sum = 0;
@@ -247,41 +236,39 @@ export function createTownField(seed = 31, world = 'town') {
     const wander = 0.06 * bumpNoise(x * 0.045 + 31, z * 0.045);
     const mountain = mass > 0 ? mass * (terrace(Math.max(0, Math.min(1, ridge ** 1.5 * (0.75 + 0.35 * crag) + wander)), 6, 0.55) * 42 + 4 * crag) : 0;
     h += townHill + foot + mountain;
-    // Sunny town: each block stands on its own plinth, raised a little behind a stone retaining
-    // wall along the sidewalk (some blocks stay at street level), as the reference's blocks do.
+    // Each block stands on its own plinth, raised a little behind a stone retaining wall along
+    // the sidewalk (some blocks stay at street level), as the reference's blocks do.
     let jump = 0;
     let parkLift = 0;
     let driveway = 0;
-    if (day) {
-      // (Each side of a side street is a block of its own.)
-      const raise = blockRaise(block[0], Math.floor((acrossZ(x, z) + OFFSET_Z) / SZ_STREETS));
-      const away = 1 - smoothstep(20, 45, Math.abs(riverAt(x, z).d) - riverHalfAt(x, z));
-      // Here and there a driveway ramps up through the retaining wall onto a raised block (1 in 5),
-      // into the gardens behind the rows (which leave it clear, see terrain/buildings.js).
-      if (raise > 0) {
-        const fi = r === both[0] ? 0 : 1;
-        const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ_STREETS));
-        const t0 = drivewayAt(fi, k, fi === 0 ? x : z, r.d > 0 ? 1 : -1);
-        if (t0 !== null && Math.abs(other.d) > 20) driveway = smoothstep(4.5, 3.2, Math.abs((fi === 0 ? x : z) - t0)) * (1 - smoothstep(KERB + 26, KERB + 30, dist));
-      }
-      const wall = smoothstep(KERB + 0.35, KERB + 1.15, dist);
-      const ramp = smoothstep(KERB + 0.35, KERB + 0.35 + raise * 5, dist);
-      h += raise * (wall + (ramp - wall) * driveway) * (1 - smoothstep(0.2, 0.5, wild)) * (1 - away) * (1 - park);
-      // The stunt parks' banks, tabletop, kickers, moguls and bowl, on the paving behind the sidewalks.
-      if (park > 0) h += (parkLift = park * smoothstep(KERB + 0.3, KERB + 1.0, dist) * parkHeight(acrossX(x, z) - (block[0] + 0.5) * SX, acrossZ(x, z) + OFFSET_Z - (block[1] + 0.5) * SZ, dist - KERB));
-      // Jumps on the streets: crests and tabletops on some straights, clear of the junctions.
-      for (let fi = 0; fi < 2; fi++) {
-        const f = both[fi];
-        const across = Math.abs(f.d);
-        if (across > KERB + 0.5) continue;
-        const o = both[1 - fi];
-        const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ_STREETS));
-        const t = fi === 0 ? x : z;
-        const lift = streetJump(fi, k, t) * (1 - smoothstep(KERB - 0.8, KERB + 0.4, across)) * smoothstep(18, 28, Math.abs(o.d)) * (1 - smoothstep(0.2, 0.4, wild)) * smoothstep(30, 45, Math.abs(riverAt(x, z).d) - riverHalfAt(x, z));
-        jump = Math.max(jump, lift);
-      }
-      h += jump;
+    // (Each side of a side street is a block of its own.)
+    const raise = blockRaise(block[0], Math.floor((acrossZ(x, z) + OFFSET_Z) / SZ_STREETS));
+    const away = 1 - smoothstep(20, 45, Math.abs(riverAt(x, z).d) - riverHalfAt(x, z));
+    // Here and there a driveway ramps up through the retaining wall onto a raised block (1 in 5),
+    // into the gardens behind the rows (which leave it clear, see terrain/buildings.js).
+    if (raise > 0) {
+      const fi = r === both[0] ? 0 : 1;
+      const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ_STREETS));
+      const t0 = drivewayAt(fi, k, fi === 0 ? x : z, r.d > 0 ? 1 : -1);
+      if (t0 !== null && Math.abs(other.d) > 20) driveway = smoothstep(4.5, 3.2, Math.abs((fi === 0 ? x : z) - t0)) * (1 - smoothstep(KERB + 26, KERB + 30, dist));
     }
+    const wall = smoothstep(KERB + 0.35, KERB + 1.15, dist);
+    const ramp = smoothstep(KERB + 0.35, KERB + 0.35 + raise * 5, dist);
+    h += raise * (wall + (ramp - wall) * driveway) * (1 - smoothstep(0.2, 0.5, wild)) * (1 - away) * (1 - park);
+    // The stunt parks' banks, tabletop, kickers, moguls and bowl, on the paving behind the sidewalks.
+    if (park > 0) h += (parkLift = park * smoothstep(KERB + 0.3, KERB + 1.0, dist) * parkHeight(acrossX(x, z) - (block[0] + 0.5) * SX, acrossZ(x, z) + OFFSET_Z - (block[1] + 0.5) * SZ, dist - KERB));
+    // Jumps on the streets: crests and tabletops on some straights, clear of the junctions.
+    for (let fi = 0; fi < 2; fi++) {
+      const f = both[fi];
+      const across = Math.abs(f.d);
+      if (across > KERB + 0.5) continue;
+      const o = both[1 - fi];
+      const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ_STREETS));
+      const t = fi === 0 ? x : z;
+      const lift = streetJump(fi, k, t) * (1 - smoothstep(KERB - 0.8, KERB + 0.4, across)) * smoothstep(18, 28, Math.abs(o.d)) * (1 - smoothstep(0.2, 0.4, wild)) * smoothstep(30, 45, Math.abs(riverAt(x, z).d) - riverHalfAt(x, z));
+      jump = Math.max(jump, lift);
+    }
+    h += jump;
 
     // Ponds in the parks and the wild lowlands (not in the mountains).
     const pondShape = lakeNoise(x * 0.011, z * 0.011);
@@ -293,13 +280,13 @@ export function createTownField(seed = 31, world = 'town') {
     const river = riverAt(x, z);
     const riverDist = Math.abs(river.d);
     const halfWidth = riverHalfAt(x, z);
-    // Sunny town: about half the streets jump the river instead of crossing on an embankment. A
+    // About half the streets jump the river instead of crossing on an embankment. A
     // curved kicker rises 3.2 m over 18 m on one bank to a lip (about 19 degrees) where the channel
     // starts; the road is cut through, its banks steep, and the far bank's road is the landing.
     // (Coming the other way the road just ends at the water, which is shallow enough to ford.)
     let gap = 0;
     let gapLift = 0;
-    if (day && dist < KERB + 6 && riverDist < halfWidth + 27) {
+    if (dist < KERB + 6 && riverDist < halfWidth + 27) {
       const fi = r === both[0] ? 0 : 1;
       const k = Math.round((fi === 0 ? acrossX(x, z) : acrossZ(x, z) + OFFSET_Z) / (fi === 0 ? SX : SZ_STREETS));
       const kr = Math.round((acrossR(x, z) + OFFSET_R) / RIVER_SPACING);
@@ -367,11 +354,10 @@ export function createTownField(seed = 31, world = 'town') {
     { across: acrossX, spacing: SX, alongX: true },
     { across: (x, z) => acrossZ(x, z) + OFFSET_Z, spacing: SZ_STREETS, alongX: false },
   ];
-  // The sunny town's layout, for placing things on it (terrain/props.js): its blocks' size, which
-  // are stunt parks, and the street jumps.
-  heightAt.blocks = { sizeX: SX, sizeZ: SZ, isPark: (i, j) => day && isPark(i, j) };
+  // The town's layout, for placing things on it (terrain/props.js): its blocks' size, which are
+  // stunt parks, and the street jumps.
+  heightAt.blocks = { sizeX: SX, sizeZ: SZ, isPark };
   heightAt.town = true;
-  heightAt.world = world;
-  heightAt.buildingKit = world === 'daytown';
+  heightAt.world = 'daytown';
   return heightAt;
 }

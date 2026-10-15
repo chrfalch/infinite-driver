@@ -110,7 +110,7 @@ export async function main(loading) {
   const night = daylight.dark > 0.5;
   const heightAt = createHeightField({ mode });
   // The sunny town's buildings are models: loaded before its first chunk is built.
-  if (heightAt.buildingKit) {
+  if (heightAt.town) {
     loading?.set('world', 0.3, 'Building the town');
     await Promise.all([loadTownKit(), loadYardKit()]);
   }
@@ -159,8 +159,8 @@ export async function main(loading) {
   await loading?.pause();
 
   // The sunny town's crates, cones and yard props: drawn here, simulated where the physics runs.
-  const propsView = heightAt.buildingKit ? createPropsView(render.scene, heightAt) : null;
-  const propPhysics = heightAt.buildingKit && physicsWorld ? createPropPhysics(RAPIER, physicsWorld, heightAt) : null;
+  const propsView = heightAt.town ? createPropsView(render.scene, heightAt) : null;
+  const propPhysics = heightAt.town && physicsWorld ? createPropPhysics(RAPIER, physicsWorld, heightAt) : null;
   // The dry river's course markers: flags, chevron boards, tyre stacks and the start gantry.
   const trackMarkers = heightAt.beds ? createTrackMarkersView(render.scene, heightAt) : null;
 
