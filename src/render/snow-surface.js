@@ -15,6 +15,7 @@ import { BufferAttribute, BufferGeometry, DataTexture, FloatType, Mesh, MeshStan
 import { Fn, float, int, ivec2, mix, normalize, positionLocal, smoothstep, step, textureLoad, transformNormalToView, uniform, varying, vec2, vec3, vec4 } from 'three/tsl';
 import { groundMeshData, snowGroundColor, snowGroundRoughness } from './terrain-mesh.js';
 import { DEFORM_CELL } from '../terrain/deformation.js';
+import { SNOW_FIELDS, SnowTiles } from '../terrain/snow-tiles.js';
 
 export const PATCH_SIZE = 48; // m
 const CELL = DEFORM_CELL;
@@ -155,6 +156,9 @@ export class SnowSurface {
     this.heightAt = heightAt;
     this.deformation = deformation;
     this.snowAt = heightAt.snowAt;
+    // The snow's fields per cell, sampled ahead of the car by the chunk worker (terrain/snow-tiles.js).
+    this.tiles = new SnowTiles(heightAt, CELL);
+    this.sample = new Float32Array(SNOW_FIELDS);
     // Per vertex: the snow surface's height, firmness, road side and lake (rewritten when the patch
     // moves); the deformation and packing (rewritten as the ruts change).
     this.snow = floatTexture(new Float32Array(N * N * 4), N, RGBAFormat);
@@ -198,7 +202,15 @@ export class SnowSurface {
   // The terrain mesh's corners for a patch at (x0, z0) m (groundMeshData, as the chunks have them).
   fillCorners(x0, z0) {
     const heights = new Float32Array(C * C);
-    for (let iz = 0; iz < C; iz++) for (let ix = 0; ix < C; ix++) heights[iz * C + ix] = this.heightAt(x0 + ix, z0 + iz);
+    const { tiles, sample } = this;
+    const ix0 = Math.round(x0 / CELL);
+    const iz0 = Math.round(z0 / CELL);
+    for (let iz = 0; iz < C; iz++) {
+      for (let ix = 0; ix < C; ix++) {
+        tiles.cell(ix0 + ix * PER_METRE, iz0 + iz * PER_METRE, sample);
+        heights[iz * C + ix] = sample[0];
+      }
+    }
     const m = groundMeshData(this.heightAt, heights, x0, z0, 1, C - 1);
     const [a, b] = this.corners.map((t) => t.image.data);
     for (let i = 0; i < C * C; i++) {
@@ -236,15 +248,14 @@ export class SnowSurface {
             next.pack[i] = prev.pack[j];
             for (let k = 0; k < 4; k++) snow[i * 4 + k] = old[j * 4 + k];
           } else {
-            const wx = (ix0 + ix) * CELL;
-            const wz = (iz0 + iz) * CELL;
-            const s = this.snowAt(wx, wz);
-            next.firm[i] = s.firm;
-            next.pack[i] = s.packDepth;
-            snow[i * 4] = this.heightAt(wx, wz);
-            snow[i * 4 + 1] = s.firm;
-            snow[i * 4 + 2] = this.heightAt.roadSide(wx, wz);
-            snow[i * 4 + 3] = s.lake;
+            const s = this.sample;
+            this.tiles.cell(ix0 + ix, iz0 + iz, s);
+            next.firm[i] = s[1];
+            next.pack[i] = s[2];
+            snow[i * 4] = s[0];
+            snow[i * 4 + 1] = s[1];
+            snow[i * 4 + 2] = s[3];
+            snow[i * 4 + 3] = s[4];
           }
         }
       }
@@ -256,6 +267,8 @@ export class SnowSurface {
       this.iz0 = iz0;
       this.origin.value.set(ix0 * CELL, iz0 * CELL);
       this.onMove?.(this.bounds());
+      // The snow for the next recentres, wherever the car heads.
+      this.tiles.want(ix0, iz0, ix0 + N - 1, iz0 + N - 1);
     }
     this.version = version;
     const def = this.def;

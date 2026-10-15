@@ -16,7 +16,13 @@ This audit measures `main` at `b84de50` (AI drivers merged). It follows up on `d
 
 - **Rebuild stall (§3):** the cause was **not** the car's materials. Each rebuild made new head- and tail-light `SpotLight`s, and three's `LightsNode` cache key includes the lights' ids, so **every lit material in the scene** (terrain, particles, tracks, …) built its node graph again. The player's car now reuses the same three spot lights. The tyres' node materials (and their shadow-pass variants), the only per-car materials left, go back to a pool and are reused by the next car's tyres. The first draw after a rebuild went from about 430 ms to about 9 ms. The longest frame went from about 520 to about 95 ms; what is left is building the car's geometry.
 
-## Setup
+## Update: item 4 fixed, and the finding corrected
+
+Measured directly, §4 was wrong about the cause. **Uploading the deformation texture costs about 0.1 ms**, and the rut refill costs 0.06–0.44 ms. Neither is worth reworking. The snowfield's spikes came from the **snow patch recentre: 25 ms in WebKit every 4 m driven**. Each recentre sampled the procedural snow (`snowAt` twice per cell, plus `roadSide`) for about 12k new 12.5 cm cells.
+
+The fix: the chunk worker now samples the snow fields in 16 m tiles ahead of the car (`terrain/snow-tiles.js`). A recentre copies cells from those tiles and samples only the cells whose tile is not ready yet, such as right after a teleport. One recentre now takes 2.7 ms instead of 25 ms. On the scripted snowfield drive, the max of `sys.groundSurface` went from 27 to 4 ms, frames over 50 ms from 21 to 0, and sim/real from 0.94 to 1.00.
+
+
 
 - Headless **WebKit** (iPhone Safari's engine) on the M4, WebGPU, with an iPhone-size viewport of 430×932 @3. The canvas is 860×1864 because DPR is capped at 2. The game runs with `?perf&sound=0`.
 - Each run uses the same scripted drive as `scripts/perf-profile.mjs`: 14 s of throttle with two turns, measured after a 3 s settle.

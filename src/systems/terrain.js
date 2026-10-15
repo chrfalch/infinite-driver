@@ -44,6 +44,10 @@ export function startChunkWorker({ mode, rockCount = ROCK_COUNT }) {
     const state = { worker, requested: new Set(), ready: new Map(), sheets: new Map() };
     worker.onmessage = (e) => {
       const msg = e.data;
+      if (msg.type === 'snowTile') {
+        state.snowTiles?.receive(msg.tx, msg.tz, msg.data);
+        return;
+      }
       const key = chunkKey(msg.cx, msg.cz);
       if (msg.type === 'sheet') {
         state.sheets.set(key, msg);
@@ -63,6 +67,14 @@ export function startChunkWorker({ mode, rockCount = ROCK_COUNT }) {
   } catch (error) {
     console.warn('Chunk worker unavailable, building terrain on the main thread:', error);
   }
+}
+
+// The snow surface's tiles (terrain/snow-tiles.js) come from the chunk worker, when there is one.
+export function connectSnowTiles(tiles) {
+  if (!chunkWorker || !tiles) return;
+  const state = chunkWorker;
+  state.snowTiles = tiles;
+  tiles.request = (tx, tz) => state.worker.postMessage({ type: 'snowTile', tx, tz });
 }
 
 // Triangle indices are the same for every chunk.
