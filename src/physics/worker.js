@@ -193,7 +193,7 @@ async function init(msg) {
     stepPoses.push([physics.simTime, t.x, t.y, t.z, q.x, q.y, q.z, q.w]);
   };
   colliders = createColliderStreamer({ rapier: RAPIER, world: physicsWorld, ecs: world, RockField, heightAt, rockCount: msg.rocks });
-  if (heightAt.buildingKit) props = createPropPhysics(RAPIER, physicsWorld, heightAt);
+  if (heightAt.town) props = createPropPhysics(RAPIER, physicsWorld, heightAt);
   simLast = performance.now();
   postMessage({ type: 'ready' });
 }

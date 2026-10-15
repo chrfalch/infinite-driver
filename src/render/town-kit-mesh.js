@@ -2,7 +2,7 @@
 // public/models/town-kit.glb: a corner block with a turret, a house under a bell-curved mansard,
 // a cottage, a domed tower and a Dutch-gabled row, listed in terrain/town-kit.js. Each lot of
 // terrain/buildings.js names its model; a chunk's are copied, turned to face their streets, into
-// one mesh (one draw call per chunk, like the dark town's).
+// one mesh (one draw call per chunk).
 //
 // Model frame (glTF): y up, the front facing +z, the origin on the ground in the middle of the
 // footprint. A building's frame: x along its street (ux, uz), the front toward the street (-nx, -nz).

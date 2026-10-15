@@ -1,6 +1,6 @@
 // Which world to drive in. The loading screen asks first (start.js) and saves the pick; the panel's
 // picker saves it and reloads the page into it; ?terrain=<mode> overrides it (tests use ?terrain=flat).
-export const WORLDS = { 'Red-rock canyon': 'canyon', 'Dry river': 'river', Snowfield: 'snow', 'Dark town': 'town', 'Sunny town': 'daytown' };
+export const WORLDS = { 'Red-rock canyon': 'canyon', 'Dry river': 'river', Snowfield: 'snow', 'Sunny town': 'daytown' };
 export const DEFAULT_WORLD = 'canyon';
 const WORLD_KEY = 'drift.world';
 // The world just picked, for the page load it reloads into (this tab only).

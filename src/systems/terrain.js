@@ -11,7 +11,6 @@ import {
   View,
 } from '../ecs/traits.js';
 import { createRocksMesh, createRocksMeshFromData } from '../render/rock-mesh.js';
-import { createBuildingsMesh, createBuildingsMeshFromData } from '../render/building-mesh.js';
 import { createKitBuildingsMesh } from '../render/town-kit-mesh.js';
 import { createChunkMesh, createChunkMeshFromData } from '../render/terrain-mesh.js';
 import { CHUNK_RES, CHUNK_SIZE, chunkKey, sampleChunk } from '../terrain/chunk.js';
@@ -362,18 +361,16 @@ function spawnChunk(world, physics, scene, heightAt, cx, cz, { ground, rocks, ne
   scene.add(object);
   const entity = world.spawn(TerrainChunk(chunk), RockField(field), View({ object }));
   // The worker's chunk comes with its rock mesh data and plants, so it is finished right away.
-  if (data) buildRocksMesh(entity, field, data.rocksMesh, data.buildingsMesh);
+  if (data) buildRocksMesh(entity, field, data.rocksMesh);
   else if (rocks) buildRocksMesh(entity, field);
 }
 
-function buildRocksMesh(entity, field, rocksMeshData, buildingsMeshData) {
+function buildRocksMesh(entity, field, rocksMeshData) {
   field.meshBuilt = true;
   const rocksMesh = rocksMeshData !== undefined ? createRocksMeshFromData(rocksMeshData) : timed('terrain.rockMeshGeo', () => createRocksMesh(field.rocks));
   if (rocksMesh) entity.get(View).object.add(rocksMesh);
-  // The town's buildings are among its rocks (solid boxes); they are drawn on their own.
-  const buildings = buildingsMeshData !== undefined ? createBuildingsMeshFromData(buildingsMeshData) : createBuildingsMesh(field.rocks);
-  if (buildings) entity.get(View).object.add(buildings);
-  // The sunny town's are modelled (render/town-kit-mesh.js).
+  // The town's buildings are among its rocks (solid boxes); they are drawn from their models
+  // (render/town-kit-mesh.js).
   const kitBuildings = timed('terrain.kitBuildings', () => createKitBuildingsMesh(field.rocks));
   if (kitBuildings) entity.get(View).object.add(kitBuildings);
   const plants = timed('terrain.plants', () => createVegetationMesh(plantsOf(field)));

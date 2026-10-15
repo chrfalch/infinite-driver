@@ -1,24 +1,21 @@
-// The dark town's buildings (terrain/town.js): houses, apartment blocks and towers lining the
-// streets, each turned to face its street. They come from a fixed grid of lots, so every chunk (and
-// every worker) agrees on them. A lot's building is dropped where it would overlap a neighbour
-// with a higher priority, the street, the water or a steep slope, which leaves gardens and gaps.
+// The town's buildings (terrain/town.js): modelled houses, blocks and towers from the kit
+// (terrain/town-kit.js) in rows along the streets, each turned to face its street, with more on a
+// fixed grid of lots behind them. Every chunk (and every worker) agrees on them. A lot's building
+// is dropped where it would overlap a neighbour with a higher priority, the street, the water or a
+// steep slope, which leaves gardens and gaps.
 //
 // Each building is also a solid box for physics: it joins the chunk's rocks with its eight corners
 // as `vertices` (the convex hull collider and the GPU tyres' rock planes use them) and no `faces`
-// (the rock mesh skips it; render/building-mesh.js draws it from `building`).
+// (the rock mesh skips it; render/town-kit-mesh.js draws it from `building`).
 import { CHUNK_SIZE } from './chunk.js';
 import { KERB } from './town.js';
 import { TOWN_KIT } from './town-kit.js';
 
-const LOT = 13; // m between lot centres
-const GAP = 0.8; // m kept between neighbouring buildings
-// The sunny town is packed tighter, like the reference diorama: closer lots, buildings nearly
-// touching, the front row on the building line right behind the sidewalk.
-const KIT_LOT = 8;
-const KIT_GAP = 0.15;
-const lotSize = (heightAt) => (heightAt.buildingKit ? KIT_LOT : LOT);
+// Packed tight, like the reference diorama: close lots, buildings nearly touching, the front row
+// on the building line right behind the sidewalk.
+const LOT = 8; // m between lot centres
+const GAP = 0.15; // m kept between neighbouring buildings
 const NARROW_KIT = 'Kit_Townhouse'; // tried where the lot's pick doesn't fit
-const FLOOR = 3.2; // m per storey
 
 function hash(ix, iz, k) {
   let h = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(k, 982451653)) | 0;
@@ -26,118 +23,66 @@ function hash(ix, iz, k) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-// Wall and roof colours, picked per building (from the reference diorama: cream and sand stone,
-// terracotta and brick, pale yellow, white and grey render, a turquoise block; terracotta, slate and
-// brown roofs, the odd teal one).
-export const WALLS = ['#ecdfc3', '#dcc092', '#e8d48e', '#c96f4a', '#b45a3e', '#efeae0', '#c8c3b8', '#d9a86c', '#a88466', '#e6c7a4'];
-export const GLASS_WALLS = ['#56b6c9', '#4ea4c6', '#6cc0cf'];
-export const ROOFS = ['#c4583b', '#d26a42', '#b04a32', '#5c6068', '#4b4e54', '#6b5040', '#4a9db0'];
-
 // The building on lot (i, j), before checking its neighbours, or null.
 function lotBuilding(heightAt, i, j) {
   const r = (k) => hash(i, j, k);
-  const lot = lotSize(heightAt);
-  let x = (i + 0.5 + (r(1) - 0.5) * 0.3) * lot;
-  let z = (j + 0.5 + (r(2) - 0.5) * 0.3) * lot;
-  let s = heightAt.sample(x, z);
+  const x = (i + 0.5 + (r(1) - 0.5) * 0.3) * LOT;
+  const z = (j + 0.5 + (r(2) - 0.5) * 0.3) * LOT;
+  const s = heightAt.sample(x, z);
   const town = 1 - s.wild;
-  if (heightAt.buildingKit ? r(3) > smoothstep(0.1, 0.4, town) : r(3) > 0.95 * smoothstep(0.15, 0.55, town)) return null;
-  // The sunny town's streets are lined by rows (see `frontage`); its lots only fill in behind them.
-  if (s.dist < (heightAt.buildingKit ? KERB + 13 : KERB + 1) || s.dist > 36 || s.townHill > 0.5) return null;
+  if (r(3) > smoothstep(0.1, 0.4, town)) return null;
+  // The streets are lined by rows (see `frontage`); the lots only fill in behind them.
+  if (s.dist < KERB + 13 || s.dist > 36 || s.townHill > 0.5) return null;
   if (s.riverDist < s.riverHalf + 9) return null;
-  // Downtown (deep in town) builds taller and closer together.
+  // Downtown (deep in town) builds taller.
   const core = smoothstep(0.6, 1, town) * (0.5 + 0.5 * Math.sin(x * 0.011 + 1.3) * Math.cos(z * 0.009 - 0.4));
   const tall = r(4) < 0.18 + 0.55 * core;
-  const storeys = tall ? 3 + Math.floor(r(5) * (2 + 3 * core)) : 1 + Math.floor(r(5) * 2.5);
-  // Width along the street, depth away from it.
-  let w = 6.5 + r(6) * 5;
-  let d = 7 + r(7) * 5;
-  let roof;
-  const pick = r(9);
-  // Mostly pitched tile roofs, as in the reference; flat roofs on some of the blocks.
-  if (tall) roof = pick < 0.06 ? 'spire' : pick < 0.14 ? 'dome' : pick < 0.42 ? 'hip' : pick < 0.62 ? 'gable' : 'flat';
-  else roof = pick < 0.5 ? 'gable' : pick < 0.88 ? 'hip' : 'flat';
-  // Spires and domes crown narrower towers.
-  if (roof === 'spire' || roof === 'dome') {
-    w = d = 7 + r(6) * 2;
-  }
   // The building faces the street: its depth axis is the street's normal (gx, gz), pointing away.
   const sign = Math.sign(s.side) || 1;
   const nx = s.gx * sign;
   const nz = s.gz * sign;
   const ux = -nz; // along the street
   const uz = nx;
-  const front = s.dist < 18 && !heightAt.buildingKit;
-  // A w x d footprint on this lot, or null where it doesn't fit.
-  const fit = (w, d, line) => {
-    let px0 = x;
-    let pz0 = z;
-    // The first row stands on a building line just behind the sidewalk; further out they keep their lot.
-    if (front) {
-      const push = line + d / 2 - s.dist;
-      px0 += nx * push;
-      pz0 += nz * push;
-    }
-    const ground = footprintGround(heightAt, px0, pz0, ux, uz, nx, nz, w, d);
-    return ground && { x: px0, z: pz0, w, d, ...ground };
-  };
-  let kit = null;
-  let stretch = 1;
-  let at;
-  if (heightAt.buildingKit) {
-    // The sunny town builds from the modelled kit (render/town-kit-mesh.js) at the models' own
-    // size; straight-fronted ones may be widened or narrowed a little, so rows close up. Where the
-    // pick doesn't fit (a bend in the street, the water), a narrower one is tried.
-    const line = KERB + 0.5 + r(8) * 0.4;
-    const first = pickKit(tall, r(15));
-    const narrow = TOWN_KIT.find((k) => k.name === NARROW_KIT);
-    const tries = [[first, first.stretch ? 0.9 + r(16) * 0.25 : 1]];
-    if (first.stretch) tries.push([first, 0.85]);
-    if (first !== narrow) tries.push([narrow, 1]);
-    for (const [k, f] of tries) {
-      at = fit(k.w * f, k.d, line);
-      if (at) {
-        kit = k;
-        stretch = f;
-        break;
-      }
-    }
-    if (!at) return null;
-    roof = 'kit';
-  } else {
-    at = fit(w, d, KERB + 1.2 + r(8) * 1.2);
-    if (!at) return null;
+  // Built from the modelled kit (render/town-kit-mesh.js) at the models' own size; straight-fronted
+  // ones may be widened or narrowed a little, so rows close up. Where the pick doesn't fit (a bend
+  // in the street, the water), a narrower one is tried.
+  const first = pickKit(tall, r(15));
+  const narrow = TOWN_KIT.find((k) => k.name === NARROW_KIT);
+  const tries = [[first, first.stretch ? 0.9 + r(16) * 0.25 : 1]];
+  if (first.stretch) tries.push([first, 0.85]);
+  if (first !== narrow) tries.push([narrow, 1]);
+  for (const [kit, stretch] of tries) {
+    const w = kit.w * stretch;
+    const ground = footprintGround(heightAt, x, z, ux, uz, nx, nz, w, kit.d);
+    if (!ground) continue;
+    return {
+      x,
+      z,
+      w,
+      d: kit.d,
+      ux,
+      uz,
+      nx,
+      nz,
+      yaw: Math.atan2(nz, nx), // the depth axis' direction in x/z
+      base: ground.lo - 1,
+      ground: ground.hi,
+      height: kit.eaves,
+      storeys: kit.storeys,
+      roof: 'kit',
+      kit: kit.name,
+      stretch,
+      glass: false,
+      wall: r(11),
+      roofColor: r(12),
+      extra: r(13),
+      radius: Math.hypot(w, kit.d) / 2,
+      priority: r(14),
+      i,
+      j,
+    };
   }
-  ({ x, z, w, d } = at);
-  const { lo, hi } = at;
-  const yaw = Math.atan2(nz, nx); // the depth axis' direction in x/z
-  const height = kit ? kit.eaves : storeys * FLOOR + 0.6;
-  return {
-    x,
-    z,
-    w,
-    d,
-    ux,
-    uz,
-    nx,
-    nz,
-    yaw,
-    base: lo - 1,
-    ground: hi,
-    height,
-    storeys: kit ? kit.storeys : storeys,
-    roof,
-    kit: kit ? kit.name : null,
-    stretch,
-    glass: !kit && tall && r(10) < 0.3,
-    wall: r(11),
-    roofColor: r(12),
-    extra: r(13),
-    radius: Math.hypot(w, d) / 2,
-    priority: r(14),
-    i,
-    j,
-  };
+  return null;
 }
 
 // Tall lots: mostly the big blocks, some three-storey houses, very rarely the domed tower or the
@@ -176,37 +121,31 @@ export function generateBuildings(heightAt, cx, cz) {
   const hit = cache.get(key);
   if (hit && hit.heightAt === heightAt) return hit.buildings;
   // Lots whose building may stand in this chunk, and the ring around them it may collide with.
-  const lot = lotSize(heightAt);
-  const i0 = Math.floor((cx * CHUNK_SIZE) / lot) - 2;
-  const i1 = Math.floor(((cx + 1) * CHUNK_SIZE) / lot) + 2;
-  const j0 = Math.floor((cz * CHUNK_SIZE) / lot) - 2;
-  const j1 = Math.floor(((cz + 1) * CHUNK_SIZE) / lot) + 2;
+  const i0 = Math.floor((cx * CHUNK_SIZE) / LOT) - 2;
+  const i1 = Math.floor(((cx + 1) * CHUNK_SIZE) / LOT) + 2;
+  const j0 = Math.floor((cz * CHUNK_SIZE) / LOT) - 2;
+  const j1 = Math.floor(((cz + 1) * CHUNK_SIZE) / LOT) + 2;
   const lots = [];
   for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-    const b = heightAt.buildingKit ? lotAt(heightAt, i, j) : lotBuilding(heightAt, i, j);
+    const b = lotAt(heightAt, i, j);
     if (b) lots.push(b);
   }
-  if (heightAt.buildingKit) {
-    const mx = (cx + 0.5) * CHUNK_SIZE;
-    const mz = (cz + 0.5) * CHUNK_SIZE;
-    lots.push(...frontageNear(heightAt, mx, mz, CHUNK_SIZE), ...specialsNear(heightAt, mx, mz, CHUNK_SIZE));
-  }
+  const mx = (cx + 0.5) * CHUNK_SIZE;
+  const mz = (cz + 0.5) * CHUNK_SIZE;
+  lots.push(...frontageNear(heightAt, mx, mz, CHUNK_SIZE), ...specialsNear(heightAt, mx, mz, CHUNK_SIZE));
   const buildings = [];
   for (const b of lots) {
     if (Math.floor(b.x / CHUNK_SIZE) !== cx || Math.floor(b.z / CHUNK_SIZE) !== cz) continue;
-    // Pushed out to the building line, a building can reach over the neighbouring lots: the one with
-    // the higher priority stays.
-    // The sunny town only gives way to neighbours that are built themselves, which leaves
-    // fewer gaps in its rows.
-    const blocked = heightAt.buildingKit ? !survives(heightAt, b) : lots.some((o) => o !== b && o.priority > b.priority && overlap(o, b, GAP));
-    if (!blocked) buildings.push(toRock(b));
+    // A building can reach over the neighbouring lots: the one with the higher priority stays. It
+    // only gives way to neighbours that are built themselves, which leaves fewer gaps in the rows.
+    if (survives(heightAt, b)) buildings.push(toRock(b));
   }
   cache.set(key, { heightAt, buildings });
   if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value);
   return buildings;
 }
 
-// The sunny town's lots, kept by heightAt and lot (any chunk or worker gets the same answer).
+// The lots' buildings, kept by heightAt and lot (any chunk or worker gets the same answer).
 const lotCache = new WeakMap();
 function lotAt(heightAt, i, j) {
   let lots = lotCache.get(heightAt);
@@ -223,7 +162,7 @@ function survives(heightAt, b) {
   if (b.survives !== undefined) return b.survives;
   let ok = true;
   for (const o of neighbours(heightAt, b)) {
-    if (o !== b && o.priority > b.priority && overlap(o, b, KIT_GAP) && survives(heightAt, o)) {
+    if (o !== b && o.priority > b.priority && overlap(o, b, GAP) && survives(heightAt, o)) {
       ok = false;
       break;
     }
@@ -232,10 +171,10 @@ function survives(heightAt, b) {
   return ok;
 }
 
-// The sunny town's buildings that might touch b: the street rows' near it and the lots around it.
+// The buildings that might touch b: the street rows' near it and the lots around it.
 function neighbours(heightAt, b) {
   const out = [...frontageNear(heightAt, b.x, b.z, b.radius + 14), ...specialsNear(heightAt, b.x, b.z, b.radius + 14)];
-  const lot = KIT_LOT;
+  const lot = LOT;
   const i0 = Math.floor(b.x / lot);
   const j0 = Math.floor(b.z / lot);
   for (let dj = -REACH; dj <= REACH; dj++) {
@@ -264,7 +203,7 @@ function footprintGround(heightAt, x, z, ux, uz, nx, nz, w, d, clear = KERB + 0.
   return hi - lo > rise ? null : { lo, hi };
 }
 
-// ---- The sunny town's street rows ----------------------------------------------------------------
+// ---- The street rows -----------------------------------------------------------------------
 // Each side of each street is cut into segments of SEG m (along x or z, as the street runs); a
 // segment is filled from its start with kit buildings side by side on the building line, facing the
 // street, like the reference's continuous frontages. A segment depends only on its street, side and
@@ -344,7 +283,7 @@ function segment(heightAt, fi, k, m, side) {
       placed = place(heightAt, f, k, side, t + dt / 2, kit, w, r(500 + n));
       // On the inside of a bend the backs close in on the previous building, and the corner
       // buildings, plazas and landmarks go first: slide along until clear.
-      const blocked = (p) => (out.length && overlap(out[out.length - 1], p, KIT_GAP)) || obstacles.some((o) => overlap(o, p, KIT_GAP));
+      const blocked = (p) => (out.length && overlap(out[out.length - 1], p, GAP)) || obstacles.some((o) => overlap(o, p, GAP));
       for (let nudge = 0; placed && blocked(placed) && nudge < 30; nudge++) {
         t += 0.6 / speed;
         placed = t + dt <= t1 ? place(heightAt, f, k, side, t + dt / 2, kit, w, r(500 + n)) : null;
@@ -361,7 +300,7 @@ function segment(heightAt, fi, k, m, side) {
       // Now and then a second building behind it (a workshop, a back house).
       if (r(600 + n) < BEHIND_SHARE) {
         const behind = placeBehind(heightAt, placed, pickKit(tall, r(700 + n)), r(800 + n));
-        if (behind && !(back.length && overlap(back[back.length - 1], behind, KIT_GAP)) && !obstacles.some((o) => overlap(o, behind, KIT_GAP))) back.push(behind);
+        if (behind && !(back.length && overlap(back[back.length - 1], behind, GAP)) && !obstacles.some((o) => overlap(o, behind, GAP))) back.push(behind);
       }
     } else t += 3 / speed; // a gap: a corner, a bend, the water
   }

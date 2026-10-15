@@ -122,8 +122,8 @@ function generateSpruces(heightAt, cx, cz) {
   return plants;
 }
 
-// Dark town: street trees along the sidewalks, round broadleaf trees and flowering shrubs in
-// the gardens and parks, reeds and willows by the water, mixed forest in the wild districts turning
+// Town: street trees along the sidewalks, round broadleaf trees and flowering shrubs in full
+// gardens and parks, reeds and willows by the water, mixed forest in the wild districts turning
 // to pines up the mountains, none on the bare granite. Broadleaf trees are 'tree' plants with
 // `leafy` set, pines with `pine` set; both have solid trunks. Nothing grows inside a building.
 function generateTownPlants(heightAt, cx, cz) {
@@ -154,9 +154,7 @@ function generateTownPlants(heightAt, cx, cz) {
       if (s.dist < KERB + 1.6) [pTree, pBush] = [town * 0.22, 0.08];
       else if (shore) [pTree, pBush] = [0.05, 0.3];
       else if (s.mountain > 6) [pTree, pBush] = [slope < 0.5 ? 0.05 : 0, 0.03];
-      // (The sunny town's gardens and courtyards are fuller: more small trees and flower beds.)
-      else if (heightAt.buildingKit) [pTree, pBush] = [0.035 + 0.12 * s.wild + 0.05 * town, 0.06 + 0.12 * town];
-      else [pTree, pBush] = [0.035 + 0.12 * s.wild, 0.06 + 0.04 * town];
+      else [pTree, pBush] = [0.035 + 0.12 * s.wild + 0.05 * town, 0.06 + 0.12 * town];
       if (roll >= pTree + pBush) continue;
       const tree = roll < pTree;
       if (insideBuilding(buildings, x, z, tree ? 1.6 : 0.6)) continue;
@@ -173,7 +171,7 @@ function generateTownPlants(heightAt, cx, cz) {
         }
       } else {
         // Flowering shrubs in town gardens; plain green ones elsewhere.
-        const flower = town > 0.5 && !shore && kindRoll < (heightAt.buildingKit ? 0.75 : 0.4) ? 1 + Math.floor(kindRoll * 10) % 4 : 0;
+        const flower = town > 0.5 && !shore && kindRoll < 0.75 ? 1 + Math.floor(kindRoll * 10) % 4 : 0;
         plants.push({ kind: 'bush', x, y, z, size: 0.5 + size * 0.8, turn, shade, flower });
       }
     }
