@@ -10,7 +10,8 @@ export const Render = trait(() => ({ renderer: null, scene: null, camera: null, 
 // heightAt: the generated terrain; surfaceAt: terrain plus ruts and berms (see Deformation).
 export const HeightField = trait(() => ({ heightAt: null, surfaceAt: null }));
 export const Deformation = trait(() => ({ map: null }));
-// Tyre contact per wheel this frame ({ x, z, depth } or null), found by the track system.
+// Tyre contact per wheel of the player's car this frame ({ x, z, depth } or null), found by the
+// track system (every car's are in its Vehicle's `groundContacts`).
 export const Tracks = trait(() => ({ renderer: null, contacts: [null, null, null, null] }));
 export const Soil = trait(() => ({ particles: null, fines: null, carry: [0, 0, 0, 0], spin: [0, 0, 0, 0] }));
 export const TerrainStreaming = trait({ radius: 2, colliderRadius: 1 });
@@ -22,7 +23,11 @@ export const Transform = trait(() => ({
 }));
 export const View = trait(() => ({ object: null }));
 export const RigidBody = trait(() => ({ body: null }));
-export const Vehicle = trait(() => ({ controller: null, body: null, drivetrain: null, steer: 0, speed: 0 }));
+// tires: the car's tyre model ('gpu', 'soft' or 'rigid', see TIRE_MODES in vehicle/config.js).
+// input: the driver's pedals and steering for a car other than the player's (the player's come
+// from the world's Input); null holds it still. id: the car's id (the worker's, with worker physics).
+// slot: its place in the shared tyre-track mesh (see Tracks).
+export const Vehicle = trait(() => ({ controller: null, body: null, drivetrain: null, steer: 0, speed: 0, tires: 'gpu', input: null, id: 0, slot: 0 }));
 export const IsPlayer = trait();
 export const CameraTarget = trait();
 export const TerrainChunk = trait(() => ({ cx: 0, cz: 0, collider: null, heights: null }));

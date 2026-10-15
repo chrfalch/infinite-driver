@@ -87,6 +87,16 @@ if (tiresParam === 'soft' || tiresParam === 'gpu') {
   CAR.gpuTires = tiresParam === 'gpu';
 }
 
+// The tyre models a car can run on, each car its own: 'gpu' (soft tyres on the GPU tyre solver),
+// 'soft' (Rapier soft bodies) or 'rigid' (Rapier's raycast vehicle: rigid wheels, no tyre solver).
+export const TIRE_MODES = ['gpu', 'soft', 'rigid'];
+
+// The player's tyre model, from CAR's switches.
+export function playerTires(car = CAR) {
+  if (!car.softTires) return 'rigid';
+  return car.gpuTires ? 'gpu' : 'soft';
+}
+
 export function saveCar() {
   saveSettings(STORAGE_KEY, DEFAULT_CAR, CAR);
 }

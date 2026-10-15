@@ -41,9 +41,10 @@ function chunkVertices(heights, cx, cz, size = CHUNK_SIZE, res = CHUNK_RES) {
   return vertices;
 }
 
-// Streams chunk colliders around a point: the ground trimesh, rock hulls, and tree trunks for the
-// chunks within `radius`, one job per call (like the main thread's streaming). Each chunk's rocks
-// are kept as a RockField entity, for the GPU tyres' rock set.
+// Streams chunk colliders around the cars: the ground trimesh, rock hulls, and tree trunks for the
+// chunks within `radius` of any of them, one job per call (like the main thread's streaming), the
+// nearest to a car first. Each chunk's rocks are kept as a RockField entity, for the GPU tyres'
+// rock set.
 const ROCK_BATCH = 150;
 
 export function createColliderStreamer({ rapier, world: physicsWorld, ecs, RockField, heightAt, rockCount, radius = 1 }) {
@@ -94,22 +95,31 @@ export function createColliderStreamer({ rapier, world: physicsWorld, ecs, RockF
     chunks.delete(key);
   }
 
-  // With `force`, everything within reach is built now (start, respawn far away).
-  function update(x, z, { force = false } = {}) {
-    const ccx = Math.floor(x / CHUNK_SIZE);
-    const ccz = Math.floor(z / CHUNK_SIZE);
-    for (const [key, c] of chunks) {
-      if (Math.abs(c.cx - ccx) > radius + 1 || Math.abs(c.cz - ccz) > radius + 1) remove(key, c);
-    }
+  // `points`: where the cars are ({ x, z } each). With `force`, everything within reach is built
+  // now (start, a car spawned or respawned far away).
+  function update(points, { force = false } = {}) {
+    const centres = points.map((p) => [Math.floor(p.x / CHUNK_SIZE), Math.floor(p.z / CHUNK_SIZE)]);
+    // Chunks from a car (Chebyshev distance), to the nearest car.
+    const reach = (cx, cz) => centres.reduce((d, [ccx, ccz]) => Math.min(d, Math.max(Math.abs(cx - ccx), Math.abs(cz - ccz))), Infinity);
+    for (const [key, c] of chunks) if (reach(c.cx, c.cz) > radius + 1) remove(key, c);
     const jobs = [];
-    for (let dz = -radius; dz <= radius; dz++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        const cx = ccx + dx;
-        const cz = ccz + dz;
-        const key = chunkKey(cx, cz);
-        let c = chunks.get(key);
-        if (!c) chunks.set(key, (c = { cx, cz, ground: null, sheet: [], colliders: null, rocks: null }));
-        if (!c.ground || c.sheet.length < ROCK_COLLIDER_BANDS || !c.done) jobs.push([dx * dx + dz * dz, c]);
+    const seen = new Set();
+    for (const [ccx, ccz] of centres) {
+      for (let dz = -radius; dz <= radius; dz++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          const cx = ccx + dx;
+          const cz = ccz + dz;
+          const key = chunkKey(cx, cz);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          let c = chunks.get(key);
+          if (!c) chunks.set(key, (c = { cx, cz, ground: null, sheet: [], colliders: null, rocks: null }));
+          if (!c.ground || c.sheet.length < ROCK_COLLIDER_BANDS || !c.done) {
+            // Nearest to any car first (squared, in chunks).
+            const d = centres.reduce((m, [x, z]) => Math.min(m, (cx - x) ** 2 + (cz - z) ** 2), Infinity);
+            jobs.push([d, c]);
+          }
+        }
       }
     }
     jobs.sort((a, b) => a[0] - b[0]);

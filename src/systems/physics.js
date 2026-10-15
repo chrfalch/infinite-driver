@@ -1,4 +1,4 @@
-import { Deformation, HeightField, Input, Physics, RigidBody, RockField, Time, Transform, Vehicle } from '../ecs/traits.js';
+import { Deformation, HeightField, Input, IsPlayer, Physics, RigidBody, RockField, Time, Transform, Vehicle } from '../ecs/traits.js';
 import { updateGpuGround, updateGpuRocks } from '../tire/gpu-tires.js';
 import { GPU_TIRE } from '../tire/config.js';
 import { MAX_STEPS } from '../tire/gpu-tire-solver.js';
@@ -25,6 +25,8 @@ function updateGpuTyreWorld(world, vehicle) {
 }
 
 const MAX_BATCH_STEPS = 4;
+// The pedals of a car nobody drives: it rolls to a stop and holds there (see applyDriverInput).
+const IDLE = Object.freeze({ throttle: 0, brake: 0, steer: 0, handbrake: false });
 
 // Fixed-step simulation so the car behaves the same at any frame rate. With GPU tyres each
 // step waits for the GPU's hub forces, so this is async.
@@ -40,8 +42,19 @@ export async function stepPhysics(world, frameDelta = null) {
   const wanted = physics.accumulator + delta;
   physics.accumulator = Math.min(wanted, physics.step * MAX_BATCH_STEPS);
 
+  // Every car steps together; the player's drives from the keyboard (Input), the others from their
+  // own input (an AI's, say).
   const vehicles = [];
-  world.query(Vehicle).updateEach(([vehicle]) => vehicles.push(vehicle));
+  let player = null;
+  world.query(Vehicle).forEach((entity) => {
+    const vehicle = entity.get(Vehicle);
+    // (A car held off the loaded ground waits; see holdCars in systems/terrain.js.)
+    if (vehicle.held) return;
+    vehicles.push(vehicle);
+    if (entity.has(IsPlayer)) player = vehicle;
+  });
+  const inputOf = (vehicle) => vehicle.input ?? (vehicle === player ? input : IDLE);
+  const gpuVehicles = vehicles.filter((v) => v.controller.gpu);
   count('droppedSeconds', wanted - physics.accumulator);
   const tw = performance.now();
   for (const v of vehicles) if (v.controller.gpu) updateGpuTyreWorld(world, v);
@@ -52,7 +65,7 @@ export async function stepPhysics(world, frameDelta = null) {
   let steps = 0;
   // GPU tyres can run several steps per GPU round trip (GPU_TIRE.stepsPerTrip): one dispatch
   // computes the tyre forces for the whole trip, then Rapier steps through them one by one.
-  const tripSize = vehicles.some((v) => v.controller.gpu && !v.controller.gpu.pipelined)
+  const tripSize = gpuVehicles.some((v) => !v.controller.gpu.pipelined)
     ? Math.max(1, Math.min(MAX_STEPS, Math.round(GPU_TIRE.stepsPerTrip ?? 1)))
     : 1;
   while (physics.accumulator >= physics.step) {
@@ -61,27 +74,32 @@ export async function stepPhysics(world, frameDelta = null) {
     const lastTrip = physics.accumulator - n * physics.step < physics.step;
     const logs = new Map();
     for (let j = 0; j < n; j++) {
+      const ta = performance.now();
       for (const vehicle of vehicles) {
-        let ta = performance.now();
         if (vehicle.drivetrain && vehicle.controller.gpu) vehicle.drivetrain.torqueSteps = n;
-        applyDriverInput(vehicle, input, physics.step);
+        applyDriverInput(vehicle, inputOf(vehicle), physics.step);
         vehicle.controller.updateVehicle(physics.step);
-        let tb = performance.now();
-        tJs += tb - ta;
-        if (vehicle.controller.gpu) {
-          if (j === 0) {
-            // The trip's drive and brake torques come from this first step's inputs.
+      }
+      const tb = performance.now();
+      tJs += tb - ta;
+      if (j === 0 && gpuVehicles.length) {
+        // The trip's drive and brake torques come from this first step's inputs. Each GPU car has
+        // its own solver; their round trips run side by side, so a second car costs its share of
+        // GPU work, not a second wait.
+        await Promise.all(
+          gpuVehicles.map(async (vehicle) => {
             if (tripSize > 1) logs.set(vehicle, await vehicle.controller.stepTyresBatch(n, physics.step, { readPositions: lastTrip }));
             else await vehicle.controller.stepTyres({ readPositions: lastTrip });
-            if (physics.slowGpu ?? SLOW_GPU) await new Promise((r) => setTimeout(r, physics.slowGpu ?? SLOW_GPU));
-          }
-          const log = logs.get(vehicle);
-          if (log) vehicle.controller.applyTyreForces(log, j);
-        }
-        ta = performance.now();
-        tGpu += ta - tb;
-        vehicle.speed = vehicle.controller.currentVehicleSpeed();
+          }),
+        );
+        if (physics.slowGpu ?? SLOW_GPU) await new Promise((r) => setTimeout(r, physics.slowGpu ?? SLOW_GPU));
       }
+      for (const vehicle of gpuVehicles) {
+        const log = logs.get(vehicle);
+        if (log) vehicle.controller.applyTyreForces(log, j);
+      }
+      for (const vehicle of vehicles) vehicle.speed = vehicle.controller.currentVehicleSpeed();
+      tGpu += performance.now() - tb;
       const tr = performance.now();
       // Contact forces on the car's chassis and rims, for the sound (only those report them).
       physics.contactEvents ??= new physics.rapier.EventQueue(true);
@@ -92,14 +110,14 @@ export async function stepPhysics(world, frameDelta = null) {
       physics.simTime += physics.step;
       steps++;
       // The engine sound follows every step (see audio/feed.js).
-      if (physics.audioFeed && vehicles[0]) physics.audioFeed.writeStep(physics.simTime, vehicles[0], world.get(HeightField)?.heightAt);
+      if (physics.audioFeed && player) physics.audioFeed.writeStep(physics.simTime, player, world.get(HeightField)?.heightAt);
       recordPoses(world, physics.simTime);
       physics.onStep?.(physics.simTime);
     }
     // Remember where each hub was when the drawn tyre shape was read back: drawing moves the
     // shape with the hub from there, so tyres never lag the car while physics catches up.
     if (lastTrip) {
-      for (const vehicle of vehicles) {
+      for (const vehicle of gpuVehicles) {
         const solver = vehicle.controller.gpu?.solver;
         if (solver) solver.readbackHubs = vehicle.controller.wheels.map((w) => ({ p: { ...w.hub.translation() }, q: { ...w.hub.rotation() } }));
       }

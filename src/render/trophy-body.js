@@ -7,7 +7,7 @@
 // moved with the frame stretch here, like the tubes (see stretchX). The headlamp and tail lamp
 // lenses share the chassis' headlamp and brake light materials, so they light up with them.
 import { Color, DoubleSide, Group, MeshStandardMaterial } from 'three/webgpu';
-import { abs, clamp, mix, positionLocal, step, uniform } from 'three/tsl';
+import { abs, clamp, mix, positionLocal, reference, step } from 'three/tsl';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CAR } from '../vehicle/config.js';
 import { stretchX } from '../vehicle/physics.js';
@@ -26,19 +26,19 @@ export const LIVERIES = {
   white: { name: 'White', base: '#f2efe6', stripe: '#c8202b', pin: '#1d3557' },
 };
 
-const livery = { base: uniform(new Color()), stripe: uniform(new Color()), pin: uniform(new Color()) };
-export function setLivery(key) {
+// The livery's colours live on each paint material (liveryBase, liveryStripe, liveryPin).
+function setPaintColours(material, key) {
   const l = LIVERIES[key] ?? LIVERIES.gulf;
-  livery.base.value.set(l.base);
-  livery.stripe.value.set(l.stripe);
-  livery.pin.value.set(l.pin);
+  (material.liveryBase ??= new Color()).set(l.base);
+  (material.liveryStripe ??= new Color()).set(l.stripe);
+  (material.liveryPin ??= new Color()).set(l.pin);
 }
-setLivery(CAR.livery);
 
 // The paint, striped by where it is on the body (chassis frame; the stripes don't follow the
-// frame stretch, which only moves them along their length).
-function paintMaterial() {
+// frame stretch, which only moves them along their length), in livery `key`.
+function paintMaterial(key) {
   const material = new MeshStandardMaterial({ roughness: 0.3, metalness: 0.05, side: DoubleSide });
+  setPaintColours(material, key);
   const p = positionLocal;
   const across = abs(p.z);
   const band = (lo, hi, v) => step(lo, v).sub(step(hi, v));
@@ -46,12 +46,17 @@ function paintMaterial() {
   const sides = step(0.62, across).mul(step(across, 0.79)); // doors, bed sides (not the flares)
   const stripe = band(0, 0.15, across).mul(top).add(band(0.05, 0.15, p.y).mul(sides));
   const pin = band(0.15, 0.19, across).mul(top).add(band(0.02, 0.05, p.y).add(band(0.15, 0.18, p.y)).mul(sides));
-  material.colorNode = mix(mix(livery.base, livery.pin, clamp(pin, 0, 1)), livery.stripe, clamp(stripe, 0, 1));
+  const colour = (name) => reference(name, 'color', material);
+  material.colorNode = mix(mix(colour('liveryBase'), colour('liveryPin'), clamp(pin, 0, 1)), colour('liveryStripe'), clamp(stripe, 0, 1));
+  // The renderer shares one compiled shader, bindings and all, between materials with the same
+  // node graph: every car's paint then took one car's colours. Each paint is its own program.
+  material.customProgramCacheKey = () => `paint-${material.uuid}`;
   return material;
 }
 
 const MATERIALS = {
-  Paint: paintMaterial(),
+  // The player's paint (the panel's choice, see setLivery); other cars have their own (bodyMaterials).
+  Paint: paintMaterial(CAR.livery),
   Trim: new MeshStandardMaterial({ color: '#1e2022', roughness: 0.6, metalness: 0.1, side: DoubleSide }),
   Chrome: new MeshStandardMaterial({ color: '#c9ccd0', roughness: 0.2, metalness: 0.9, side: DoubleSide }),
   Glass: new MeshStandardMaterial({ color: '#1d2b33', roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.45, depthWrite: false, side: DoubleSide }),
@@ -68,8 +73,22 @@ function loadModel() {
   return modelPromise;
 }
 
-// The body for the current frame stretch; filled in when the model has loaded.
-export function createTrophyBody({ stretch } = {}) {
+// A car's own paint in livery `key` and its own tail lamps (`tail`, its brake light material), for
+// a car other than the player's, so it neither changes with the panel's livery nor lights up with
+// the player's brakes.
+export function bodyMaterials(key, tail) {
+  return { Paint: paintMaterial(key), Tail: tail };
+}
+
+// The player's livery.
+export function setLivery(key) {
+  setPaintColours(MATERIALS.Paint, key);
+}
+
+// The body for the current frame stretch; filled in when the model has loaded. `materials`
+// replaces some of the shared ones (see bodyMaterials).
+export function createTrophyBody({ stretch, materials = null } = {}) {
+  const own = materials ? { ...MATERIALS, ...materials } : MATERIALS;
   const object = new Group();
   object.name = 'trophy body';
   const loading = loadModel();
@@ -85,7 +104,7 @@ export function createTrophyBody({ stretch } = {}) {
         pos.needsUpdate = true;
         mesh.geometry.computeBoundingSphere();
         const name = o.material?.name;
-        mesh.material = MATERIALS[name] ?? MATERIALS.Trim;
+        mesh.material = own[name] ?? own.Trim;
         mesh.castShadow = name !== 'Glass';
         mesh.receiveShadow = true;
         o.updateWorldMatrix(true, false);
