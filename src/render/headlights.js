@@ -37,16 +37,14 @@ export function setHeadlightDarkness(dark) {
   beamScale = DAY_BEAM + (1 - DAY_BEAM) * dark;
 }
 
-// Below this level the lights are taken out of the scene, so with them off the materials skip
-// lights they would not show.
-const OFF = 0.002;
-
 // The spot lights in the car's frame (+x forward), returned as a group to add to the car. `lamp`:
 // the headlamps' centre (design frame, right side), the round lamps' unless the body has its own.
 export function createHeadlights({ lamp = HEADLAMP } = {}) {
   const group = new Group();
   group.name = 'headlights';
-  group.visible = false;
+  // The lights stay in the scene when off (at zero intensity): adding or taking them out changes
+  // every lit material's shader, and switching them on stalled the drive while those compiled.
+  // In the scene from the start, those shaders are compiled with the rest on the loading screen.
   const x = stretchX(lamp.x) + 0.02;
   const lights = [1, -1].map((s) => {
     const light = new SpotLight('#fff3df', 0, HEADLIGHT.distance, HEADLIGHT.angle, HEADLIGHT.penumbra, HEADLIGHT.decay);
@@ -71,7 +69,6 @@ export function updateHeadlights(group, on, delta) {
   const k = Math.min(1, delta / 0.08);
   const level = (group.userData.level ?? 0) + ((on ? 1 : 0) - (group.userData.level ?? 0)) * k;
   group.userData.level = level;
-  group.visible = on || level > OFF;
   for (const light of group.userData.lights) light.intensity = HEADLIGHT.intensity * beamScale * level;
   group.userData.tail.intensity = TAILLIGHT.intensity * beamScale * level;
   headlampMaterial.emissiveIntensity = HEADLIGHT.glowOff + (HEADLIGHT.glowOn - HEADLIGHT.glowOff) * level;

@@ -3,10 +3,8 @@
 // transforms, so they keep moving while the page is busy (shaders compile, chunks are built).
 //
 // Each step has a weight in the bar; set(key, fraction) moves it. When the game is ready to drive
-// and the sound is decoded, a button asks for a tap or a key: that gesture is what lets the browser
-// start the sound, so the drive starts with it. Without sound to start (off, unsupported, or a
-// browser driven by a script), the screen goes as soon as everything is ready. No sound plays
-// before then: main.js arms it in finish's start().
+// and the sound is decoded, the screen goes and the drive starts. No sound plays before then:
+// main.js arms it in finish's start() (on the context the world pick's click started).
 //
 // A row of worlds to pick from sits under the title the whole time. Until one is picked nothing
 // loads: the screen shows just the title, the buggy and the row (screen.levels).
@@ -44,7 +42,6 @@ export function createLoadingScreen() {
   const step = $('step');
   const detail = $('detail');
   const quip = $('quip');
-  const go = $('go');
   const levels = $('levels');
   const progress = Object.fromEntries(Object.keys(STEPS).map((key) => [key, 0]));
   const details = {};
@@ -101,8 +98,9 @@ export function createLoadingScreen() {
 
   // The worlds to pick from ({ label: mode }). With ask, nothing else shows until one is clicked
   // (`current`, the last one driven, marked as a hint); without, `current` is the one loading.
-  // Resolves with the world to load, and the loading starts on the screen.
-  screen.levels = (worlds, current, { ask = false } = {}) =>
+  // onPick runs inside the click (so it can start the sound). Resolves with the world to load,
+  // and the loading starts on the screen.
+  screen.levels = (worlds, current, { ask = false, onPick = () => {} } = {}) =>
     new Promise((resolve) => {
       const buttons = Object.entries(worlds).map(([label, mode]) => {
         const button = document.createElement('button');
@@ -113,6 +111,7 @@ export function createLoadingScreen() {
         button.addEventListener('click', () => {
           if (levels.classList.contains('picked')) return;
           button.setAttribute('aria-pressed', 'true');
+          onPick();
           pick(mode, `Off to the ${label.toLowerCase()}`);
         });
         return button;
@@ -120,7 +119,7 @@ export function createLoadingScreen() {
       const pick = (mode, label) => {
         levels.classList.add('picked');
         root.classList.remove('asking');
-        // Keys go to the drive prompt from here (the gesture there skips the picker's buttons).
+        // Keys drive the car from here, not the picker's buttons.
         if (levels.contains(document.activeElement)) document.activeElement.blur();
         step.textContent = label;
         begin();
@@ -155,35 +154,15 @@ export function createLoadingScreen() {
     if (done) warm();
   };
 
-  // Resolves once the game is warmed up, the sound decoded (`sound`, a promise), and (if `prompt()`
-  // says so then) the player tapped or pressed a key; then the screen fades away. start(gesture)
-  // runs then: start(true) inside that gesture (taps and keys on the world picker do not count),
-  // start(false) when there was no prompt.
-  screen.finish = async ({ sound = Promise.resolve(), prompt = () => true, start = () => {} } = {}) => {
+  // Resolves once the game is warmed up and the sound decoded (`sound`, a promise); start() runs
+  // then and the screen fades away.
+  screen.finish = async ({ sound = Promise.resolve(), start = () => {} } = {}) => {
     await Promise.all([warmed, sound]);
     clearInterval(quipTimer);
     for (const key of Object.keys(STEPS)) progress[key] = 1;
     render();
     console.info(`[loading] ready in ${Math.round(performance.now() - started)} ms`);
-    if (prompt()) {
-      step.textContent = 'Ready when you are';
-      quip.classList.remove('in');
-      root.classList.add('ready');
-      if (matchMedia('(pointer: coarse)').matches) go.textContent = 'Tap to drive';
-      go.hidden = false;
-      // The sound starts on the same gesture (audio.js listens on the window as well).
-      await new Promise((resolve) => {
-        const types = ['pointerdown', 'keydown'];
-        const onGesture = (e) => {
-          if (e.type === 'keydown' && (e.metaKey || e.ctrlKey || e.altKey)) return;
-          if (levels.contains(e.target)) return;
-          for (const type of types) window.removeEventListener(type, onGesture, true);
-          start(true);
-          resolve();
-        };
-        for (const type of types) window.addEventListener(type, onGesture, true);
-      });
-    } else start(false);
+    start();
     root.classList.add('gone');
     setTimeout(() => root.remove(), 700);
   };
