@@ -36,11 +36,11 @@ describe('stadium', () => {
     expect(stadium.roadDistance(0, 0)).toBeLessThan(1e-6);
     expect(stadium.roadHeading(0, 0)).toBeCloseTo(0, 6);
     expect(stadium.sample(0, 0).s).toBeCloseTo(0, 6);
-    for (const [x, z] of [[-6, 0], [6, 0], [0, -3], [0, 3]]) expect(stadium(x, z)).toBe(0);
+    for (const [x, z] of [[-3, 0], [3, 0], [0, -3], [0, 3]]) expect(stadium(x, z)).toBeCloseTo(0, 2);
   });
 
-  it('is one closed loop of 600-800 m, its pieces joined end to end', () => {
-    expect(length).toBeGreaterThan(600);
+  it('is one closed loop of 250-800 m, its pieces joined end to end', () => {
+    expect(length).toBeGreaterThan(250);
     expect(length).toBeLessThan(800);
     segments.forEach((seg, i) => {
       const next = segments[(i + 1) % segments.length];
@@ -83,17 +83,20 @@ describe('stadium', () => {
       const f = stadium.sample(b.x, b.z).feature;
       if (f) kinds.add(f);
     }
-    expect(top).toBeGreaterThan(1.2);
+    expect(top).toBeGreaterThan(1);
     expect(top).toBeLessThanOrEqual(2);
-    expect([...kinds].sort()).toEqual(['double', 'puddle', 'tabletop', 'washboard', 'whoops']);
+    expect([...kinds].sort()).toEqual(['bump', 'puddle', 'ridge', 'washboard', 'whoops']);
   });
 
-  it('lies level from side to side on the straights, banked a little on the outside of the corners', () => {
+  it('lies level from side to side on the straights (but for the humps), banked a little on the outside of the corners', () => {
     for (const p of centreLine(2)) {
       const s = stadium.sample(p.x, p.z);
       const side = (off) => stadium(p.x + p.tz * off, p.z - p.tx * off);
       const tilt = Math.abs(side(3) - side(-3)) / 6;
-      expect(tilt).toBeLessThan(s.feature ? 0.01 : 0.07);
+      // (The humps stand on one side of the lane.)
+      if (s.feature === 'bump') continue;
+      // (The ridge leans across the lanes a little.)
+      expect(tilt).toBeLessThan(s.feature === 'ridge' ? 0.1 : s.feature && !s.corner ? 0.01 : 0.07);
     }
   });
 
@@ -111,7 +114,7 @@ describe('stadium', () => {
 
   it('walls every lane in with rails along both sides, clear of the other lanes', () => {
     const rails = stadium.barriers.filter((b) => b.kind === 'rail');
-    expect(rails.length).toBeGreaterThan(500);
+    expect(rails.length).toBeGreaterThan(200);
     for (const b of rails) {
       expect(stadium.roadDistance(b.x, b.z)).toBeCloseTo(BARRIER.offset, 1);
       expect(b.length).toBeGreaterThan(1.2);
@@ -145,7 +148,7 @@ describe('stadium', () => {
   it('rings the arena with a wall outside every lane', () => {
     const { x0, x1, z0, z1 } = stadium.arena;
     for (const p of centreLine(5)) {
-      expect(Math.min(p.x - x0, x1 - p.x, p.z - z0, z1 - p.z)).toBeGreaterThan(BARRIER.offset + 5);
+      expect(Math.min(p.x - x0, x1 - p.x, p.z - z0, z1 - p.z)).toBeGreaterThan(BARRIER.offset + 3);
     }
     expect(stadium.barriers.some((b) => b.kind === 'wall')).toBe(true);
   });

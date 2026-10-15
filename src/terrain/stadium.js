@@ -1,7 +1,7 @@
-// Stadium: a closed dirt circuit after the arcade game Super Off Road (Leland, 1989). One lap of
-// switchback lanes on a level arena floor, each lane walled in by low red-and-white barriers, with
-// tabletop and double jumps, whoops, a rumble strip and a water hole on the straights, and dirt
-// mounds on the dead ground between the lanes. Unlike the other worlds it is not endless: the arena
+// Stadium: a closed dirt circuit after the arcade game Super Off Road (Leland, 1989), laid out as its
+// Sidewinder track. One lap of switchback lanes on a level arena floor, each lane walled in by
+// red-and-white barriers, with a ridge across the middle, a pyramid, a tabletop, humps, whoops, a
+// rumble strip and a water hole on the straights, and dirt mounds on the dead ground. Unlike the other worlds it is not endless: the arena
 // is a finite floor ringed by a concrete wall, and outside it the ground stays level.
 //
 // The track is data, not noise: a closed polyline of corners (LAYOUT), each rounded off with its
@@ -19,36 +19,49 @@
 
 export const LANE_HALF = 5; // m of track either side of the centre line
 export const BARRIER = Object.freeze({ offset: LANE_HALF + 0.35, height: 1.1, thick: 0.3, piece: 2 });
-export const ARENA_WALL = Object.freeze({ height: 2.6, thick: 0.6, margin: 14 }); // margin: m beyond the outermost lane's centre
+export const ARENA_WALL = Object.freeze({ height: 2.6, thick: 0.6, margin: 10 }); // margin: m beyond the outermost lane's centre
 export const WATER_LEVEL = -0.3; // m: the water holes' surface (the floor is at 0)
 const PUDDLE_DEPTH = 0.6; // m below the floor, so 0.3 m of water
 
-// Corners of the loop (m), the way round, with the radius each is rounded to. The bottom straight
-// runs +x from the first corner; the start is START along it.
+// Corners of the loop (m), the way round, with the radius each is rounded to: Sidewinder, as in the
+// arcade game. Two dividers: a long C open to the right (its bottom arm between the start lane and
+// the lane above it, its left arm up the left side, its top arm under the top lane) and a peninsula
+// from the right wall into the middle of the C. The track snakes through them: the wide start lane
+// along the bottom (+x), a hairpin up round the C's bottom end, back left under the peninsula, a
+// tight hairpin round its tip, right again above it, a hairpin round the C's top end, left along the
+// top, and down the left side back to the start. The start is START along the bottom straight.
+// Measured off the game's screen (a truck about 5 m long sets the scale; the view's slant and
+// foreshortening taken out): a compact arena about 95 x 70 m.
 const LAYOUT = [
-  [-75, 45, 12],
-  [75, 45, 12],
-  [75, -45, 12],
-  [-75, -45, 12],
-  [-75, -15, 10],
-  [45, -15, 15], // the hairpin: two quarter turns 30 m apart make one sweeping half circle
-  [45, 15, 15],
-  [-75, 15, 10],
+  [8, 0, 10],
+  [74, 0, 7.5], // the hairpins: two quarter turns as far apart as twice their radius
+  [74, -15, 7.5],
+  [28, -15, 8.5],
+  [28, -32, 8.5],
+  [66, -32, 8],
+  [66, -48, 8],
+  [8, -48, 10],
 ];
-const START = { x: -30, z: 45 };
+const START = { x: 22, z: 0 };
+
+// The ridge (in LAYOUT's coordinates): a long hump of paler dirt across the arena (the light band in
+// the game), its crest leaning from x = 30 at the top wall to the right toward the start lane, crossed
+// by the three upper lanes. It fades out before the start lane, which has the rumble strip instead.
+const RIDGE = { x: 30, z: -55, lean: 0.36, halfWidth: 9, height: 1.2, fadeZ: [-9, -6] };
 
 // Features by straight (the straight that leaves corner `leg`), `at` m along it from where the
-// straight begins (after the corner's arc).
+// straight begins (after the corner's arc; a feature may run on into the next corner). A bump sits on
+// one side of the lane (side +1 left of the way round, -1 right).
 const FEATURES = [
-  { kind: 'washboard', leg: 0, at: 62, length: 16, height: 0.13, pitch: 2 },
-  { kind: 'whoops', leg: 0, at: 84, count: 5, height: 0.3, pitch: 6 },
-  { kind: 'tabletop', leg: 1, at: 12, up: 7, top: 12, down: 11, height: 1.5 },
-  { kind: 'double', leg: 2, at: 22, up: 6, down: 6, gap: 3, height: 1.2 },
-  { kind: 'puddle', leg: 2, at: 82, length: 16 },
-  { kind: 'tabletop', leg: 4, at: 26, up: 8, top: 2, down: 12, height: 1.6 }, // the pyramid
-  { kind: 'puddle', leg: 4, at: 66, length: 12 },
-  { kind: 'whoops', leg: 6, at: 16, count: 5, height: 0.3, pitch: 6 },
-  { kind: 'washboard', leg: 6, at: 68, length: 14, height: 0.13, pitch: 2 },
+  // The start lane (+x): the rumble strip, and a water hole running into the hairpin (the game's mud).
+  { kind: 'washboard', leg: 0, at: 26, length: 14, height: 0.13, pitch: 2 },
+  { kind: 'puddle', leg: 0, at: 44, length: 9 },
+  // The top lane (-x): humps on alternate sides.
+  { kind: 'bump', leg: 6, at: 4, side: 1, length: 5, height: 0.7 },
+  { kind: 'bump', leg: 6, at: 11, side: -1, length: 5, height: 0.7 },
+  { kind: 'bump', leg: 6, at: 18, side: 1, length: 5, height: 0.7 },
+  // Down the left side: whoops.
+  { kind: 'whoops', leg: 7, at: 6, count: 3, height: 0.3, pitch: 6 },
 ];
 
 const smoothstep = (a, b, x) => {
@@ -161,6 +174,11 @@ function featureLift(f, u) {
     const hump = (v) => (v < 0 || v > one ? 0 : v < f.up ? f.height * (v / f.up) ** 1.4 : f.height * smoothstep(one, f.up, v));
     if (u < 0 || u > 2 * one + f.gap) return null;
     return Math.max(hump(u), hump(u - one - f.gap));
+  }
+  if (f.kind === 'bump') {
+    if (u < 0 || u > f.length) return null;
+    const c = Math.sin((Math.PI * u) / f.length);
+    return f.height * c * c;
   }
   if (f.kind === 'whoops') {
     const span = f.count * f.pitch;
@@ -343,7 +361,7 @@ export function createStadiumField() {
       if (u < -track.length / 2) u += track.length;
       else if (u > track.length / 2) u -= track.length;
       const lift = featureLift(f, u);
-      if (lift !== null) return { lift, kind: f.kind };
+      if (lift !== null) return { lift, kind: f.kind, side: f.side ?? 0 };
     }
     return null;
   }
@@ -387,6 +405,9 @@ export function createStadiumField() {
         const inside = 1 - smoothstep(LANE_HALF - 0.5, LANE_HALF + 0.3, ad);
         h += f.lift * inside;
         puddle = inside * smoothstep(0, -PUDDLE_DEPTH * 0.5, f.lift);
+      } else if (f.kind === 'bump') {
+        // On its side of the lane, fading out a little past the middle.
+        h += f.lift * lane * smoothstep(-1, 1, n.d * f.side);
       } else h += f.lift * lane;
     }
     // Banked corners: the outside of the lane rises up to 35 cm at the barrier, eased in and out.
@@ -398,9 +419,19 @@ export function createStadiumField() {
     // The dead ground: mounds, kept behind the barriers and inside the arena.
     const dead = smoothstep(LANE_HALF + 1.5, LANE_HALF + 3.5, ad);
     const inArena = x > arena.x0 + 4 && x < arena.x1 - 4 && z > arena.z0 + 4 && z < arena.z1 - 4;
+    // The ridge, across lanes and dead ground alike (inside the arena wall).
+    let ridge = 0;
+    const lz = z + START.z;
+    const rx = Math.abs(x + START.x - RIDGE.x - (lz - RIDGE.z) * RIDGE.lean) / RIDGE.halfWidth;
+    if (rx < 1 && inArena) {
+      const c = Math.cos((rx * Math.PI) / 2);
+      ridge = c * c * smoothstep(RIDGE.fadeZ[1], RIDGE.fadeZ[0], lz);
+      h += RIDGE.height * ridge;
+      if (!feature && ridge > 0.05 && lane > 0.5) feature = 'ridge';
+    }
     const mound = dead > 0 && inArena ? mounds(x, z) * dead : 0;
     h += mound;
-    return { h, d: n.d, dist: ad, s: n.s, tx: n.tx, tz: n.tz, lane, puddle, mound, feature, arena: inArena ? 1 : 0 };
+    return { h, d: n.d, dist: ad, s: n.s, tx: n.tx, tz: n.tz, corner: n.u >= 0, lane, puddle, mound, ridge, feature, arena: inArena ? 1 : 0 };
   }
 
   const heightAt = (x, z) => sample(x, z).h;
