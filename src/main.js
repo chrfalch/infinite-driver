@@ -1,4 +1,3 @@
-import RAPIER from '@dimforge/rapier3d-compat';
 import { glyph } from '@pmndrs/glyph';
 import { ThreeConfig } from '@pmndrs/glyph/three';
 import { createWorld } from 'koota';
@@ -100,7 +99,7 @@ export async function main(loading) {
   });
 
   loading?.set('gpu', 0.1, 'Waking up the GPU');
-  const [render] = await Promise.all([createRenderer(container), RAPIER.init(), glyph.init()]);
+  const [render] = await Promise.all([createRenderer(container), glyph.init()]);
   loading?.set('gpu', 1, 'Surveying the land');
   await loading?.pause();
 
@@ -168,7 +167,12 @@ export async function main(loading) {
       remote = null;
     }
   }
+  // Rapier is loaded here only for physics on this thread: the worker has its own, and the page
+  // then never downloads this copy (about 4 MB of script with its wasm inlined).
+  let RAPIER = null;
   if (!remote) {
+    RAPIER = (await import('@dimforge/rapier3d-compat')).default;
+    await RAPIER.init();
     physicsWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
     physicsWorld.timestep = 1 / 120;
     // The jointed car is a chain of light links under a heavy chassis; Rapier's default 4 solver
@@ -375,7 +379,7 @@ export async function main(loading) {
         const physics = world.get(Physics);
         physics.simTime = remote.simTime;
         physics.stepMs = remote.stepMs;
-        syncRemoteSolver(world);
+        timed('sys.remoteSolver', () => syncRemoteSolver(world));
       } else if (!busy && !race.paused) simulate();
 
       timed('sys.syncBodies', () => syncBodies(world));
