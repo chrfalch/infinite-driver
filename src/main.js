@@ -45,6 +45,9 @@ import { SNOW_PATCH_N, SnowSurface } from './render/snow-surface.js';
 import { createDaylight } from './render/daylight.js';
 import { startHour } from './render/time-of-day.js';
 import { createWater } from './render/water.js';
+import { createWaterSpray } from './render/water-spray.js';
+import { updateWater } from './systems/water.js';
+import { createHeightCache } from './terrain/height-cache.js';
 import { setBuildingCutaway } from './render/building-mesh.js';
 import { loadTownKit } from './render/town-kit-mesh.js';
 import { loadYardKit } from './render/yard-kit-mesh.js';
@@ -122,8 +125,10 @@ export async function main(loading) {
     loading?.set('world', 0.3, 'Building the town');
     await Promise.all([loadTownKit(), loadYardKit()]);
   }
-  // The town's river and ponds.
-  const water = heightAt.waterLevel !== undefined ? createWater(render.scene, heightAt.waterLevel) : null;
+  // The town's river and ponds, and the stadium's water holes: their waves, and the spray the cars
+  // throw up in them.
+  const water = heightAt.waterLevel !== undefined ? createWater(render.scene, heightAt.waterLevel, (x, z) => heightAt.waterLevel - heightAt(x, z)) : null;
+  const waterSpray = water ? createWaterSpray(render.scene, { low: render.quality === 'low' }) : null;
   // The tyres, compaction and spray treat the ground as snow in the snowfield.
   setSnowCover(heightAt.snow);
   setPavedRoads(heightAt.paved);
@@ -195,6 +200,8 @@ export async function main(loading) {
   world.add(Render(render));
   const surfaceAt = (x, z) => heightAt(x, z) + deformation.at(x, z);
   world.add(HeightField({ heightAt, surfaceAt }));
+  // Water drops in flight look for the ground every frame: from a coarse cache.
+  if (water) water.groundAt = createHeightCache(heightAt, { cell: 0.5, bits: 8 });
   world.add(Deformation({ map: deformation }));
   // Powder snow hangs in the air longer than clumps of soil, and light shines through it.
   // Sand and dust grains on soil (not on snow: the powder spray is already fine).
@@ -370,9 +377,15 @@ export async function main(loading) {
         const p = player.get(Vehicle).body.translation();
         timed('sys.trackMarkers', () => trackMarkers.update(p.x, p.z));
       }
+      if (player && water) {
+        const p = player.get(Vehicle).body.translation();
+        timed('sys.water', () => {
+          updateWater(world, water, waterSpray, render.activeCamera, daylight.dark);
+          water.update(p.x, p.z, time.delta);
+        });
+      }
       if (player && heightAt.town) {
         const p = player.get(Vehicle).body.translation();
-        water?.update(p.x, p.z);
         setBuildingCutaway(p, render.activeCamera);
         if (propsView) {
           propPhysics?.update(p.x, p.z);
@@ -452,6 +465,9 @@ export async function main(loading) {
     heightAt,
     // The ground (or snow) patch around the car, with its ruts.
     groundSurface,
+    // The water's waves and spray (worlds with water).
+    water,
+    waterSpray,
     audio,
     audioFeed,
     minimap,
