@@ -1,16 +1,21 @@
-// The sunny town's loose props: wooden crates and traffic cones that the car can send flying.
-// Crates stand in stacks on the stunt parks' landing zones and in the parks' corners, cones in a
-// slalom through each park and in pairs at the foot of the street jumps. Every chunk's props come
-// from its position alone, so the main thread (drawing) and the physics worker (bodies) agree.
+// The sunny town's props: wooden crates and traffic cones that the car can send flying, and the
+// yard kit's things in front of the houses (terrain/yard.js). Crates stand in stacks on the stunt
+// parks' landing zones and in the parks' corners, cones in a slalom through each park and in pairs
+// at the foot of the street jumps. Every chunk's props come from its position alone, so the main
+// thread (drawing) and the physics worker (bodies) agree.
 //
-// A prop: { kind: 'crate' | 'cone', x, y, z, yaw } with y its base on the ground (a crate stacked
-// on others stands on them).
+// A prop: { kind: 'crate' | 'cone' | a yard kit model's name, x, y, z, yaw } with y its base on the
+// ground (a crate stacked on others stands on them).
 import { CHUNK_SIZE } from './chunk.js';
 import { ROAD_HALF_WIDTH, JUMP_SPACING, streetJumpAt } from './town.js';
 import { crossing, streetPoint } from './buildings.js';
+import { YARD_BY_NAME, yardProps } from './yard.js';
 
 export const CRATE = 1.0; // m, a crate's side
 export const CONE = { radius: 0.22, height: 0.72 };
+
+// Half a prop's height (its body's middle above its base).
+export const propHalfHeight = (kind) => (kind === 'crate' ? CRATE / 2 : kind === 'cone' ? CONE.height / 2 : YARD_BY_NAME.get(kind).h / 2);
 
 // Spots in a stunt park (m from its middle, along the two street families' fields, as
 // town.js's parkHeight): crate pyramids beyond the kickers' landings, cone slaloms beside the
@@ -110,6 +115,8 @@ export function generateProps(heightAt, cx, cz) {
       }
     }
   });
+
+  props.push(...yardProps(heightAt, cx, cz));
 
   cache.set(key, { heightAt, props });
   if (cache.size > 64) cache.delete(cache.keys().next().value);

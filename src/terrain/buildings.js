@@ -248,19 +248,20 @@ function neighbours(heightAt, b) {
 }
 
 // The ground under a footprint (lowest and highest), or null where it would stand on a street's
-// sidewalk, in the water, in the mountains or on a steep slope.
-function footprintGround(heightAt, x, z, ux, uz, nx, nz, w, d) {
+// sidewalk (closer than `clear` to a street's centre line), in the water, in the mountains or on a
+// slope rising more than `rise` across it.
+function footprintGround(heightAt, x, z, ux, uz, nx, nz, w, d, clear = KERB + 0.4, rise = 3.5) {
   let lo = Infinity;
   let hi = -Infinity;
   for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1], [-1, 0], [1, 0], [0, 0]]) {
     const ps = heightAt.sample(x + ux * a * w * 0.5 + nx * b * d * 0.5, z + uz * a * w * 0.5 + nz * b * d * 0.5);
     // (Nor across a driveway up onto the block, or in a stunt park.)
-    if (ps.dist < KERB + 0.4 || ps.riverDist < ps.riverHalf + 4 || ps.park > 0.05 || ps.driveway > 0.05) return null;
+    if (ps.dist < clear || ps.riverDist < ps.riverHalf + 4 || ps.park > 0.05 || ps.driveway > 0.05) return null;
     if (ps.h < 0.6 || ps.mountain > 3) return null;
     lo = Math.min(lo, ps.h);
     hi = Math.max(hi, ps.h);
   }
-  return hi - lo > 3.5 ? null : { lo, hi };
+  return hi - lo > rise ? null : { lo, hi };
 }
 
 // ---- The sunny town's street rows ----------------------------------------------------------------
@@ -272,7 +273,10 @@ const SEG = 64;
 const HOUSE_GAP = 3; // m between neighbouring houses in a row, at least
 const HOUSE_GAP_SPREAD = 5; // m more, at most
 const BEHIND_SHARE = 0.15; // of the row's buildings with another behind
-const LINE = KERB + 0.6; // m from the centre line to the fronts
+// The fronts stand right at the back of the sidewalk, at its level: a raised block's retaining wall
+// runs into the buildings (their plinths reach below it), its gardens left up between them.
+const LINE = KERB + 0.1; // m from the centre line to the fronts
+const ROW_CLEAR = KERB + 0.02; // m a row building's footprint keeps from any street's centre line
 const segments = new WeakMap();
 
 // The centre line of street k of family f at `t` along it (x or z), with its unit normal (toward
@@ -406,7 +410,7 @@ function place(heightAt, f, k, side, t, kit, w, seed) {
   let back = 0;
   for (const a of [-1, 0, 1]) {
     const c = heightAt.sample(x + ux * a * w * 0.5 - nx * d * 0.5, z + uz * a * w * 0.5 - nz * d * 0.5);
-    back = Math.max(back, KERB + 0.5 - c.dist);
+    back = Math.max(back, ROW_CLEAR + 0.06 - c.dist);
   }
   if (back > 3) return null;
   x += nx * back;
@@ -414,10 +418,13 @@ function place(heightAt, f, k, side, t, kit, w, seed) {
   // It must face its own street (not another one it ended up next to).
   const front = heightAt.sample(x - nx * d * 0.5, z - nz * d * 0.5);
   if (front.dist > LINE + back + 1.5) return null;
-  const ground = footprintGround(heightAt, x, z, ux, uz, nx, nz, w, d);
+  // (Up to a raised block behind its front, its back dug into it.)
+  const ground = footprintGround(heightAt, x, z, ux, uz, nx, nz, w, d, ROW_CLEAR, 5);
   if (!ground) return null;
+  // Its floor at the sidewalk's level, in front of its middle.
+  const walk = heightAt(x - nx * (d / 2 + 0.4), z - nz * (d / 2 + 0.4));
   // The rows go before the lots behind them.
-  return kitBuilding(kit, x, z, w, nx, nz, ground, seed, 1 + seed);
+  return kitBuilding(kit, x, z, w, nx, nz, { lo: Math.min(ground.lo, walk), hi: walk }, seed, 1 + seed);
 }
 
 function kitBuilding(kit, x, z, w, nx, nz, ground, seed, priority) {
