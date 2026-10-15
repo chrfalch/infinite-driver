@@ -356,20 +356,20 @@ function snowColor(h, x, z, out) {
 
 // Stadium palette: rust-brown dirt in patches, the lanes darker where the trucks have worn them
 // in, a deep brown bed under the water holes, the dead ground's mounds a dry, paler orange, and the
-// ridge across the middle a pinkish dirt.
+// slope between its two levels a pinkish dirt.
 const ARENA_DIRT = new Color('#a2643a');
 const ARENA_DIRT_DARK = new Color('#8a5230');
 const ARENA_LANE = new Color('#7d4a2b');
 const ARENA_DRY = new Color('#bb7c4c');
 const ARENA_MUD = new Color('#4e3220');
-const ARENA_RIDGE = new Color('#c08a72'); // the ridge's paler, pinkish dirt
+const ARENA_SLOPE = new Color('#c08a72'); // the slope's paler, pinkish dirt
 function stadiumColor(s, x, z, out) {
   const p = patchNoise(x * 0.06, z * 0.06) * 0.6 + patchNoise(x * 0.18, z * 0.18) * 0.4;
   out.copy(ARENA_DIRT).lerp(ARENA_DIRT_DARK, Math.min(1, Math.max(0, p * 0.7 + 0.35)));
   // The lanes, darker toward the middle where the wheels run.
   out.lerp(ARENA_LANE, s.lane * (0.45 + 0.25 * smoothstepJs(4, 0.5, s.dist)) * (0.8 + 0.2 * patchNoise(x * 0.3, z * 0.3)));
   out.lerp(ARENA_DRY, Math.min(1, s.mound / 0.8) * 0.7);
-  out.lerp(ARENA_RIDGE, Math.min(1, s.ridge * 1.6) * (0.75 + 0.25 * patchNoise(x * 0.2 + 3, z * 0.2)));
+  out.lerp(ARENA_SLOPE, Math.min(1, s.slope * 1.3) * (0.75 + 0.25 * patchNoise(x * 0.2 + 3, z * 0.2)));
   out.lerp(ARENA_MUD, s.puddle * 0.9);
   out.offsetHSL(0, 0, fineNoise(x * 0.6, z * 0.6) * 0.025);
   return out;

@@ -36,7 +36,9 @@ describe('stadium', () => {
     expect(stadium.roadDistance(0, 0)).toBeLessThan(1e-6);
     expect(stadium.roadHeading(0, 0)).toBeCloseTo(0, 6);
     expect(stadium.sample(0, 0).s).toBeCloseTo(0, 6);
-    for (const [x, z] of [[-3, 0], [3, 0], [0, -3], [0, 3]]) expect(stadium(x, z)).toBeCloseTo(0, 2);
+    // (On the plateau.)
+    expect(stadium(0, 0)).toBeCloseTo(2, 2);
+    for (const [x, z] of [[-3, 0], [3, 0], [0, -3], [0, 3]]) expect(stadium(x, z)).toBeCloseTo(stadium(0, 0), 2);
   });
 
   it('is one closed loop of 250-800 m, its pieces joined end to end', () => {
@@ -79,13 +81,14 @@ describe('stadium', () => {
       const b = line[i];
       const grade = Math.abs(stadium(b.x, b.z) - stadium(a.x, a.z)) / Math.hypot(b.x - a.x, b.z - a.z);
       expect(grade).toBeLessThan(Math.tan((31 * Math.PI) / 180));
-      top = Math.max(top, stadium(b.x, b.z));
+      // (Above the level the arena floor is at there.)
+      top = Math.max(top, stadium(b.x, b.z) - stadium.sample(b.x, b.z).level);
       const f = stadium.sample(b.x, b.z).feature;
       if (f) kinds.add(f);
     }
     expect(top).toBeGreaterThan(1);
     expect(top).toBeLessThanOrEqual(2);
-    expect([...kinds].sort()).toEqual(['bump', 'puddle', 'ridge', 'washboard', 'whoops']);
+    expect([...kinds].sort()).toEqual(['bump', 'puddle', 'slope', 'tabletop', 'washboard', 'whoops']);
   });
 
   it('lies level from side to side on the straights (but for the humps), banked a little on the outside of the corners', () => {
@@ -95,8 +98,8 @@ describe('stadium', () => {
       const tilt = Math.abs(side(3) - side(-3)) / 6;
       // (The humps stand on one side of the lane.)
       if (s.feature === 'bump') continue;
-      // (The ridge leans across the lanes a little.)
-      expect(tilt).toBeLessThan(s.feature === 'ridge' ? 0.1 : s.feature && !s.corner ? 0.01 : 0.07);
+      // (The slope leans across the lanes a little.)
+      expect(tilt).toBeLessThan(s.feature === 'slope' ? 0.1 : s.feature && !s.corner ? 0.01 : 0.07);
     }
   });
 

@@ -1,7 +1,7 @@
 // Stadium: a closed dirt circuit after the arcade game Super Off Road (Leland, 1989), laid out as its
-// Sidewinder track. One lap of switchback lanes on a level arena floor, each lane walled in by
-// red-and-white barriers, with a ridge across the middle, a pyramid, a tabletop, humps, whoops, a
-// rumble strip and a water hole on the straights, and dirt mounds on the dead ground. Unlike the other worlds it is not endless: the arena
+// Sidewinder track. One lap of switchback lanes over an arena floor in two levels joined by a slope,
+// each lane walled in by red-and-white barriers, with pyramids, humps, whoops, a rumble strip and a
+// water hole on the straights, and dirt mounds on the dead ground. Unlike the other worlds it is not endless: the arena
 // is a finite floor ringed by a concrete wall, and outside it the ground stays level.
 //
 // The track is data, not noise: a closed polyline of corners (LAYOUT), each rounded off with its
@@ -20,8 +20,9 @@
 export const LANE_HALF = 5; // m of track either side of the centre line
 export const BARRIER = Object.freeze({ offset: LANE_HALF + 0.35, height: 1.1, thick: 0.3, piece: 2 });
 export const ARENA_WALL = Object.freeze({ height: 2.6, thick: 0.6, margin: 10 }); // margin: m beyond the outermost lane's centre
-export const WATER_LEVEL = -0.3; // m: the water holes' surface (the floor is at 0)
-const PUDDLE_DEPTH = 0.6; // m below the floor, so 0.3 m of water
+// m: the water holes' surface (the floor is at 0; spawning wants the ground 0.3 m above the water)
+export const WATER_LEVEL = -0.35;
+const PUDDLE_DEPTH = 0.6; // m below the floor, so 0.25 m of water
 
 // Corners of the loop (m), the way round, with the radius each is rounded to: Sidewinder, as in the
 // arcade game. Two dividers: a long C open to the right (its bottom arm between the start lane and
@@ -44,22 +45,28 @@ const LAYOUT = [
 ];
 const START = { x: 22, z: 0 };
 
-// The ridge (in LAYOUT's coordinates): a long hump of paler dirt across the arena (the light band in
-// the game), its crest leaning from x = 30 at the top wall to the right toward the start lane, crossed
-// by the three upper lanes. It fades out before the start lane, which has the rumble strip instead.
-const RIDGE = { x: 30, z: -55, lean: 0.36, halfWidth: 9, height: 1.2, fadeZ: [-9, -6] };
+// The slope (in LAYOUT's coordinates): the arena is in two levels, a plateau SLOPE.height m up on
+// the left (the start, the left side, the tight hairpin) and the floor on the right, with a slope of
+// pinkish dirt between them (the light band in the game, where every rail steps down). Its middle
+// leans from x = 47 at the top wall (z = -55) to about 36 by the start lane, and it is SLOPE.width m
+// across (about 20 degrees at its steepest). It runs on under the walls and out of the arena.
+const SLOPE = { x: 47, z: -55, lean: -0.175, width: 8, height: 2 };
 
 // Features by straight (the straight that leaves corner `leg`), `at` m along it from where the
 // straight begins (after the corner's arc; a feature may run on into the next corner). A bump sits on
 // one side of the lane (side +1 left of the way round, -1 right).
 const FEATURES = [
-  // The start lane (+x): the rumble strip, and a water hole running into the hairpin (the game's mud).
-  { kind: 'washboard', leg: 0, at: 26, length: 14, height: 0.13, pitch: 2 },
-  { kind: 'puddle', leg: 0, at: 44, length: 9 },
-  // The top lane (-x): humps on alternate sides.
-  { kind: 'bump', leg: 6, at: 4, side: 1, length: 5, height: 0.7 },
-  { kind: 'bump', leg: 6, at: 11, side: -1, length: 5, height: 0.7 },
-  { kind: 'bump', leg: 6, at: 18, side: 1, length: 5, height: 0.7 },
+  // The start lane (+x), down the slope: the rolls of the rumble strip, and a water hole in the
+  // hairpin (the game's mud).
+  { kind: 'washboard', leg: 0, at: 26, length: 15, height: 0.25, pitch: 2.5 },
+  { kind: 'puddle', leg: 0, at: 50, length: 9 },
+  // Under the peninsula (-x): a pyramid out of the hairpin, then up the slope.
+  { kind: 'tabletop', leg: 2, at: 2, up: 5, top: 1, down: 7, height: 1.2 },
+  // The top lane (-x): humps on alternate sides out of the hairpin, up the slope, and a pyramid before
+  // the corner.
+  { kind: 'bump', leg: 6, at: 1, side: 1, length: 4.5, height: 0.6 },
+  { kind: 'bump', leg: 6, at: 6.5, side: -1, length: 4.5, height: 0.6 },
+  { kind: 'tabletop', leg: 6, at: 29, up: 4, top: 1, down: 5, height: 0.9 },
   // Down the left side: whoops.
   { kind: 'whoops', leg: 7, at: 6, count: 3, height: 0.3, pitch: 6 },
 ];
@@ -243,7 +250,8 @@ function buildBarriers(track, arena) {
   const { x0, x1, z0, z1 } = arena;
   for (const [ax, az, bx, bz] of [[x0, z0, x1, z0], [x1, z0, x1, z1], [x1, z1, x0, z1], [x0, z1, x0, z0]]) {
     const length = Math.hypot(bx - ax, bz - az);
-    const count = Math.ceil(length / 8);
+    // Short pieces, so the wall follows the ground down the slope (on level ground physics joins them).
+    const count = Math.ceil(length / BARRIER.piece);
     const run = runs++;
     for (let i = 0; i < count; i++) {
       const t = (i + 0.5) / count;
@@ -419,19 +427,18 @@ export function createStadiumField() {
     // The dead ground: mounds, kept behind the barriers and inside the arena.
     const dead = smoothstep(LANE_HALF + 1.5, LANE_HALF + 3.5, ad);
     const inArena = x > arena.x0 + 4 && x < arena.x1 - 4 && z > arena.z0 + 4 && z < arena.z1 - 4;
-    // The ridge, across lanes and dead ground alike (inside the arena wall).
-    let ridge = 0;
-    const lz = z + START.z;
-    const rx = Math.abs(x + START.x - RIDGE.x - (lz - RIDGE.z) * RIDGE.lean) / RIDGE.halfWidth;
-    if (rx < 1 && inArena) {
-      const c = Math.cos((rx * Math.PI) / 2);
-      ridge = c * c * smoothstep(RIDGE.fadeZ[1], RIDGE.fadeZ[0], lz);
-      h += RIDGE.height * ridge;
-      if (!feature && ridge > 0.05 && lane > 0.5) feature = 'ridge';
-    }
     const mound = dead > 0 && inArena ? mounds(x, z) * dead : 0;
     h += mound;
-    return { h, d: n.d, dist: ad, s: n.s, tx: n.tx, tz: n.tz, corner: n.u >= 0, lane, puddle, mound, ridge, feature, arena: inArena ? 1 : 0 };
+    // The two levels and the slope between them, across lanes, dead ground and the stands alike.
+    const lz = z + START.z;
+    const across = (x + START.x - SLOPE.x - (lz - SLOPE.z) * SLOPE.lean) / SLOPE.width;
+    const low = smoothstep(-0.5, 0.5, across);
+    const level = SLOPE.height * (1 - low);
+    h += level;
+    // How much of the slope's face this is (1 in its middle), for its colour.
+    const slope = Math.min(1, 4 * low * (1 - low));
+    if (!feature && slope > 0.05 && lane > 0.5) feature = 'slope';
+    return { h, d: n.d, dist: ad, s: n.s, tx: n.tx, tz: n.tz, corner: n.u >= 0, level, lane, puddle, mound, slope, feature, arena: inArena ? 1 : 0 };
   }
 
   const heightAt = (x, z) => sample(x, z).h;

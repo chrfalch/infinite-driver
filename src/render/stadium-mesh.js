@@ -97,12 +97,26 @@ export function createStadiumView(scene, heightAt) {
     const yaw = Math.atan2(-tz, tx);
     const mx = (side.ax + side.bx) / 2;
     const mz = (side.az + side.bz) / 2;
+    // The stands rise from the highest ground along their side (the arena is in two levels), and
+    // reach down below the lowest.
+    let base = -Infinity;
+    let foot = Infinity;
+    for (let k = 0; k <= 32; k++) {
+      const t = k / 32;
+      for (let row = 0; row <= STAND.rows; row += STAND.rows) {
+        const out = STAND.gap + row * STAND.depth;
+        const g = heightAt(side.ax + (side.bx - side.ax) * t + side.ox * out, side.az + (side.bz - side.az) * t + side.oz * out);
+        base = Math.max(base, g);
+        foot = Math.min(foot, g);
+      }
+    }
+    const below = base - foot + 0.5;
     for (let row = 0; row < STAND.rows; row++) {
       const out = STAND.gap + (row + 0.5) * STAND.depth;
       const top = (row + 1) * STAND.rise;
       // Each terrace runs the side's length plus the stands' depth either end, so the corners close.
       const span = length + 2 * (STAND.gap + STAND.rows * STAND.depth);
-      m.compose(p.set(mx + side.ox * out, top / 2, mz + side.oz * out), q.setFromAxisAngle(up, yaw), s.set(span, top, STAND.depth));
+      m.compose(p.set(mx + side.ox * out, base + (top - below) / 2, mz + side.oz * out), q.setFromAxisAngle(up, yaw), s.set(span, top + below, STAND.depth));
       terraceMesh.setMatrixAt(t, m);
       terraceMesh.setColorAt(t++, STAND_CONCRETE);
       const n = Math.floor(length / seat);
@@ -110,7 +124,7 @@ export function createStadiumView(scene, heightAt) {
         const along = (k + 0.5) * seat - length / 2 + (rand() - 0.5) * 0.2;
         const tall = 0.75 + rand() * 0.3;
         const where = out + (rand() - 0.5) * 0.2;
-        m.compose(p.set(mx + tx * along + side.ox * where, top + tall / 2, mz + tz * along + side.oz * where), q.setFromAxisAngle(up, yaw + (rand() - 0.5) * 0.4), s.set(0.5, tall, 0.35));
+        m.compose(p.set(mx + tx * along + side.ox * where, base + top + tall / 2, mz + tz * along + side.oz * where), q.setFromAxisAngle(up, yaw + (rand() - 0.5) * 0.4), s.set(0.5, tall, 0.35));
         crowdMesh.setMatrixAt(c, m);
         crowdMesh.setColorAt(c++, SHIRTS[Math.floor(rand() * SHIRTS.length)]);
       }
@@ -120,15 +134,16 @@ export function createStadiumView(scene, heightAt) {
   // The start gantry over the origin: two posts outside the rails and a chequered banner across.
   const clear = 4.2; // m from the ground to the banner's underside
   const reach = BARRIER.offset + 0.6;
+  const ground = heightAt(0, 0);
   const steel = new MeshStandardMaterial({ color: '#5c5f62', roughness: 0.5, metalness: 0.4 });
   const gantry = [];
   for (const side of [-1, 1]) {
     const post = new Mesh(new BoxGeometry(0.25, clear + 0.9, 0.25), steel);
-    post.position.set(0, (clear + 0.9) / 2, side * reach);
+    post.position.set(0, ground + (clear + 0.9) / 2, side * reach);
     gantry.push(post);
   }
   const banner = new Mesh(new BoxGeometry(0.12, 0.9, 2 * reach), new MeshStandardMaterial({ map: chequerTexture(), roughness: 0.7 }));
-  banner.position.set(0, clear + 0.45, 0);
+  banner.position.set(0, ground + clear + 0.45, 0);
   gantry.push(banner);
   for (const part of gantry) {
     part.name = 'stadium:gantry';
