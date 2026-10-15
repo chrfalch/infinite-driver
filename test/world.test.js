@@ -17,8 +17,8 @@ describe('world choice', () => {
     expect(worldMode('?terrain=flat')).toBe('flat');
   });
 
-  it('offers the canyon, the dry river, the snowfield, the dark and sunny towns and the stadium', () => {
-    expect(Object.values(WORLDS)).toEqual(['canyon', 'river', 'snow', 'town', 'daytown', 'stadium']);
+  it('offers the canyon, the dry river, the snowfield, the sunny town and the stadium', () => {
+    expect(Object.values(WORLDS)).toEqual(['canyon', 'river', 'snow', 'daytown', 'stadium']);
   });
 });
 
@@ -47,10 +47,10 @@ describe('asking for a world', () => {
     globalThis.localStorage = storage();
     globalThis.sessionStorage = storage();
     try {
-      switchWorld('town', 'https://drift.example/');
+      switchWorld('daytown', 'https://drift.example/');
       globalThis.sessionStorage.store.clear();
       expect(chosenWorld('')).toBe(null);
-      expect(worldMode('')).toBe('town');
+      expect(worldMode('')).toBe('daytown');
     } finally {
       delete globalThis.localStorage;
       delete globalThis.sessionStorage;

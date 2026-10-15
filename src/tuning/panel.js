@@ -1,6 +1,6 @@
 import GUI from 'lil-gui';
 import { CONTROLS, DEFAULT_CONTROLS, saveControls } from '../controls.js';
-import { Deformation, Input, IsPlayer, Physics, Render, Soil, Tracks, Vehicle } from '../ecs/traits.js';
+import { Deformation, Input, Physics, Render, Soil, Tracks, Vehicle } from '../ecs/traits.js';
 import { applyQuality, resolveQuality } from '../render/quality.js';
 import { CAR, DEFAULT_CAR, resetCar, saveCar } from '../vehicle/config.js';
 import {
@@ -135,7 +135,7 @@ export function createTuningPanel(world, { heightAt }) {
   };
 
   const applyWheels = () => {
-    world.query(IsPlayer, Vehicle).forEach((car) => applyWheelSettings(car.get(Vehicle).controller));
+    world.query(Vehicle).forEach((car) => applyWheelSettings(car.get(Vehicle).controller));
   };
 
   const actions = {
@@ -322,16 +322,14 @@ export function createTuningPanel(world, { heightAt }) {
       .name('Soil softness')
       .onChange(() => {
         saveGround();
-        const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.gpu?.solver;
-        if (solver) solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step);
+        setGpuTireParams(world);
       });
     ground
       .add(GROUND, 'gravel', 0, 1, 0.05)
       .name('Gravel')
       .onChange(() => {
         saveGround();
-        const solver = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle).controller.gpu?.solver;
-        if (solver) solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step);
+        setGpuTireParams(world);
         setGravelAmount(GROUND.gravel);
       });
     ground.add(GROUND, 'tracks').name('Tyre tracks').onChange(saveGround);
@@ -407,14 +405,17 @@ const GPU_REBUILD_KEYS = ['segmentsAround', 'segmentsAcross', 'beadRings', 'rubb
 
 // One folder for the tyres (the GPU soft-body tyres): the everyday settings at the top, the solver
 // in a closed sub-folder. Size lives in TIRE (shared with the tyre meshes), the rest in GPU_TIRE.
+// The tyre settings to every car on GPU tyres (with worker physics the worker applies them).
+function setGpuTireParams(world) {
+  world.query(Vehicle).forEach((car) => car.get(Vehicle).controller.gpu?.solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step));
+}
+
 function addTireFolder(gui, world, scheduleRebuild) {
   const folder = gui.addFolder('Tyres');
   const apply = (key) => () => {
     saveGpuTire();
     if (GPU_REBUILD_KEYS.includes(key)) return scheduleRebuild();
-    const car = world.queryFirst(IsPlayer, Vehicle);
-    const solver = car?.get(Vehicle).controller.gpu?.solver;
-    if (solver) solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), world.get(Physics).step);
+    setGpuTireParams(world);
   };
   for (const [key, label, min, max, step] of [
     ['pressureKpa', 'Air pressure (kPa)', 10, 300, 5],

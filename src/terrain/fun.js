@@ -8,7 +8,7 @@ import { JUMP_SPACING, streetJumpAt } from './town.js';
 import { crossing, streetPoint } from './buildings.js';
 
 export function funPlaces(heightAt, cx, cz, half, now = () => performance.now()) {
-  if (!heightAt.buildingKit) return { step: () => [] };
+  if (!heightAt.town) return { step: () => [] };
   const places = [];
   const corners = [[cx - half, cz - half], [cx + half, cz - half], [cx - half, cz + half], [cx + half, cz + half]];
   const inside = (x, z) => Math.abs(x - cx) <= half && Math.abs(z - cz) <= half;

@@ -33,7 +33,7 @@ const WALL_TOP = KERB + 1.25;
 const inRow = (b) => b.priority >= 1 && b.priority < 2 && KIT_SIZE.get(b.kit) !== 'landmark';
 
 export function yardProps(heightAt, cx, cz) {
-  if (!heightAt.buildingKit) return [];
+  if (!heightAt.town) return [];
   const around = buildingsAround(heightAt, cx, cz);
   const rows = around.map((r) => r.building).filter(inRow);
   const out = [];

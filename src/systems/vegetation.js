@@ -1,4 +1,4 @@
-import { HeightField, IsPlayer, RockField, Soil, Time, Vehicle } from '../ecs/traits.js';
+import { HeightField, RockField, Soil, Time, Vehicle } from '../ecs/traits.js';
 import { Color, Matrix4 } from 'three/webgpu';
 import { createCrushedBush, deformBush } from '../render/vegetation-mesh.js';
 
@@ -21,10 +21,12 @@ function toLocal(p, dx, dz, scale = p.size) {
   return [(dx * c - dz * s) / scale, (dx * s + dz * c) / scale];
 }
 
+// Every car crushes the bushes it drives over and knocks the snow off spruces.
 export function updateBushes(world) {
-  const car = world.queryFirst(IsPlayer, Vehicle);
-  if (!car) return;
-  const { body, controller } = car.get(Vehicle);
+  world.query(Vehicle).forEach((car) => carThroughPlants(world, car.get(Vehicle)));
+}
+
+function carThroughPlants(world, { body, controller }) {
   const dt = world.get(Time).delta;
   const heightAt = world.get(HeightField)?.heightAt;
   const c = body.translation();

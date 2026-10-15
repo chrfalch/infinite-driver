@@ -22,8 +22,7 @@ export function createHeightField({ seed = 1337, mode = 'flat' } = {}) {
   if (mode === 'canyon') return createCanyonField(seed);
   if (mode === 'river') return createRiverField();
   if (mode === 'snow') return createSnowField();
-  if (mode === 'town') return createTownField();
-  if (mode === 'daytown') return createTownField(31, 'daytown');
+  if (mode === 'daytown') return createTownField();
   if (mode === 'stadium') return createStadiumField();
   // Test slope ('ramp:20'): flat for x < 6 m, then a steady climb of that many degrees along +x.
   if (mode.startsWith('ramp')) {

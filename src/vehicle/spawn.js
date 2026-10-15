@@ -20,7 +20,7 @@ import { createInstanceBatcher } from '../render/instance-batcher.js';
 import { CONTROLS } from '../controls.js';
 import { effectiveGpuTire, effectiveTire, GPU_TIRE, TIRE } from '../tire/config.js';
 import { createGpuTires, gpuTireMeshes } from '../tire/gpu-tires.js';
-import { CAR, DRIVETRAIN } from './config.js';
+import { CAR, DRIVETRAIN, playerTires } from './config.js';
 import { Drivetrain } from './drivetrain.js';
 import { createCarBody, WHEELS } from './physics.js';
 import { createSoftCarBody, softCarRideHeight } from './soft-vehicle.js';
@@ -28,22 +28,39 @@ import { createSoftCarBody, softCarRideHeight } from './soft-vehicle.js';
 const IDENTITY = { x: 0, y: 0, z: 0, w: 1 };
 const ZERO = { x: 0, y: 0, z: 0 };
 
-// Builds the player car (physics body, controller, meshes, wheel entities) from the current CAR settings.
-export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, angvel = ZERO, steer = 0, drivetrain = null }) {
+// Builds a car (physics body, controller, meshes, wheel entities) from the current CAR settings.
+// Each car has its own tyre model, `tires` (see TIRE_MODES; the player's from CAR by default), so
+// one car can run on the GPU tyre solver and the next on rigid wheels. The `player`'s car is the
+// one the keyboard drives and the camera follows; another car is driven through its Vehicle's
+// `input` (it stands still without one) and drawn in its own `livery`.
+export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, angvel = ZERO, steer = 0, drivetrain = null, tires = playerTires(), player = true, livery = null, input = null, slot = null }) {
   const { remote } = world.get(Physics);
+  const spec = { tires, player, livery: player ? null : livery, input, slot: slot ?? nextSlot(world, player) };
   // Physics in the worker: it simulates the car; here it is only drawn (see physics/client.js).
-  if (remote) return spawnRemoteCar(world, remote, { position, rotation, linvel, angvel, steer, keepDrivetrain: !!drivetrain });
+  // (A rebuild keeps the gearbox and engine state: the worker's, of the car it replaces.)
+  if (remote) return spawnRemoteCar(world, remote, { position, rotation, linvel, angvel, steer, keepDrivetrain: drivetrain?.carId ?? 0 }, spec);
 
-  const { body, controller, gpuTires, soft } = createCarPhysics(world, { position, rotation, linvel, angvel });
-  return addCarViews(world, { body, controller, gpuTires, soft, drivetrain: drivetrain ?? new Drivetrain(DRIVETRAIN), position, rotation, steer });
+  const physics = createCarPhysics(world, { position, rotation, linvel, angvel }, tires);
+  return addCarViews(world, { ...physics, drivetrain: drivetrain ?? new Drivetrain(DRIVETRAIN), position, rotation, steer, spec });
 }
 
-// The car's physics (body, controller, and GPU tyres) on this thread, from the current settings.
-function createCarPhysics(world, { position, rotation = IDENTITY, linvel = ZERO, angvel = ZERO }) {
+// Every car's place in the shared tyre-track mesh (see Tracks): the player's is 0, the others 1, 2, …
+function nextSlot(world, player) {
+  if (player) return 0;
+  const taken = new Set();
+  world.query(Vehicle).forEach((e) => taken.add(e.get(Vehicle).slot));
+  let slot = 1;
+  while (taken.has(slot)) slot++;
+  return slot;
+}
+
+// A car's physics (body, controller, and GPU tyres) on this thread, for tyre model `tires`. Without
+// a GPU device here the GPU tyres fall back to Rapier's soft bodies.
+function createCarPhysics(world, { position, rotation = IDENTITY, linvel = ZERO, angvel = ZERO }, tires) {
   const { rapier, world: physicsWorld } = world.get(Physics);
-  const soft = CAR.softTires;
+  const soft = tires !== 'rigid';
   const device = world.get(Render).renderer?.backend?.device;
-  const useGpu = soft && CAR.gpuTires && !!device;
+  const useGpu = tires === 'gpu' && !!device;
   const tire = effectiveTire(TIRE, CONTROLS.performance);
   let gpuTires = null;
   if (useGpu) {
@@ -64,34 +81,35 @@ function createCarPhysics(world, { position, rotation = IDENTITY, linvel = ZERO,
 }
 
 // Which kind of car the views were built for; a respawn keeps them only for the same kind.
-const viewsKind = (remote) => `${CAR.softTires}|${CAR.gpuTires}|${remote ? 'worker' : 'local'}`;
+const viewsKind = (remote, tires) => `${tires}|${remote ? 'worker' : 'local'}`;
 
-function spawnRemoteCar(world, remote, { keepDrivetrain, ...pose }) {
-  const { body, controller, drivetrain } = remote.spawn(pose, { keepDrivetrain });
+function spawnRemoteCar(world, remote, { keepDrivetrain, ...pose }, spec) {
+  const { id, body, controller, drivetrain } = remote.spawn(pose, { keepDrivetrain, tires: spec.tires, player: spec.player });
   const gpu = effectiveGpuTire(GPU_TIRE, CONTROLS.performance);
-  const gpuTires = { ...gpuTireMeshes(TIRE, gpu), solver: controller.gpu.solver };
-  const car = addCarViews(world, { body, controller, gpuTires, soft: true, drivetrain, position: pose.position, rotation: pose.rotation, steer: pose.steer });
+  const gpuTires = controller.gpu ? { ...gpuTireMeshes(TIRE, gpu), solver: controller.gpu.solver } : null;
+  const car = addCarViews(world, { body, controller, gpuTires, soft: spec.tires !== 'rigid', drivetrain, position: pose.position, rotation: pose.rotation, steer: pose.steer, spec, id });
   // The worker's speed, steering, and brake state go into the entity's own Vehicle object.
-  remote.attach(car.get(Vehicle));
+  remote.attach(id, car.get(Vehicle));
   return car;
 }
 
-// The player entity, its meshes, and one entity per wheel.
-function addCarViews(world, { body, controller, gpuTires, soft, drivetrain, position, rotation, steer }) {
+// The car's entity, its meshes, and one entity per wheel.
+function addCarViews(world, { body, controller, gpuTires, soft, drivetrain, position, rotation, steer, spec, id = 0 }) {
   const { scene } = world.get(Render);
-  const { object, steeringWheel, axles } = createCarMesh();
+  const { object, steeringWheel, axles } = createCarMesh({ livery: spec.livery, soft });
   scene.add(object);
   const car = world.spawn(
-    IsPlayer,
-    CameraTarget,
     Transform({ position: { ...position }, quaternion: { ...rotation } }),
     RigidBody({ body }),
     // The drivetrain reads DRIVETRAIN live, so panel changes apply without a rebuild.
-    Vehicle({ controller, body, drivetrain, steer, speed: 0 }),
+    Vehicle({ controller, body, drivetrain, steer, speed: 0, tires: spec.tires, input: spec.input, slot: spec.slot }),
     View({ object }),
     SteeringWheel({ object: steeringWheel }),
     AxleRig({ rig: axles }),
   );
+  if (spec.player) car.add(IsPlayer, CameraTarget);
+  // Its id: the worker's with worker physics, else the entity's.
+  car.get(Vehicle).id = id || car.id();
   WHEELS.forEach((_, index) => {
     const rig = createWheelRig(index, { softTire: soft ? TIRE : null });
     object.add(rig.object);
@@ -110,19 +128,29 @@ function addCarViews(world, { body, controller, gpuTires, soft, drivetrain, posi
   });
   // The moving parts (arms, shocks, joints, shafts) repeat per wheel: draw each shape once, instanced.
   object.userData.batcher = createInstanceBatcher(object, scene);
-  object.userData.kind = viewsKind(world.get(Physics).remote);
+  object.userData.kind = viewsKind(world.get(Physics).remote, spec.tires);
+  object.userData.spec = spec;
   return car;
 }
 
 function disposeObject(object) {
   // Geometry shared between cars (the engine model) stays.
   object.traverse((child) => child.userData.sharedGeometry || child.geometry?.dispose());
+  for (const material of object.userData.ownMaterials ?? []) material.dispose();
+}
+
+// Takes the car's physics out of its world (or the worker's).
+function removeCarPhysics(world, vehicle) {
+  const { remote, world: physicsWorld } = world.get(Physics);
+  if (remote) return remote.despawn(vehicle.id);
+  // The jointed car owns its hubs, joints, and soft tyres; the raycast car is one controller.
+  if (vehicle.controller.dispose) vehicle.controller.dispose();
+  else physicsWorld.removeVehicleController(vehicle.controller);
+  physicsWorld.removeRigidBody(vehicle.body);
 }
 
 export function despawnCar(world, car) {
-  const { world: physicsWorld } = world.get(Physics);
   const { scene } = world.get(Render);
-  const { controller, body } = car.get(Vehicle);
   const { object } = car.get(View);
 
   world.query(WheelOf(car)).forEach((wheel) => {
@@ -137,42 +165,43 @@ export function despawnCar(world, car) {
     }
     wheel.destroy();
   });
-  // The jointed car owns its hubs, joints, and soft tyres; the raycast car is one controller.
-  if (controller.dispose) controller.dispose();
-  else physicsWorld.removeVehicleController(controller);
-  physicsWorld?.removeRigidBody(body);
+  removeCarPhysics(world, car.get(Vehicle));
   object.userData.batcher?.dispose();
   scene.remove(object);
   disposeObject(object);
   car.destroy();
 }
 
-// Rebuilds the car in place, keeping its motion, so geometry and mass changes apply live.
-export function rebuildCar(world) {
-  const car = world.queryFirst(IsPlayer, Vehicle);
-  if (!car) return null;
-  const { body, steer, drivetrain } = car.get(Vehicle);
-  const state = {
-    drivetrain,
-    position: { ...body.translation() },
-    rotation: { ...body.rotation() },
-    linvel: { ...body.linvel() },
-    angvel: { ...body.angvel() },
-    steer,
-  };
-  despawnCar(world, car);
-  return spawnCar(world, state);
+// Rebuilds every car in place, keeping its motion, so geometry and mass changes apply live.
+export function rebuildCars(world) {
+  const cars = [];
+  world.query(Vehicle, View).forEach((car) => cars.push(car));
+  for (const car of cars) {
+    const { body, steer, drivetrain, tires, input, slot } = car.get(Vehicle);
+    const { player, livery } = car.get(View).object.userData.spec;
+    const state = {
+      drivetrain,
+      position: { ...body.translation() },
+      rotation: { ...body.rotation() },
+      linvel: { ...body.linvel() },
+      angvel: { ...body.angvel() },
+      steer,
+    };
+    despawnCar(world, car);
+    // The player's car takes the tyre model the settings now ask for.
+    spawnCar(world, { ...state, tires: player ? playerTires() : tires, player, livery, input, slot });
+  }
+  return world.queryFirst(IsPlayer, Vehicle);
 }
 
-// How high to place a new car so it drops gently onto its wheels.
-export function startHeight() {
+// How high to place a new car with tyre model `tires` so it drops gently onto its wheels.
+export function startHeight(tires = playerTires()) {
   // Just above ride height, so the car settles instead of landing.
-  return CAR.softTires ? softCarRideHeight() + 0.03 : 1.5;
+  return tires !== 'rigid' ? softCarRideHeight() + 0.03 : 1.5;
 }
 
-// Puts the car back on its wheels a little above the ground where it is.
-export function respawnCar(world, heightAt) {
-  const car = world.queryFirst(IsPlayer, Vehicle);
+// Puts a car (the player's unless given) back on its wheels a little above the ground where it is.
+export function respawnCar(world, heightAt, car = world.queryFirst(IsPlayer, Vehicle)) {
   if (!car) return null;
   const { body } = car.get(Vehicle);
   const p = body.translation();
@@ -183,7 +212,7 @@ export function respawnCar(world, heightAt) {
   const fz = 2 * (q.x * q.z - q.w * q.y);
   const yaw = Math.hypot(fx, fz) > 1e-3 ? Math.atan2(-fz, fx) : 0;
   const spot = findSpawnSpot(world, heightAt, p.x, p.z, yaw);
-  return respawnCarAt(world, heightAt, spot.x, spot.z, spot.yaw);
+  return respawnCarAt(world, heightAt, spot.x, spot.z, spot.yaw, { car });
 }
 
 // Car footprint for spawn checks: half length (bumper to rear hoop) and half width over the tyres.
@@ -278,44 +307,49 @@ export function findSpawnSpot(world, heightAt, x0, z0, yaw0) {
   return { x: x0, z: z0, yaw: yaw0 };
 }
 
-// Puts the car on its wheels at (x, z), facing `yaw` (radians about +y; 0 faces +x). Tests can
-// start it `lift` m higher and moving forward at `speed` m/s.
-export function respawnCarAt(world, heightAt, x, z, yaw = 0, { speed = 0, lift = 0 } = {}) {
-  const car = world.queryFirst(IsPlayer, Vehicle);
+// Puts a car (the player's unless `car` is given) on its wheels at (x, z), facing `yaw` (radians
+// about +y; 0 faces +x). Tests can start it `lift` m higher and moving forward at `speed` m/s.
+export function respawnCarAt(world, heightAt, x, z, yaw = 0, { speed = 0, lift = 0, car = world.queryFirst(IsPlayer, Vehicle) } = {}) {
+  if (!car) return null;
+  const vehicle = car.get(Vehicle);
   // Drop from just above the highest ground under the car, so no wheel starts inside a slope.
   const ground = footprint(heightAt, x, z, yaw).max;
   const pose = {
-    position: { x, y: ground + startHeight() + lift, z },
+    position: { x, y: ground + startHeight(vehicle.tires) + lift, z },
     rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
     linvel: speed ? { x: Math.cos(yaw) * speed, y: 0, z: -Math.sin(yaw) * speed } : ZERO,
     angvel: ZERO,
   };
+  const { spec } = car.get(View).object.userData;
+  // The player's car takes the tyre model the settings now ask for.
+  const tires = spec.player ? playerTires() : vehicle.tires;
   // The same car again: keep its meshes and replace only the physics. New meshes and materials
   // cost a long first frame (about 50-160 ms on an M4) while the renderer sets them up.
-  if (car && car.get(View).object.userData.kind === viewsKind(world.get(Physics).remote)) return replaceCarPhysics(world, car, pose);
-  if (car) despawnCar(world, car);
-  return spawnCar(world, pose);
+  if (car.get(View).object.userData.kind === viewsKind(world.get(Physics).remote, tires)) return replaceCarPhysics(world, car, pose);
+  const { input, slot } = vehicle;
+  despawnCar(world, car);
+  return spawnCar(world, { ...pose, tires, player: spec.player, livery: spec.livery, input, slot });
 }
 
 // Gives the car new physics at `pose` (a fresh start: new drivetrain, no steering), keeping its
 // entity and meshes.
 function replaceCarPhysics(world, car, pose) {
-  const { remote, world: physicsWorld } = world.get(Physics);
+  const { remote } = world.get(Physics);
   const vehicle = car.get(Vehicle);
+  const { player } = car.get(View).object.userData.spec;
   let body;
   let controller;
   let drivetrain;
+  let id = vehicle.id;
+  removeCarPhysics(world, vehicle);
   if (remote) {
-    ({ body, controller, drivetrain } = remote.spawn(pose));
+    ({ id, body, controller, drivetrain } = remote.spawn(pose, { tires: vehicle.tires, player }));
   } else {
-    if (vehicle.controller.dispose) vehicle.controller.dispose();
-    else physicsWorld.removeVehicleController(vehicle.controller);
-    physicsWorld.removeRigidBody(vehicle.body);
-    ({ body, controller } = createCarPhysics(world, pose));
+    ({ body, controller } = createCarPhysics(world, pose, vehicle.tires));
     drivetrain = new Drivetrain(DRIVETRAIN);
   }
-  Object.assign(vehicle, { body, controller, drivetrain, steer: 0, speed: 0, braking: false });
-  if (remote) remote.attach(vehicle);
+  Object.assign(vehicle, { body, controller, drivetrain, steer: 0, speed: 0, braking: false, id, held: false });
+  if (remote) remote.attach(id, vehicle);
   car.get(RigidBody).body = body;
   const transform = car.get(Transform);
   Object.assign(transform.position, pose.position);
@@ -347,10 +381,18 @@ export function requestRespawnAt(world, heightAt, x, z, yaw, options) {
   pendingAction = { type: 'respawnAt', world, heightAt, x, z, yaw, options };
 }
 
+// Takes a car out at the start of the next frame (a step may be using it now). Spawning needs no
+// wait: a new car joins the next batch of steps.
+const pendingDespawns = [];
+export function requestDespawn(world, car) {
+  pendingDespawns.push({ world, car });
+}
+
 export function applyPendingCarAction() {
+  for (const { world, car } of pendingDespawns.splice(0)) if (car.isAlive()) despawnCar(world, car);
   const action = pendingAction;
   pendingAction = null;
-  if (action?.type === 'rebuild') rebuildCar(action.world);
+  if (action?.type === 'rebuild') rebuildCars(action.world);
   if (action?.type === 'respawn') respawnCar(action.world, action.heightAt);
   if (action?.type === 'respawnAt') respawnCarAt(action.world, action.heightAt, action.x, action.z, action.yaw, action.options);
 }

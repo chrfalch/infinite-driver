@@ -17,6 +17,7 @@ import {
   AxleRig,
   Time,
   Vehicle,
+  View,
   WheelRig,
 } from './ecs/traits.js';
 import { createRenderer } from './render/scene.js';
@@ -54,13 +55,14 @@ import { createStadiumView } from './render/stadium-mesh.js';
 import { GroundSurface, PATCH_N } from './render/ground-surface.js';
 import { showRutsOnSheet } from './render/rock-surface.js';
 import { DEFORM_CELL } from './terrain/deformation.js';
-import { applyPendingCarAction, footprint, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
+import { applyPendingCarAction, footprint, requestDespawn, requestRebuild, requestRespawn, requestRespawnAt, spawnCar, startHeight } from './vehicle/spawn.js';
 import { createTuningPanel } from './tuning/panel.js';
 import { loadPanelOpen, panelStartsOpen, savePanelOpen } from './tuning/panel-state.js';
 import { updateInstanceBatchers } from './render/instance-batcher.js';
 import { createPhysicsClient, workerGpuSupported } from './physics/client.js';
 import { ROCK_COUNT, loadTerrain, startChunkWorker } from './systems/terrain.js';
-import { CAR } from './vehicle/config.js';
+import { playerTires } from './vehicle/config.js';
+import { configuredRivals, gridSlot } from './vehicle/cars.js';
 import { updateGpuGround, updateGpuRocks } from './tire/gpu-tires.js';
 import { createTouchControls } from './ui/touch-controls.js';
 import { count, reportError, sample, startOverlay, timed } from './perf.js';
@@ -112,7 +114,7 @@ export async function main(loading) {
   const night = daylight.dark > 0.5;
   const heightAt = createHeightField({ mode });
   // The sunny town's buildings are models: loaded before its first chunk is built.
-  if (heightAt.buildingKit) {
+  if (heightAt.town) {
     loading?.set('world', 0.3, 'Building the town');
     await Promise.all([loadTownKit(), loadYardKit()]);
   }
@@ -134,9 +136,14 @@ export async function main(loading) {
   loading?.set('world', 1, 'Starting the physics');
   await loading?.pause();
 
+  // The other cars (?rivals=rigid,gpu: each its own tyre model; see vehicle/cars.js).
+  const rivals = configuredRivals();
   // Physics runs in a worker (with its own GPU device) for the GPU tyres when the browser has
-  // WebGPU in workers; ?physics=main keeps it on this thread. Other tyre modes stay here.
-  const useWorker = CAR.softTires && CAR.gpuTires && params.get('physics') !== 'main' && (await workerGpuSupported());
+  // WebGPU in workers; ?physics=main keeps it on this thread. Other tyre modes for the player's
+  // car stay here, and so does everything when another car runs Rapier's soft tyres (the worker
+  // has GPU tyres and rigid wheels only).
+  const useWorker =
+    playerTires() === 'gpu' && rivals.every((r) => r.tires !== 'soft') && params.get('physics') !== 'main' && (await workerGpuSupported());
   let remote = null;
   let physicsWorld = null;
   if (useWorker) {
@@ -161,8 +168,8 @@ export async function main(loading) {
   await loading?.pause();
 
   // The sunny town's crates, cones and yard props: drawn here, simulated where the physics runs.
-  const propsView = heightAt.buildingKit ? createPropsView(render.scene, heightAt) : null;
-  const propPhysics = heightAt.buildingKit && physicsWorld ? createPropPhysics(RAPIER, physicsWorld, heightAt) : null;
+  const propsView = heightAt.town ? createPropsView(render.scene, heightAt) : null;
+  const propPhysics = heightAt.town && physicsWorld ? createPropPhysics(RAPIER, physicsWorld, heightAt) : null;
   // The dry river's course markers: flags, chevron boards, tyre stacks and the start gantry.
   const trackMarkers = heightAt.beds ? createTrackMarkersView(render.scene, heightAt) : null;
   // The stadium's rails, wall, gantry and stands: drawn here, the walls simulated where the physics runs.
@@ -191,10 +198,11 @@ export async function main(loading) {
       spin: [0, 0, 0, 0],
     }),
   );
-  // The tracks' floor follows the ruts near the car (render/rut-map.js).
+  // The tracks' floor follows the ruts near the car (render/rut-map.js). Four wheels per car, each
+  // car in its own slot (Vehicle.slot); cars added later beyond these leave no tracks.
   world.add(
     Tracks({
-      renderer: new TireTracks(render.scene, { segments: GROUND.trackLength, deformation, ruts, snow: !!heightAt.snow }),
+      renderer: new TireTracks(render.scene, { wheels: 4 * (1 + rivals.length), segments: GROUND.trackLength, deformation, ruts, snow: !!heightAt.snow }),
       contacts: [null, null, null, null],
     }),
   );
@@ -202,9 +210,15 @@ export async function main(loading) {
   // The car starts just above the ground at the origin (on the road or river bed, facing along it),
   // above the highest ground under it so no wheel starts inside a slab.
   const yaw = heightAt.roadHeading ? heightAt.roadHeading(0, 0) : 0;
-  spawnCar(world, {
-    position: { x: 0, y: footprint(heightAt, 0, 0, yaw).max + startHeight(), z: 0 },
+  const startPose = (x, z, tires) => ({
+    position: { x, y: footprint(heightAt, x, z, yaw).max + startHeight(tires), z },
     rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
+  });
+  spawnCar(world, startPose(0, 0, playerTires()));
+  // The other cars line up behind it.
+  rivals.forEach((rival, i) => {
+    const { x, z } = gridSlot(0, 0, yaw, i + 1);
+    spawnCar(world, { ...startPose(x, z, rival.tires), tires: rival.tires, livery: rival.livery, player: false, slot: i + 1 });
   });
   const panel = createTuningPanel(world, { heightAt });
   const touch = createTouchControls({ onRespawn: () => requestRespawn(world, heightAt), onCamera: () => toggleFollowCamera() });
@@ -311,7 +325,7 @@ export async function main(loading) {
         // The worker steps on its own clock; send it this frame's input and take its newest time.
         applyPendingCarAction();
         readInput(world);
-        remote.tick(world.get(Input));
+        remote.tick(world.get(Input), otherInputs(world));
         const physics = world.get(Physics);
         physics.simTime = remote.simTime;
         physics.stepMs = remote.stepMs;
@@ -386,12 +400,33 @@ export async function main(loading) {
     get car() {
       return world.queryFirst(IsPlayer, Vehicle);
     },
+    // Every car's entity, the player's among them.
+    get cars() {
+      const cars = [];
+      world.query(Vehicle).forEach((car) => cars.push(car));
+      return cars;
+    },
+    // Another car at (x, z) facing `yaw`, on tyre model `tires` (see TIRE_MODES); drive it by setting
+    // its Vehicle's `input` ({ throttle, brake, steer, handbrake }). Returns its entity.
+    addCar: ({ x, z, yaw = 0, tires = 'rigid', livery = 'red', input = null }) =>
+      spawnCar(world, {
+        position: { x, y: footprint(heightAt, x, z, yaw).max + startHeight(tires), z },
+        rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
+        tires,
+        livery,
+        input,
+        player: false,
+      }),
+    // Takes a car out (at the start of the next frame).
+    removeCar: (car) => requestDespawn(world, car),
     respawnAt: (x, z, yaw, options) => requestRespawnAt(world, heightAt, x, z, yaw, options),
+    // Rebuilds every car in place, as a settings change does.
+    rebuild: () => requestRebuild(world),
     heightAt,
     audio,
     audioFeed,
     minimap,
-    traits: { Vehicle, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig, RockField },
+    traits: { Vehicle, View, IsPlayer, WheelRig, SteeringWheel, Input, Time, Physics, Tracks, Deformation, Soil, AxleRig, RockField },
   };
 }
 
@@ -403,23 +438,38 @@ function updateGroundSurface(world, groundSurface) {
   groundSurface.update(p.x, p.z);
 }
 
-// Worker physics: the draw side keeps its own copy of the tyre solver's ground grid (for the
-// track contacts) and of the nearby rocks (the tyre mesh keeps its tread out of them).
+// Worker physics: the draw side keeps its own copy of each GPU car's tyre solver ground grid (for
+// the track contacts) and of the nearby rocks (the tyre mesh keeps its tread out of them).
 function syncRemoteSolver(world) {
-  const vehicle = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle);
-  const solver = vehicle?.controller.gpu?.solver;
-  if (!solver) return;
-  solver.setGround ??= () => {};
-  solver.setRocks ??= (rocks) => (solver.rockList = rocks);
-  const p = vehicle.body.translation();
-  updateGpuGround(solver, world.get(HeightField).heightAt, p.x, p.z, world.get(Deformation).map);
-  const last = solver.rockCentre;
-  if (!last || Math.hypot(last.x - p.x, last.z - p.z) > 3) {
-    const rocks = [];
-    world.query(RockField).forEach((e) => rocks.push(...e.get(RockField).rocks));
-    const { heightAt } = world.get(HeightField);
-    if (heightAt.barrierRocks) rocks.push(...heightAt.barrierRocks);
-    updateGpuRocks(solver, rocks, p.x, p.z);
-    solver.rockCentre = { x: p.x, z: p.z };
-  }
+  let rocks = null;
+  world.query(Vehicle).forEach((car) => {
+    const vehicle = car.get(Vehicle);
+    const solver = vehicle.controller.gpu?.solver;
+    if (!solver) return;
+    solver.setGround ??= () => {};
+    solver.setRocks ??= (list) => (solver.rockList = list);
+    const p = vehicle.body.translation();
+    updateGpuGround(solver, world.get(HeightField).heightAt, p.x, p.z, world.get(Deformation).map);
+    const last = solver.rockCentre;
+    if (!last || Math.hypot(last.x - p.x, last.z - p.z) > 3) {
+      if (!rocks) {
+        rocks = [];
+        world.query(RockField).forEach((e) => rocks.push(...e.get(RockField).rocks));
+        const { heightAt } = world.get(HeightField);
+        if (heightAt.barrierRocks) rocks.push(...heightAt.barrierRocks);
+      }
+      updateGpuRocks(solver, rocks, p.x, p.z);
+      solver.rockCentre = { x: p.x, z: p.z };
+    }
+  });
+}
+
+// The other cars' drivers for the worker: [id, input] for each car with an input of its own.
+function otherInputs(world) {
+  const inputs = [];
+  world.query(Vehicle).forEach((car) => {
+    const { id, input } = car.get(Vehicle);
+    if (input && !car.has(IsPlayer)) inputs.push([id, { ...input }]);
+  });
+  return inputs;
 }

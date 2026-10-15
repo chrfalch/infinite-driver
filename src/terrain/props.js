@@ -34,7 +34,7 @@ function hash(a, b, c) {
 const cache = new Map();
 
 export function generateProps(heightAt, cx, cz) {
-  if (!heightAt.buildingKit) return [];
+  if (!heightAt.town) return [];
   const key = `${cx},${cz}`;
   const hit = cache.get(key);
   if (hit && hit.heightAt === heightAt) return hit.props;

@@ -23,16 +23,6 @@ const LOOKS = {
     steps: 3,
     scale: 0.5,
   },
-  // Town: wooded hills and mountains around it. At night a faint glow low on the horizon, the hills
-  // dark against it.
-  town: {
-    day: { horizon: '#d5dde2', top: '#3d84d2', background: '#dfe2df', far: ['#33433a', '#71837a'], near: ['#2b3a2a', '#5c6d50'] },
-    night: { horizon: '#18222f', top: '#02040a', background: '#0b111c', far: ['#090d12', '#1f2a2e'], near: ['#070a0d', '#1a2421'] },
-    steps: 8,
-    scale: 0.75,
-    haze: [0.6, 0.4],
-    glow: 0.03,
-  },
   // Sunny town: a clear blue sky, green wooded hills and blue-grey mountains hazed toward a pale
   // horizon; less haze than the others by day (`orthoFog`, `dayFog`: see render/daylight.js).
   daytown: {

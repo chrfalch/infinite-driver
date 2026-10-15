@@ -1,4 +1,4 @@
-// The dark town's water (terrain/town.js): one sheet at the water level that travels with the
+// The town's water (terrain/town.js): one sheet at the water level that travels with the
 // car, so the river and the ponds show wherever the ground dips below it. Clear teal, with small
 // moving ripples that catch the sun; the bed shows through, darker where it is deeper (the
 // terrain's colours, render/terrain-mesh.js).

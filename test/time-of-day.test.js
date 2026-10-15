@@ -95,7 +95,7 @@ describe('time setting', () => {
     expect(startHour('canyon', '?time=18.5')).toBe(18.5);
     expect(startHour('canyon', '?time=06:45')).toBe(6.75);
     expect(startHour('canyon', '?time=25')).toBe(1);
-    expect(startHour('town', '')).toBe(DEFAULT_HOURS.town);
+    expect(startHour('daytown', '')).toBe(DEFAULT_HOURS.daytown);
     expect(startHour('flat', '')).toBe(14);
   });
 

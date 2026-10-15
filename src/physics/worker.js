@@ -1,4 +1,4 @@
-// Physics worker: Rapier, the car, its drivetrain, and the GPU tyre solver run here, on their own
+// Physics worker: Rapier, the cars, their drivetrains, and the GPU tyre solvers run here, on their own
 // thread and their own GPU device. The main thread draws. Here nothing waits behind the frame's
 // render work in a shared GPU queue, or behind the frame's JavaScript. See physics/client.js for
 // the other side and the message protocol.
@@ -13,7 +13,7 @@ import { GPU_TIRE, GROUND, TIRE, effectiveGpuTire, effectiveTire, setPavedRoads,
 import { createGpuTires } from '../tire/gpu-tires.js';
 import { CAR, DRIVETRAIN } from '../vehicle/config.js';
 import { Drivetrain } from '../vehicle/drivetrain.js';
-import { WHEELS, applyWheelSettings } from '../vehicle/physics.js';
+import { WHEELS, applyWheelSettings, createCarBody } from '../vehicle/physics.js';
 import { createSoftCarBody } from '../vehicle/soft-vehicle.js';
 import { createColliderStreamer } from './colliders.js';
 import { createPropPhysics } from './props.js';
@@ -29,12 +29,14 @@ let device = null;
 let colliders = null;
 let props = null; // the sunny town's loose props
 let deformation = null;
-let car = null; // player entity
-let carId = 0;
+// The cars, by the id the main thread gave each: { entity, poses } (poses: the chassis pose of
+// every step since the last state message).
+const cars = new Map();
+// Drivetrains of cars just taken out, by id, for a rebuilt car to carry on with (see spawn).
+const retired = new Map();
 let pending = []; // spawn and settings actions, applied between batches
 let busy = false;
 let simLast = 0;
-let stepPoses = [];
 
 // Copies settings from the main thread (it owns saving and the tuning panel).
 function applySettings(all) {
@@ -47,29 +49,55 @@ function applySettings(all) {
   }
 }
 
-function despawn() {
+function despawn(id) {
+  const car = cars.get(id);
   if (!car) return;
-  const { controller, body } = car.get(Vehicle);
-  controller.dispose();
+  const { controller, body, drivetrain } = car.entity.get(Vehicle);
+  // The jointed car owns its hubs, joints, and GPU tyres; the raycast car is one controller.
+  if (controller.dispose) controller.dispose();
+  else physics.world.removeVehicleController(controller);
   physics.world.removeRigidBody(body);
-  car.destroy();
-  car = null;
+  car.entity.destroy();
+  cars.delete(id);
+  retired.set(id, drivetrain);
 }
 
-function spawn({ id, position, rotation, linvel, angvel, steer = 0, keepDrivetrain = false }) {
-  const old = car?.get(Vehicle).drivetrain;
-  despawn();
-  const gpu = effectiveGpuTire(GPU_TIRE, CONTROLS.performance);
-  const gpuTires = createGpuTires(device, WHEELS.length, TIRE, gpu);
-  gpuTires.solver.setParams(gpu, STEP);
-  gpuTires.pipelined = gpu.pipelined;
-  const tire = effectiveTire(TIRE, CONTROLS.performance);
-  const { body, controller } = createSoftCarBody(RAPIER, physics.world, position, CAR, tire, { gpuTires, rotation, linvel, angvel });
-  const drivetrain = keepDrivetrain && old ? old : new Drivetrain(DRIVETRAIN);
-  car = world.spawn(IsPlayer, RigidBody({ body }), Vehicle({ controller, body, drivetrain, steer, speed: 0 }));
-  carId = id;
-  colliders.update(position.x, position.z, { force: true });
-  props?.update(position.x, position.z);
+// A car at a pose: `tires` 'gpu' (soft tyres on this thread's GPU tyre solver) or 'rigid'
+// (Rapier's raycast vehicle). `keepDrivetrain`: the id of a car just taken out whose gearbox and
+// engine state it carries on with (a rebuild).
+function spawn({ id, position, rotation, linvel, angvel, steer = 0, keepDrivetrain = 0, tires = 'gpu', player = true }) {
+  despawn(id);
+  let body;
+  let controller;
+  if (tires === 'rigid') {
+    ({ body, controller } = createCarBody(RAPIER, physics.world, position));
+    body.setRotation(rotation, true);
+    body.setLinvel(linvel, true);
+    body.setAngvel(angvel, true);
+  } else {
+    const gpu = effectiveGpuTire(GPU_TIRE, CONTROLS.performance);
+    const gpuTires = createGpuTires(device, WHEELS.length, TIRE, gpu);
+    gpuTires.solver.setParams(gpu, STEP);
+    gpuTires.pipelined = gpu.pipelined;
+    const tire = effectiveTire(TIRE, CONTROLS.performance);
+    ({ body, controller } = createSoftCarBody(RAPIER, physics.world, position, CAR, tire, { gpuTires, rotation, linvel, angvel }));
+  }
+  const old = keepDrivetrain ? retired.get(keepDrivetrain) : null;
+  retired.clear();
+  const drivetrain = old ?? new Drivetrain(DRIVETRAIN);
+  const entity = world.spawn(RigidBody({ body }), Vehicle({ controller, body, drivetrain, steer, speed: 0, tires, id }));
+  if (player) entity.add(IsPlayer);
+  cars.set(id, { entity, poses: [] });
+  colliders.update(centres(), { force: true });
+  if (player) props?.update(position.x, position.z);
+}
+
+// Where every car is, for the terrain colliders.
+const centres = () => [...cars.values()].map(({ entity }) => entity.get(Vehicle).body.translation());
+
+function playerCar() {
+  for (const car of cars.values()) if (car.entity.has(IsPlayer)) return car;
+  return null;
 }
 
 function applyPending() {
@@ -77,16 +105,17 @@ function applyPending() {
   pending = [];
   for (const a of actions) {
     if (a.type === 'spawn') spawn(a);
+    else if (a.type === 'despawn') despawn(a.id);
     else if (a.type === 'settings') {
       applySettings(a.settings);
-      const controller = car?.get(Vehicle).controller;
-      if (controller) {
+      for (const { entity } of cars.values()) {
+        const { controller } = entity.get(Vehicle);
         controller.gpu?.solver.setParams(effectiveGpuTire(GPU_TIRE, CONTROLS.performance), STEP);
         applyWheelSettings(controller);
         controller.dirty = true; // spring settings are re-applied on the next step
       }
     } else if (a.type === 'shift') {
-      const d = car?.get(Vehicle).drivetrain;
+      const d = cars.get(a.id)?.entity.get(Vehicle).drivetrain;
       if (a.dir > 0) d?.shiftUp();
       else d?.shiftDown();
     } else if (a.type === 'clearDeformation') deformation.clear();
@@ -95,44 +124,68 @@ function applyPending() {
 
 const pose = (b) => ({ p: { ...b.translation() }, q: { ...b.rotation() }, v: { ...b.linvel() }, w: { ...b.angvel() } });
 
-function snapshot(readback) {
-  const vehicle = car.get(Vehicle);
-  const c = vehicle.controller;
-  const solver = c.gpu?.solver;
-  const d = vehicle.drivetrain;
-  const steps = new Float32Array(stepPoses.length * 8);
-  stepPoses.forEach((s, i) => steps.set(s, i * 8));
-  stepPoses = [];
-  const positions = readback && solver ? solver.positions.slice() : null;
-  const message = {
-    type: 'state',
-    carId,
-    simTime: physics.simTime,
-    stepMs: physics.stepMs,
-    batch: physics.lastBatch,
-    steps,
-    body: pose(vehicle.body),
-    wheels: c.wheels.map((w, i) => ({
-      hub: pose(w.hub),
-      hubPose: c.wheelHubPose(i),
-      suspension: c.suspensionPose(i),
-      spin: c.wheelSpin(i),
+// The wheels as the draw side needs them: the jointed car's hubs and links, or the raycast car's
+// suspension lengths and contact points.
+function wheelStates(c) {
+  if (!c.wheels) {
+    return [0, 1, 2, 3].map((i) => ({
+      suspension: c.wheelSuspensionLength(i),
       rotation: c.wheelRotation(i),
       steering: c.wheelSteering(i),
       contact: c.wheelIsInContact(i),
-      detached: c.wheelDetached(i),
-      seat: c.wheelDetached(i) ? c.wheelSeat(i) : null,
-    })),
+      contactPoint: c.wheelIsInContact(i) ? { ...c.wheelContactPoint(i) } : null,
+    }));
+  }
+  return c.wheels.map((w, i) => ({
+    hub: pose(w.hub),
+    hubPose: c.wheelHubPose(i),
+    suspension: c.suspensionPose(i),
+    spin: c.wheelSpin(i),
+    rotation: c.wheelRotation(i),
+    steering: c.wheelSteering(i),
+    contact: c.wheelIsInContact(i),
+    detached: c.wheelDetached(i),
+    seat: c.wheelDetached(i) ? c.wheelSeat(i) : null,
+  }));
+}
+
+// One car's state for the draw side; its buffers go into `transfer`.
+function carState(id, car, readback, transfer) {
+  const vehicle = car.entity.get(Vehicle);
+  const c = vehicle.controller;
+  const solver = c.gpu?.solver;
+  const d = vehicle.drivetrain;
+  const steps = new Float32Array(car.poses.length * 8);
+  car.poses.forEach((s, i) => steps.set(s, i * 8));
+  car.poses = [];
+  const positions = readback && solver ? solver.positions.slice() : null;
+  transfer.push(steps.buffer);
+  if (positions) transfer.push(positions.buffer);
+  return {
+    id,
+    steps,
+    body: pose(vehicle.body),
+    wheels: wheelStates(c),
     speed: vehicle.speed,
     steer: vehicle.steer,
     braking: vehicle.braking,
     drivetrain: { rpm: d.rpm, gear: d.gear, pendingGear: d.pendingGear, throttle: d.throttle, fuel: d.fuel, exhaustBrake: d.exhaustBrake, clutch: d.clutch, shaftTorque: d.shaftTorque, engaged: { ...d.engaged } },
     positions,
     readbackHubs: solver?.readbackHubs ?? null,
+  };
+}
+
+function snapshot(readback) {
+  const transfer = [];
+  const message = {
+    type: 'state',
+    simTime: physics.simTime,
+    stepMs: physics.stepMs,
+    batch: physics.lastBatch,
+    cars: [...cars].map(([id, car]) => carState(id, car, readback, transfer)),
     // The props that moved (physics/props.js), for drawing.
     props: props ? props.moved() : null,
   };
-  const transfer = positions ? [positions.buffer, steps.buffer] : [steps.buffer];
   if (message.props) transfer.push(message.props.buffer);
   postMessage(message, transfer);
 }
@@ -142,16 +195,19 @@ const channel = new MessageChannel();
 channel.port1.onmessage = () => simulate();
 
 async function simulate() {
-  if (busy || !car) return;
+  if (busy || !cars.size) return;
   busy = true;
   try {
     const now = performance.now();
     const delta = Math.min((now - simLast) / 1000, 0.1);
     simLast = now;
     applyPending();
-    const p = car.get(Vehicle).body.translation();
-    colliders.update(p.x, p.z);
-    props?.update(p.x, p.z);
+    colliders.update(centres());
+    const player = playerCar();
+    if (player) {
+      const p = player.entity.get(Vehicle).body.translation();
+      props?.update(p.x, p.z);
+    }
     const before = physics.simTime;
     await stepPhysics(world, delta);
     if (physics.simTime > before) snapshot(true);
@@ -188,13 +244,15 @@ async function init(msg) {
   // Shared with the main thread's audio worklet: this thread writes the engine state every step.
   physics.audioFeed = msg.audioFeed ? new AudioFeed(msg.audioFeed) : null;
   physics.onStep = () => {
-    const b = car.get(Vehicle).body;
-    const t = b.translation();
-    const q = b.rotation();
-    stepPoses.push([physics.simTime, t.x, t.y, t.z, q.x, q.y, q.z, q.w]);
+    for (const car of cars.values()) {
+      const b = car.entity.get(Vehicle).body;
+      const t = b.translation();
+      const q = b.rotation();
+      car.poses.push([physics.simTime, t.x, t.y, t.z, q.x, q.y, q.z, q.w]);
+    }
   };
   colliders = createColliderStreamer({ rapier: RAPIER, world: physicsWorld, ecs: world, RockField, heightAt, rockCount: msg.rocks });
-  if (heightAt.buildingKit) props = createPropPhysics(RAPIER, physicsWorld, heightAt);
+  if (heightAt.town) props = createPropPhysics(RAPIER, physicsWorld, heightAt);
   if (heightAt.barriers) createBarrierPhysics(RAPIER, physicsWorld, heightAt);
   simLast = performance.now();
   postMessage({ type: 'ready' });
@@ -206,6 +264,12 @@ self.onmessage = async (e) => {
     if (msg.type === 'init') await init(msg);
     else if (msg.type === 'tick') {
       Object.assign(world.get(Input), msg.input);
+      // The other cars' drivers (an AI's pedals and steering), by car id; a car left out holds still.
+      for (const car of cars.values()) car.entity.get(Vehicle).input = null;
+      for (const [id, input] of msg.inputs ?? []) {
+        const car = cars.get(id);
+        if (car) car.entity.get(Vehicle).input = input;
+      }
       deformation.markChanged(msg.deformVersion, null);
       simulate();
     } else if (msg.type === 'tile') deformation.adoptTile(msg.key, msg.tile);
@@ -216,7 +280,7 @@ self.onmessage = async (e) => {
     else {
       pending.push(msg);
       // A spawn with no car yet (the first one) cannot wait for a batch.
-      if (!car && msg.type === 'spawn' && !busy) applyPending();
+      if (!cars.size && msg.type === 'spawn' && !busy) applyPending();
     }
   } catch (error) {
     postMessage({ type: 'error', message: String(error?.stack ?? error) });

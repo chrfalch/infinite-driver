@@ -1,14 +1,16 @@
 // Main-thread side of the physics worker (see physics/worker.js).
 //
-// main → worker: 'init' (terrain, settings, shared rut tiles), 'tick' (input, every frame),
-//   'spawn' (a car at a pose; also rebuilds and respawns), 'settings' (after any save), 'shift',
-//   'tile' (a new shared rut tile), 'clearDeformation'.
-// worker → main: 'ready', 'state' (after each batch: the chassis pose of every step, the newest
-//   poses of chassis and hubs, suspension, drivetrain, tyre particles), 'error'.
+// main → worker: 'init' (terrain, settings, shared rut tiles), 'tick' (the player's input and the
+//   other cars' inputs, every frame), 'spawn' (a car with an id at a pose, with its tyre model;
+//   also rebuilds and respawns), 'despawn' (a car by id), 'settings' (after any save), 'shift' (a
+//   car by id), 'tile' (a new shared rut tile), 'clearDeformation'.
+// worker → main: 'ready', 'state' (after each batch, for every car: the chassis pose of every
+//   step, the newest poses of chassis and hubs, suspension, drivetrain, tyre particles), 'error'.
 //
-// The draw code reads the car through RemoteBody and RemoteController, which offer the same fields
-// and methods as the local bodies and controller (body.translation(), wheelHubPose(i), gpu.solver.positions, …), filled
-// from the newest 'state'.
+// The draw code reads each car through RemoteBody and a remote controller (RemoteController for
+// the jointed car on GPU tyres, RemoteRaycastController for rigid wheels), which offer the same
+// fields and methods as the local bodies and controllers (body.translation(), wheelHubPose(i),
+// gpu.solver.positions, …), filled from the newest 'state'.
 import { CONTROLS } from '../controls.js';
 import { onSettingsSaved } from '../settings-store.js';
 import { count, sample } from '../perf.js';
@@ -43,6 +45,11 @@ class RemoteBody {
 }
 
 const noop = () => {};
+const SETTERS = [
+  'setWheelSteering', 'setWheelEngineForce', 'setWheelBrake', 'setWheelFrictionSlip', 'setWheelSuspensionRestLength',
+  'setWheelMaxSuspensionTravel', 'setWheelSuspensionStiffness', 'setWheelSuspensionCompression',
+  'setWheelSuspensionRelaxation', 'setWheelMaxSuspensionForce', 'setWheelSideFrictionStiffness', 'dispose',
+];
 
 // Stands in for the soft car's controller on the main thread (read-only; the worker drives).
 class RemoteController {
@@ -56,11 +63,7 @@ class RemoteController {
       pipelined: false,
       solver: { positions: new Float32Array(0), perTire, readbackHubs: null, rockList: [], ready: false, setParams: noop },
     };
-    for (const name of [
-      'setWheelSteering', 'setWheelEngineForce', 'setWheelBrake', 'setWheelFrictionSlip', 'setWheelSuspensionRestLength',
-      'setWheelMaxSuspensionTravel', 'setWheelSuspensionStiffness', 'setWheelSuspensionCompression',
-      'setWheelSuspensionRelaxation', 'setWheelMaxSuspensionForce', 'setWheelSideFrictionStiffness', 'dispose',
-    ]) this[name] = noop;
+    for (const name of SETTERS) this[name] = noop;
   }
   wheel(i) {
     return this.state?.wheels[i];
@@ -100,12 +103,46 @@ class RemoteController {
   }
 }
 
+// Stands in for Rapier's raycast vehicle (rigid wheels) on the main thread. Like Rapier's, it has
+// no `wheels`, `gpu` or `wheelHubPose`: the draw code tells the two kinds of car apart by those.
+class RemoteRaycastController {
+  constructor() {
+    this.state = null;
+    for (const name of SETTERS) this[name] = noop;
+  }
+  wheel(i) {
+    return this.state?.wheels[i];
+  }
+  numWheels() {
+    return WHEELS.length;
+  }
+  currentVehicleSpeed() {
+    return this.state?.speed ?? 0;
+  }
+  wheelSuspensionLength(i) {
+    return this.wheel(i)?.suspension ?? null;
+  }
+  wheelSteering(i) {
+    return this.wheel(i)?.steering ?? 0;
+  }
+  wheelRotation(i) {
+    return this.wheel(i)?.rotation ?? 0;
+  }
+  wheelIsInContact(i) {
+    return this.wheel(i)?.contact ?? false;
+  }
+  wheelContactPoint(i) {
+    return this.wheel(i)?.contactPoint ?? null;
+  }
+}
+
 export function createPhysicsClient({ terrain, rocks, deformation, slowGpu = 0, audioFeed = null }) {
   const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
   let ready = null;
   let failed = null;
   let nextId = 1;
-  let current = null; // { id, vehicle } of the car the worker simulates
+  // The cars the worker simulates, by id: the Vehicle object each one's state is written to.
+  const cars = new Map();
   const client = { simTime: 0, stepMs: 0, error: null, propPoses: [] };
 
   // Shared rut tiles: announce new ones; a clear on either side clears both.
@@ -145,12 +182,18 @@ export function createPhysicsClient({ terrain, rocks, deformation, slowGpu = 0, 
       count('simSeconds', b.steps / 120);
     }
     count('droppedSeconds', msg.batch?.dropped ?? 0);
-    if (!current || msg.carId !== current.id) return; // a car that was replaced since
-    const v = current.vehicle;
+    // (A car that was replaced or taken out since is skipped.)
+    for (const state of msg.cars) {
+      const v = cars.get(state.id);
+      if (v) receiveCar(v, state);
+    }
+  }
+
+  function receiveCar(v, msg) {
     const c = v.controller;
     c.state = msg;
     v.body.set(msg.body);
-    msg.wheels.forEach((w, i) => c.wheels[i].hub.set(w.hub));
+    if (c.wheels) msg.wheels.forEach((w, i) => c.wheels[i].hub.set(w.hub));
     v.speed = msg.speed;
     v.steer = msg.steer;
     v.braking = msg.braking;
@@ -160,7 +203,7 @@ export function createPhysicsClient({ terrain, rocks, deformation, slowGpu = 0, 
     for (let k = 0; k < s.length; k += 8) {
       pushPose(history, s[k], { x: s[k + 1], y: s[k + 2], z: s[k + 3] }, { x: s[k + 4], y: s[k + 5], z: s[k + 6], w: s[k + 7] });
     }
-    if (msg.positions) {
+    if (msg.positions && c.gpu) {
       const solver = c.gpu.solver;
       solver.positions = msg.positions;
       solver.perTire = msg.positions.length / 4 / WHEELS.length;
@@ -169,31 +212,36 @@ export function createPhysicsClient({ terrain, rocks, deformation, slowGpu = 0, 
     }
   }
 
-  // A car for the draw code, simulated by the worker from `pose` on. With `keepDrivetrain`
-  // (rebuilds) the worker keeps the old car's gearbox and engine state.
-  client.spawn = (pose, { keepDrivetrain = false } = {}) => {
+  // A car for the draw code, simulated by the worker from `pose` on, with tyre model `tires`
+  // ('gpu' or 'rigid'; the worker has no Rapier soft tyres). `keepDrivetrain`: the id of the car
+  // it replaces (rebuilds), whose gearbox and engine state the worker carries on with.
+  client.spawn = (pose, { keepDrivetrain = 0, tires = 'gpu', player = true } = {}) => {
     const id = nextId++;
     const body = new RemoteBody(pose.position, pose.rotation, pose.linvel, pose.angvel);
-    const controller = new RemoteController(pose);
+    const controller = tires === 'rigid' ? new RemoteRaycastController() : new RemoteController(pose);
     const drivetrain = {
+      carId: id,
       rpm: 0,
       gear: 0,
       pendingGear: null,
       params: DRIVETRAIN,
-      shiftUp: () => worker.postMessage({ type: 'shift', dir: 1 }),
-      shiftDown: () => worker.postMessage({ type: 'shift', dir: -1 }),
+      shiftUp: () => worker.postMessage({ type: 'shift', id, dir: 1 }),
+      shiftDown: () => worker.postMessage({ type: 'shift', id, dir: -1 }),
     };
     const vehicle = { body, controller, drivetrain };
-    current = { id, vehicle };
-    pendingSpawnId = id;
-    worker.postMessage({ type: 'spawn', id, keepDrivetrain, ...JSON.parse(JSON.stringify(pose)) });
-    return vehicle;
+    cars.set(id, vehicle);
+    worker.postMessage({ type: 'spawn', id, keepDrivetrain, tires: tires === 'rigid' ? 'rigid' : 'gpu', player, ...JSON.parse(JSON.stringify(pose)) });
+    return { id, ...vehicle };
   };
 
-  // The entity's Vehicle object for the car just spawned (speed, steer, braking are written there).
-  let pendingSpawnId = 0;
-  client.attach = (vehicle) => {
-    if (current?.id === pendingSpawnId) current.vehicle = vehicle;
+  // The entity's Vehicle object for car `id` (its speed, steer, braking are written there).
+  client.attach = (id, vehicle) => {
+    if (cars.has(id)) cars.set(id, vehicle);
+  };
+
+  client.despawn = (id) => {
+    if (!cars.delete(id)) return;
+    worker.postMessage({ type: 'despawn', id });
   };
 
   // Debugging: what the worker sees at (x, z) (see 'probe' in worker.js).
@@ -205,7 +253,8 @@ export function createPhysicsClient({ terrain, rocks, deformation, slowGpu = 0, 
       worker.postMessage({ type: 'probe', id, x, z });
     });
 
-  client.tick = (input) => worker.postMessage({ type: 'tick', input: { ...input }, deformVersion: deformation.version });
+  // The player's input, and the other cars' (`inputs`: [id, input] pairs).
+  client.tick = (input, inputs = []) => worker.postMessage({ type: 'tick', input: { ...input }, inputs, deformVersion: deformation.version });
 
   // Resolves when the worker is ready; rejects if it fails to start (the caller then keeps the
   // physics on the main thread).

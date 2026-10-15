@@ -18,11 +18,11 @@ import { createBeadlockWheel } from './beadlock-wheel.js';
 import { LUG_HEIGHT, createStaticMtTyre } from './mt-tyre.js';
 import { TIRE } from '../tire/config.js';
 import { torusMesh } from '../tire/soft-tire.js';
-import { createTubeChassis } from './tube-chassis.js';
+import { brakeLightMaterial, createTubeChassis } from './tube-chassis.js';
 import { createDragsterEngine } from './dragster-engine.js';
 import { mergeByMaterial } from './merge-geometry.js';
 import { createHeadlights } from './headlights.js';
-import { BODY_HEADLAMP, createTrophyBody } from './trophy-body.js';
+import { BODY_HEADLAMP, bodyMaterials, createTrophyBody } from './trophy-body.js';
 import { frameGeometry, ifsRack, suspensionMounts } from '../vehicle/frame-geometry.js';
 import { rimInnerFace } from './wheel-inset.js';
 
@@ -92,7 +92,12 @@ export const ENGINE = { x: -1.78, y: -0.15, scale: 0.92 };
 // Chassis-local: +x forward, +y up, +z right. Origin is the physics body origin.
 // A sand buggy: one welded tube chassis (see tube-chassis.js), bucket seats, steering, and running
 // gear, with trophy-truck body panels over it unless they are switched off (CAR.trophyBody).
-export function createCarMesh() {
+// `livery`: a car other than the player's, in its own paint and with its own brake lights
+// (userData.brakeLight), and no spot lights (each light costs every lit material). The player's
+// car (no livery) has the panel's paint and the shared brake light material. `soft`: its wheels are
+// rims for soft tyres (the player's, from CAR, unless given).
+export function createCarMesh({ livery = null, soft = CAR.softTires } = {}) {
+  const brakeLight = livery ? brakeLightMaterial.clone() : brakeLightMaterial;
   const g = frameGeometry();
   const car = new Group();
   // Parts fixed to the chassis go into `body`, merged into one mesh per material at the end.
@@ -147,7 +152,10 @@ export function createCarMesh() {
   const clamp = steer.wheelCenter.clone().lerp(steer.joint1, 0.76);
   body.add(bar(clamp, new Vector3(g.dash.x, g.dash.y, clamp.z), 0.012, frame));
   body.add(box(0.05, 0.05, 0.06, frame, clamp.x, clamp.y, clamp.z));
-  car.add(mergeByMaterial(body));
+  const merged = mergeByMaterial(body);
+  if (livery) merged.traverse((o) => o.material === brakeLightMaterial && (o.material = brakeLight));
+  car.add(merged);
+  car.userData.brakeLight = brakeLight;
 
   // Blown V8 in the engine bay, flywheel and gearbox toward the seats, pulleys and belt at the back,
   // the hat's scoop facing forward; its moving parts follow the drivetrain each frame (see syncEngine).
@@ -157,9 +165,12 @@ export function createCarMesh() {
 
   // Trophy-truck body panels over the frame (loaded with the model; the cage, seats and V8 show
   // through the window openings and the open bed).
-  if (CAR.trophyBody) car.add(createTrophyBody({ stretch: frameStretch() }).object);
+  const materials = livery ? bodyMaterials(livery, brakeLight) : null;
+  if (CAR.trophyBody) car.add(createTrophyBody({ stretch: frameStretch(), materials }).object);
+  // This car's own materials, disposed with it (see despawnCar).
+  car.userData.ownMaterials = materials ? Object.values(materials) : [];
 
-  const axles = createAxleRig();
+  const axles = createAxleRig({ soft });
   car.add(axles.group);
 
   // Whip antenna on the rear of the roof; its whip and pennant move each frame (see syncAntenna).
@@ -168,9 +179,11 @@ export function createCarMesh() {
   car.userData.antenna = antenna;
 
   // Headlights in the nose lamps or the body's headlamps (switched by H, see syncLights).
-  const headlights = createHeadlights(CAR.trophyBody ? { lamp: BODY_HEADLAMP } : {});
-  car.add(headlights);
-  car.userData.headlights = headlights;
+  if (!livery) {
+    const headlights = createHeadlights(CAR.trophyBody ? { lamp: BODY_HEADLAMP } : {});
+    car.add(headlights);
+    car.userData.headlights = headlights;
+  }
 
   return { object: car, steeringWheel, axles, antenna };
 }
@@ -213,7 +226,7 @@ export function createWheelRig(index, { softTire = null } = {}) {
   const spin = mergeByMaterial(softTire ? createBeadlockWheel(softTire.rimRadius, softTire.width * 0.85, side) : createTyre(side));
   steer.add(spin);
   // Knuckle stays with the steering but not the spin.
-  const knuckle = box(0.14, 0.26, 0.08, frame, 0, 0, -side * (rimInnerFace() + 0.02));
+  const knuckle = box(0.14, 0.26, 0.08, frame, 0, 0, -side * (rimInnerFace(!!softTire) + 0.02));
   steer.add(knuckle);
   hub.add(steer);
   root.add(hub);
