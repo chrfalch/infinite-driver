@@ -19,6 +19,7 @@ function updateGpuTyreWorld(world, vehicle) {
   if (!last || Math.hypot(last.x - p.x, last.z - p.z) > 3) {
     const rocks = [];
     world.query(RockField).forEach((e) => rocks.push(...e.get(RockField).rocks));
+    if (heightAt.barrierRocks) rocks.push(...heightAt.barrierRocks);
     updateGpuRocks(solver, rocks, p.x, p.z);
     solver.rockCentre = { x: p.x, z: p.z };
   }

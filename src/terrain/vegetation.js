@@ -18,7 +18,7 @@ function chunkSeed(cx, cz) {
 export function generatePlants(heightAt, cx, cz) {
   if (heightAt.town) return generateTownPlants(heightAt, cx, cz);
   if (heightAt.forestAt) return generateSpruces(heightAt, cx, cz);
-  if (!heightAt.sample) return [];
+  if (!heightAt.sample || heightAt.world === 'stadium') return [];
   if (heightAt.world === 'river') return generateRiverPlants(heightAt, cx, cz);
   const rand = mulberry32(chunkSeed(cx, cz));
   const plants = [];

@@ -49,6 +49,8 @@ import { loadYardKit } from './render/yard-kit-mesh.js';
 import { createPropsView } from './render/props-mesh.js';
 import { createTrackMarkersView } from './render/track-markers-mesh.js';
 import { createPropPhysics } from './physics/props.js';
+import { createBarrierPhysics } from './physics/barriers.js';
+import { createStadiumView } from './render/stadium-mesh.js';
 import { GroundSurface, PATCH_N } from './render/ground-surface.js';
 import { showRutsOnSheet } from './render/rock-surface.js';
 import { DEFORM_CELL } from './terrain/deformation.js';
@@ -163,6 +165,11 @@ export async function main(loading) {
   const propPhysics = heightAt.buildingKit && physicsWorld ? createPropPhysics(RAPIER, physicsWorld, heightAt) : null;
   // The dry river's course markers: flags, chevron boards, tyre stacks and the start gantry.
   const trackMarkers = heightAt.beds ? createTrackMarkersView(render.scene, heightAt) : null;
+  // The stadium's rails, wall, gantry and stands: drawn here, the walls simulated where the physics runs.
+  if (heightAt.barriers) {
+    createStadiumView(render.scene, heightAt);
+    if (physicsWorld) createBarrierPhysics(RAPIER, physicsWorld, heightAt);
+  }
 
   world.add(Time, Input, TerrainStreaming);
   world.get(Input).headlights = night;
@@ -410,6 +417,8 @@ function syncRemoteSolver(world) {
   if (!last || Math.hypot(last.x - p.x, last.z - p.z) > 3) {
     const rocks = [];
     world.query(RockField).forEach((e) => rocks.push(...e.get(RockField).rocks));
+    const { heightAt } = world.get(HeightField);
+    if (heightAt.barrierRocks) rocks.push(...heightAt.barrierRocks);
     updateGpuRocks(solver, rocks, p.x, p.z);
     solver.rockCentre = { x: p.x, z: p.z };
   }

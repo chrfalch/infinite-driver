@@ -17,8 +17,8 @@ describe('world choice', () => {
     expect(worldMode('?terrain=flat')).toBe('flat');
   });
 
-  it('offers the canyon, the dry river, the snowfield and the dark and sunny towns', () => {
-    expect(Object.values(WORLDS)).toEqual(['canyon', 'river', 'snow', 'town', 'daytown']);
+  it('offers the canyon, the dry river, the snowfield, the dark and sunny towns and the stadium', () => {
+    expect(Object.values(WORLDS)).toEqual(['canyon', 'river', 'snow', 'town', 'daytown', 'stadium']);
   });
 });
 
