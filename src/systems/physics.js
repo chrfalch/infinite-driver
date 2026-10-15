@@ -1,6 +1,7 @@
 import { Deformation, HeightField, Input, IsPlayer, Physics, RigidBody, RockField, Time, Transform, Vehicle } from '../ecs/traits.js';
 import { updateGpuGround, updateGpuRocks } from '../tire/gpu-tires.js';
-import { GPU_TIRE } from '../tire/config.js';
+import { CONTROLS } from '../controls.js';
+import { effectiveGpuTire, GPU_TIRE, surfaceGrip } from '../tire/config.js';
 import { MAX_STEPS } from '../tire/gpu-tire-solver.js';
 import { applyDriverInput } from '../vehicle/physics.js';
 import { createPoseHistory, pushPose } from './interpolation.js';
@@ -22,6 +23,21 @@ function updateGpuTyreWorld(world, vehicle) {
     if (heightAt.barrierRocks) rocks.push(...heightAt.barrierRocks);
     updateGpuRocks(solver, rocks, p.x, p.z);
     solver.rockCentre = { x: p.x, z: p.z };
+  }
+}
+
+// Rigid-wheeled cars grip as the ground under them lets the GPU tyres (see applyDriverInput): the
+// grip is looked up once per batch at the car's centre.
+const groundSample = { road: 0, rock: 0 };
+function updateSurfaceGrip(world, vehicles) {
+  const heightAt = world.get(HeightField)?.heightAt;
+  let gpu = null;
+  for (const vehicle of vehicles) {
+    if (vehicle.controller.wheels) continue;
+    gpu ??= effectiveGpuTire(GPU_TIRE, CONTROLS.performance);
+    const p = vehicle.body.translation();
+    const ground = heightAt?.groundAt ? heightAt.groundAt(p.x, p.z, groundSample) : null;
+    vehicle.surfaceGrip = surfaceGrip(gpu, ground);
   }
 }
 
@@ -59,6 +75,7 @@ export async function stepPhysics(world, frameDelta = null) {
   count('droppedSeconds', wanted - physics.accumulator);
   const tw = performance.now();
   for (const v of vehicles) if (v.controller.gpu) updateGpuTyreWorld(world, v);
+  updateSurfaceGrip(world, vehicles);
   sample('phys.groundUpload', performance.now() - tw);
 
   const t0 = performance.now();

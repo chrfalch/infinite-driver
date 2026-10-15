@@ -193,6 +193,17 @@ export function effectiveGpuTire(gpu, performance, ground = GROUND, snow = snowC
   return { ...withSoil, substeps: Math.min(gpu.substeps, 3), iterations: Math.min(gpu.iterations, 6), segmentsAround: 32, segmentsAcross: 8 };
 }
 
+// The grip (μ) the GPU tyres get on the ground at a point, from effectiveGpuTire's settings and
+// heightAt.groundAt's { road, rock } there: the solver's dry-ground grip (dirt blended toward the
+// road's by its share, bare rock its own), or fresh snow's on snow. Rigid wheels take theirs from
+// it (see applyDriverInput), so they grip what the tyres would.
+export function surfaceGrip(gpu, ground) {
+  if (gpu.snow) return gpu.friction;
+  if (ground?.rock > 0.5) return gpu.rockFriction;
+  const road = Math.min(1, Math.max(0, ground?.road ?? 0));
+  return gpu.friction + (gpu.roadFriction - gpu.friction) * road;
+}
+
 // Grip on soil for the ground settings, as a multiple of the tyre's friction setting.
 export function dirtGrip(ground) {
   const g = SURFACE_GRIP;

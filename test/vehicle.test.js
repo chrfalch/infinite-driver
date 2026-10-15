@@ -151,6 +151,34 @@ describe('car physics', () => {
     expect(peakLat).toBeLessThan(1.5);
   });
 
+  it('corners on the grip of the ground under it (as the GPU tyres would)', () => {
+    // Steady circles at full lock, a little throttle: the yaw rate times the speed.
+    const lateral = (surfaceGrip) => {
+      const { state, run } = setup();
+      state.surfaceGrip = surfaceGrip;
+      run(2, idle);
+      state.body.setLinvel({ x: 12, y: 0, z: 0 }, true);
+      let sum = 0;
+      let n = 0;
+      let t = 0;
+      run(5, { ...idle, throttle: 0.3, steer: 1 }, () => {
+        t += DT;
+        if (t < 2) return;
+        const v = state.body.linvel();
+        sum += Math.hypot(v.x, v.z) * Math.abs(state.body.angvel().y);
+        n++;
+      });
+      return sum / n / 9.81;
+    };
+    const dirt = lateral(0.56);
+    const rock = lateral(1.1);
+    console.log('lateral (g) on dirt', dirt.toFixed(2), 'on rock', rock.toFixed(2));
+    // The GPU tyres hold about 0.45 g on the stadium's dirt.
+    expect(dirt).toBeGreaterThan(0.3);
+    expect(dirt).toBeLessThan(0.6);
+    expect(rock).toBeGreaterThan(dirt * 1.3);
+  });
+
   it('climbs over a rock with visible suspension travel and stays upright', () => {
     const { world, state, run } = setup();
     // A rounded rock, 0.3 m tall, in the path of the left wheels.

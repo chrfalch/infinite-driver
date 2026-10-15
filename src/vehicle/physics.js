@@ -215,10 +215,13 @@ export function applyDriverInput(state, input, dt, car = CAR) {
     controller.setWheelEngineForce(i, drive);
     controller.setWheelBrake(i, brakes[i]);
   }
-  // The handbrake locks the rears, so they slide more easily.
-  const rearSlip = input.handbrake ? car.frictionSlip * 0.55 : car.frictionSlip;
-  controller.setWheelFrictionSlip(2, rearSlip);
-  controller.setWheelFrictionSlip(3, rearSlip);
+  // Raycast car: the wheels grip as the ground under the car lets the soft tyres (state.surfaceGrip,
+  // μ; see systems/physics.js). The handbrake locks the rears, so they slide more easily.
+  if (!controller.wheels) {
+    const slip = car.frictionSlip * (state.surfaceGrip ?? 1);
+    const rearSlip = input.handbrake ? slip * 0.55 : slip;
+    for (let i = 0; i < 4; i++) controller.setWheelFrictionSlip(i, i < 2 ? slip : rearSlip);
+  }
 
   // Air drag along the velocity, and rolling resistance along the forward ground speed only.
   // Forces are reset every step so nothing stale is left over. The soft tyres lose energy in the
