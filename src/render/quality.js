@@ -2,9 +2,11 @@ import { CONTROLS } from '../controls.js';
 
 // Graphics quality levels. Phones spend most of their GPU time on pixels and the shadow map, and
 // the tyre solver shares the GPU queue with drawing, so a lighter frame also speeds up physics.
+// Depth of field costs about 30 % of the GPU's frame (two extra full-screen passes), so low leaves
+// it out whatever the panel's checkbox says.
 export const QUALITY_LEVELS = {
-  high: { maxPixelRatio: 2, shadowMapSize: 2048 },
-  low: { maxPixelRatio: 1.5, shadowMapSize: 1024 },
+  high: { maxPixelRatio: 2, shadowMapSize: 2048, depthOfField: true },
+  low: { maxPixelRatio: 1.5, shadowMapSize: 1024, depthOfField: false },
 };
 
 // ?quality=high|low overrides the saved choice. 'auto' is high everywhere for now: on an iPhone,
