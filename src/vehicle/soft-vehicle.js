@@ -2,7 +2,7 @@ import { TIRE } from '../tire/config.js';
 import { MAX_TIRES } from '../tire/gpu-tire-solver.js';
 import { GROUP, createSoftTire, groups } from '../tire/soft-tire.js';
 import { CAR, DRIVETRAIN } from './config.js';
-import { WHEELS, frameStretch, wheelMount } from './physics.js';
+import { WHEELS, addCarShell, frameStretch, wheelMount } from './physics.js';
 import { DESIGN_WHEEL_MOUNT_Y, IFS_ARM_LIMIT, IFS_RACK, ifsCorner, ifsRack, ifsSpindleLift, spindleAlignment } from './frame-geometry.js';
 
 const DOWN = { x: 0, y: -1, z: 0 };
@@ -982,6 +982,7 @@ export function createSoftCarBody(RAPIER, world, position, car = CAR, tire = TIR
   );
   const controller = new JointedVehicle(RAPIER, world, body, car, tire, options);
   controller.soundColliders.set(chassis.handle, 'chassis');
+  controller.soundColliders.set(addCarShell(RAPIER, world, body, car).handle, 'chassis');
   // Every part moves with the chassis as one rigid body: v = v0 + ω × r.
   for (const part of [body, ...controller.bodies]) {
     const t = part.translation();

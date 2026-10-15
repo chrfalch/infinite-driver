@@ -22,7 +22,8 @@ import {
 } from './ecs/traits.js';
 import { createRenderer } from './render/scene.js';
 import { createGauges } from './ui/gauges.js';
-import { createMinimap } from './ui/minimap.js';
+import { createMinimap, forwardOf } from './ui/minimap.js';
+import { LIVERIES } from './render/trophy-body.js';
 import { attachZoom, followCamera, isFollowCamera, orbitCamera, toggleFollowCamera } from './systems/camera.js';
 import { attachKeyboard, readCameraKeys, readInput } from './systems/input.js';
 import { CONTROLS } from './controls.js';
@@ -63,6 +64,9 @@ import { createPhysicsClient, workerGpuSupported } from './physics/client.js';
 import { ROCK_COUNT, loadTerrain, startChunkWorker } from './systems/terrain.js';
 import { playerTires } from './vehicle/config.js';
 import { configuredRivals, gridSlot } from './vehicle/cars.js';
+import { createCourse, gridSpot } from './ai/course.js';
+import { createDriver } from './ai/driver.js';
+import { updateDrivers } from './systems/ai.js';
 import { updateGpuGround, updateGpuRocks } from './tire/gpu-tires.js';
 import { createTouchControls } from './ui/touch-controls.js';
 import { count, reportError, sample, startOverlay, timed } from './perf.js';
@@ -138,6 +142,10 @@ export async function main(loading) {
 
   // The other cars (?rivals=rigid,gpu: each its own tyre model; see vehicle/cars.js).
   const rivals = configuredRivals();
+  // The AI drivers' pace (a share of the course's speed profile) and, for tuning, the cornering and
+  // braking the profile allows (m/s², see speedProfile).
+  const aiPace = Number(params.get('aipace') ?? 1);
+  const aiGrip = { ...(params.get('ailateral') && { lateral: Number(params.get('ailateral')) }), ...(params.get('aibraking') && { braking: Number(params.get('aibraking')) }) };
   // Physics runs in a worker (with its own GPU device) for the GPU tyres when the browser has
   // WebGPU in workers; ?physics=main keeps it on this thread. Other tyre modes for the player's
   // car stay here, and so does everything when another car runs Rapier's soft tyres (the worker
@@ -209,16 +217,23 @@ export async function main(loading) {
 
   // The car starts just above the ground at the origin (on the road or river bed, facing along it),
   // above the highest ground under it so no wheel starts inside a slab.
-  const yaw = heightAt.roadHeading ? heightAt.roadHeading(0, 0) : 0;
-  const startPose = (x, z, tires) => ({
+  const startYaw = heightAt.roadHeading ? heightAt.roadHeading(0, 0) : 0;
+  const startPose = (x, z, tires, yaw = startYaw) => ({
     position: { x, y: footprint(heightAt, x, z, yaw).max + startHeight(tires), z },
     rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
   });
-  spawnCar(world, startPose(0, 0, playerTires()));
-  // The other cars line up behind it.
+  // On a course (the stadium) the cars start two abreast on a grid along it, and the others are
+  // driven by AI drivers (?ai=0 leaves them standing); elsewhere they line up behind the player's.
+  const course = createCourse(heightAt);
+  const spot = (n) => (course && rivals.length ? gridSpot(course, n) : { ...gridSlot(0, 0, startYaw, n), yaw: startYaw });
+  const ai = course && params.get('ai') !== '0';
+  const first = spot(0);
+  spawnCar(world, startPose(first.x, first.z, playerTires(), first.yaw));
   rivals.forEach((rival, i) => {
-    const { x, z } = gridSlot(0, 0, yaw, i + 1);
-    spawnCar(world, { ...startPose(x, z, rival.tires), tires: rival.tires, livery: rival.livery, player: false, slot: i + 1 });
+    const { x, z, yaw } = spot(i + 1);
+    // A spread of pace through the field (?aipace= scales it).
+    const driver = ai ? createDriver(course, { ...aiGrip, pace: aiPace * (1 - 0.03 * (i % 4)), seed: i + 1 }) : null;
+    spawnCar(world, { ...startPose(x, z, rival.tires, yaw), tires: rival.tires, livery: rival.livery, player: false, driver, slot: i + 1 });
   });
   const panel = createTuningPanel(world, { heightAt });
   const touch = createTouchControls({ onRespawn: () => requestRespawn(world, heightAt), onCamera: () => toggleFollowCamera() });
@@ -321,6 +336,8 @@ export async function main(loading) {
     // Safari shows a white canvas for any animation frame that draws nothing, so an error in a
     // system must not skip the draw: it is logged (and counted in the ?perf overlay) instead.
     try {
+      // The AI drivers set their cars' inputs for this frame's physics.
+      timed('sys.ai', () => updateDrivers(world));
       if (remote) {
         // The worker steps on its own clock; send it this frame's input and take its newest time.
         applyPendingCarAction();
@@ -367,8 +384,13 @@ export async function main(loading) {
         const canvas = render.renderer.domElement;
         gauges.layout(canvas.clientWidth, canvas.clientHeight, touch.isVisible(), minimap?.root.offsetWidth ?? 0);
         const vehicle = player.get(Vehicle);
-        if (minimap) timed('sys.minimap', () => minimap.update(vehicle.body.translation(), vehicle.body.rotation()));
+        if (minimap) timed('sys.minimap', () => minimap.update(vehicle.body.translation(), vehicle.body.rotation(), otherCars(world)));
         audio?.update(vehicle, world.get(Soil), render.activeCamera);
+        if (audio) {
+          const others = [];
+          world.query(Vehicle).forEach((car) => car.has(IsPlayer) || others.push(car.get(Vehicle)));
+          audio.updateRivals(vehicle, others, render.activeCamera);
+        }
         gauges.update(vehicle, time.delta, { follow: isFollowCamera(), perf: CONTROLS.showPerf ? perfLines(vehicle) : null, throttleLock: world.get(Input).throttleLock, headlights: world.get(Input).headlights });
         { const v = player.get(Vehicle).body.linvel(); sample('speed.kmh', Math.hypot(v.x, v.z) * 3.6); }
       }
@@ -406,15 +428,19 @@ export async function main(loading) {
       world.query(Vehicle).forEach((car) => cars.push(car));
       return cars;
     },
+    // The course the AI drivers drive (null in worlds without one).
+    course,
     // Another car at (x, z) facing `yaw`, on tyre model `tires` (see TIRE_MODES); drive it by setting
-    // its Vehicle's `input` ({ throttle, brake, steer, handbrake }). Returns its entity.
-    addCar: ({ x, z, yaw = 0, tires = 'rigid', livery = 'red', input = null }) =>
+    // its Vehicle's `input` ({ throttle, brake, steer, handbrake }), or give it an AI driver
+    // (`ai: true`, or options for createDriver; on a course). Returns its entity.
+    addCar: ({ x, z, yaw = 0, tires = 'rigid', livery = 'red', input = null, ai: aiOptions = null }) =>
       spawnCar(world, {
         position: { x, y: footprint(heightAt, x, z, yaw).max + startHeight(tires), z },
         rotation: { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
         tires,
         livery,
         input,
+        driver: aiOptions && course ? createDriver(course, aiOptions === true ? {} : aiOptions) : null,
         player: false,
       }),
     // Takes a car out (at the start of the next frame).
@@ -462,6 +488,20 @@ function syncRemoteSolver(world) {
       solver.rockCentre = { x: p.x, z: p.z };
     }
   });
+}
+
+// The other cars for the minimap: where each is, which way it faces, its paint.
+function otherCars(world) {
+  const cars = [];
+  world.query(Vehicle, View).forEach((car) => {
+    if (car.has(IsPlayer)) return;
+    const { body } = car.get(Vehicle);
+    const p = body.translation();
+    const f = forwardOf(body.rotation());
+    const livery = LIVERIES[car.get(View).object.userData.spec?.livery] ?? LIVERIES.red;
+    cars.push({ x: p.x, z: p.z, fx: f.x, fz: f.z, colour: livery.base });
+  });
+  return cars;
 }
 
 // The other cars' drivers for the worker: [id, input] for each car with an input of its own.

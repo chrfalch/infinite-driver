@@ -1,4 +1,5 @@
 import { CAR } from './config.js';
+import { GROUP, groups } from '../tire/soft-tire.js';
 
 export const WHEELS = [
   { name: 'FL', front: true },
@@ -33,6 +34,30 @@ export function wheelMount(i, car = CAR) {
   };
 }
 
+// The shell a car runs into other cars with: a rounded box over the body and the tyres (bumper to
+// bumper, tyre to tyre, from the floor pan to the roll cage), in a collision group of its own that
+// meets only other cars' shells. The cars' own colliders keep to the ground and the world (the
+// jointed car's chassis box is narrower than its track, and its GPU tyres are not Rapier's at all),
+// so without it cars drive through each other. It has no mass of its own.
+export const SHELL = Object.freeze({ halfLength: 2.35, halfWidth: 1.2, bottom: -0.3, top: 0.95, round: 0.15 });
+export function addCarShell(RAPIER, world, body, car = CAR) {
+  const hx = SHELL.halfLength + frameStretch(car) - SHELL.round;
+  const hy = (SHELL.top - SHELL.bottom) / 2 - SHELL.round;
+  const hz = SHELL.halfWidth - SHELL.round;
+  return world.createCollider(
+    RAPIER.ColliderDesc.roundCuboid(hx, hy, hz, SHELL.round)
+      .setTranslation(0, (SHELL.top + SHELL.bottom) / 2, 0)
+      .setDensity(0)
+      .setFriction(0.3)
+      .setRestitution(0.1)
+      .setCollisionGroups(groups(GROUP.CAR, GROUP.CAR))
+      // Its contact forces are reported for the sound, as the chassis' (see systems/physics.js).
+      .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+      .setContactForceEventThreshold(300),
+    body,
+  );
+}
+
 export function createCarBody(RAPIER, world, position, car = CAR) {
   const body = world.createRigidBody(
     RAPIER.RigidBodyDesc.dynamic()
@@ -57,6 +82,7 @@ export function createCarBody(RAPIER, world, position, car = CAR) {
     body,
   );
 
+  addCarShell(RAPIER, world, body, car);
   const controller = world.createVehicleController(body);
   for (let i = 0; i < WHEELS.length; i++) {
     controller.addWheel(

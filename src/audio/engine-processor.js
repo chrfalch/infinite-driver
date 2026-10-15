@@ -21,6 +21,10 @@
 //                                     steering and body (car-synth.js)
 //        { type: 'listener', pos }    where each part is heard ({ l, r } gains; mix.js CENTERED)
 //   out: { type: 'status', feedSteps } once a second: how many steps the feed has seen
+//
+// The 'rivals' processor in this module plays the other cars' engines (rival-voices.js):
+//   in:  { type: 'cars', cars }      the cars to hear, nearest first ({ id, rpm, fuel, … , l, r })
+//        { type: 'mix', values }, { type: 'preset', preset }   as above
 import { EngineSynth, LAYERS } from './engine-synth.js';
 import { SampleEngine } from './sample-engine.js';
 import { TURBO_DIESEL_I4 } from './engine-presets.js';
@@ -29,6 +33,7 @@ import { GroundSynth } from './ground-synth.js';
 import { CarSynth } from './car-synth.js';
 import { Foley } from './foley.js';
 import { CENTERED, softKnee } from './mix.js';
+import { RivalVoices } from './rival-voices.js';
 
 const TURBO_ONLY = Object.fromEntries(Object.keys(LAYERS).map((k) => [k, ['whistle', 'whoosh', 'flutter', 'wastegate'].includes(k) ? 1 : 0]));
 const IDLE = { rpm: TURBO_DIESEL_I4.idleRpm, fuel: 0.13, exhaustBrake: 0, throttle: 0 };
@@ -169,3 +174,37 @@ class EngineProcessor extends AudioWorkletProcessor {
 }
 
 registerProcessor('engine', EngineProcessor);
+
+// The other cars' engines, on their own node (so the player's engine is mixed exactly as before).
+class RivalsProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    const { mix = null, preset = null } = options.processorOptions ?? {};
+    this.voices = new RivalVoices(sampleRate, preset ?? TURBO_DIESEL_I4);
+    if (mix) this.voices.setMix(mix);
+    this.port.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === 'cars') this.voices.set(m.cars);
+      else if (m.type === 'mix') this.voices.setMix(m.values);
+      else if (m.type === 'preset') this.voices.setPreset(m.preset);
+    };
+  }
+
+  process(_inputs, outputs) {
+    const out = outputs[0];
+    const left = out[0];
+    if (!left) return true;
+    const right = out[1] ?? (this.monoRight ??= new Float32Array(left.length));
+    left.fill(0);
+    right.fill(0);
+    this.voices.render(left, right);
+    for (let i = 0; i < left.length; i++) {
+      left[i] = softKnee(left[i]);
+      right[i] = softKnee(right[i]);
+    }
+    if (!out[1]) for (let i = 0; i < left.length; i++) left[i] = (left[i] + right[i]) / 2;
+    return true;
+  }
+}
+
+registerProcessor('rivals', RivalsProcessor);

@@ -32,10 +32,11 @@ const ZERO = { x: 0, y: 0, z: 0 };
 // Each car has its own tyre model, `tires` (see TIRE_MODES; the player's from CAR by default), so
 // one car can run on the GPU tyre solver and the next on rigid wheels. The `player`'s car is the
 // one the keyboard drives and the camera follows; another car is driven through its Vehicle's
-// `input` (it stands still without one) and drawn in its own `livery`.
-export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, angvel = ZERO, steer = 0, drivetrain = null, tires = playerTires(), player = true, livery = null, input = null, slot = null }) {
+// `input` (it stands still without one), by its AI `driver` if it has one (see systems/ai.js), and
+// drawn in its own `livery`.
+export function spawnCar(world, { position, rotation = IDENTITY, linvel = ZERO, angvel = ZERO, steer = 0, drivetrain = null, tires = playerTires(), player = true, livery = null, input = null, driver = null, slot = null }) {
   const { remote } = world.get(Physics);
-  const spec = { tires, player, livery: player ? null : livery, input, slot: slot ?? nextSlot(world, player) };
+  const spec = { tires, player, livery: player ? null : livery, input, driver, slot: slot ?? nextSlot(world, player) };
   // Physics in the worker: it simulates the car; here it is only drawn (see physics/client.js).
   // (A rebuild keeps the gearbox and engine state: the worker's, of the car it replaces.)
   if (remote) return spawnRemoteCar(world, remote, { position, rotation, linvel, angvel, steer, keepDrivetrain: drivetrain?.carId ?? 0 }, spec);
@@ -102,7 +103,7 @@ function addCarViews(world, { body, controller, gpuTires, soft, drivetrain, posi
     Transform({ position: { ...position }, quaternion: { ...rotation } }),
     RigidBody({ body }),
     // The drivetrain reads DRIVETRAIN live, so panel changes apply without a rebuild.
-    Vehicle({ controller, body, drivetrain, steer, speed: 0, tires: spec.tires, input: spec.input, slot: spec.slot }),
+    Vehicle({ controller, body, drivetrain, steer, speed: 0, tires: spec.tires, input: spec.input, driver: spec.driver, slot: spec.slot }),
     View({ object }),
     SteeringWheel({ object: steeringWheel }),
     AxleRig({ rig: axles }),
@@ -177,7 +178,7 @@ export function rebuildCars(world) {
   const cars = [];
   world.query(Vehicle, View).forEach((car) => cars.push(car));
   for (const car of cars) {
-    const { body, steer, drivetrain, tires, input, slot } = car.get(Vehicle);
+    const { body, steer, drivetrain, tires, input, driver, slot } = car.get(Vehicle);
     const { player, livery } = car.get(View).object.userData.spec;
     const state = {
       drivetrain,
@@ -189,7 +190,7 @@ export function rebuildCars(world) {
     };
     despawnCar(world, car);
     // The player's car takes the tyre model the settings now ask for.
-    spawnCar(world, { ...state, tires: player ? playerTires() : tires, player, livery, input, slot });
+    spawnCar(world, { ...state, tires: player ? playerTires() : tires, player, livery, input, driver, slot });
   }
   return world.queryFirst(IsPlayer, Vehicle);
 }
@@ -326,9 +327,9 @@ export function respawnCarAt(world, heightAt, x, z, yaw = 0, { speed = 0, lift =
   // The same car again: keep its meshes and replace only the physics. New meshes and materials
   // cost a long first frame (about 50-160 ms on an M4) while the renderer sets them up.
   if (car.get(View).object.userData.kind === viewsKind(world.get(Physics).remote, tires)) return replaceCarPhysics(world, car, pose);
-  const { input, slot } = vehicle;
+  const { input, driver, slot } = vehicle;
   despawnCar(world, car);
-  return spawnCar(world, { ...pose, tires, player: spec.player, livery: spec.livery, input, slot });
+  return spawnCar(world, { ...pose, tires, player: spec.player, livery: spec.livery, input, driver, slot });
 }
 
 // Gives the car new physics at `pose` (a fresh start: new drivetrain, no steering), keeping its
@@ -383,13 +384,23 @@ export function requestRespawnAt(world, heightAt, x, z, yaw, options) {
 
 // Takes a car out at the start of the next frame (a step may be using it now). Spawning needs no
 // wait: a new car joins the next batch of steps.
-const pendingDespawns = [];
+const pendingCars = [];
 export function requestDespawn(world, car) {
-  pendingDespawns.push({ world, car });
+  pendingCars.push({ type: 'despawn', world, car });
+}
+
+// Puts a car (an AI's) back on its wheels at (x, z) facing `yaw`, at the start of the next frame.
+// Queued apart from the player's respawns, so neither replaces the other.
+export function requestCarRespawn(world, heightAt, car, x, z, yaw) {
+  pendingCars.push({ type: 'respawn', world, car, heightAt, x, z, yaw });
 }
 
 export function applyPendingCarAction() {
-  for (const { world, car } of pendingDespawns.splice(0)) if (car.isAlive()) despawnCar(world, car);
+  for (const a of pendingCars.splice(0)) {
+    if (!a.car.isAlive()) continue;
+    if (a.type === 'despawn') despawnCar(a.world, a.car);
+    else respawnCarAt(a.world, a.heightAt, a.x, a.z, a.yaw, { car: a.car });
+  }
   const action = pendingAction;
   pendingAction = null;
   if (action?.type === 'rebuild') rebuildCars(action.world);

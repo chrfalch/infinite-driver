@@ -13,6 +13,7 @@ import { onSettingsSaved } from '../settings-store.js';
 import { AUDIO, AUDIO_KEY, audioMix, saveAudio } from './config.js';
 import { ENGINE_PRESETS, TURBO_DIESEL_V8 } from './engine-presets.js';
 import { panGains } from './mix.js';
+import { MAX_VOICES } from './rival-voices.js';
 import { bankTransfer, foleyTransfer, loadBank, loadFoley } from './sample-bank.js';
 
 // The recorded tyre, ground and car sounds (foley.js), in public/.
@@ -38,15 +39,14 @@ function rotate(q, v) {
   return { x: ix * w + iw * -x + iy * -z - iz * -y, y: iy * w + iw * -y + iz * -x - ix * -z, z: iz * w + iw * -z + ix * -y - iy * -x };
 }
 
-// Where each part is heard from the camera: { exhaust, body, wheels } of { l, r } gains.
-export function listenerPositions(camera, vehicle, out = { exhaust: {}, body: {}, wheels: [{}, {}, {}, {}] }) {
+// The listener, from the camera and the car it follows: toward the camera from the car, at the
+// distance the view shows it from. { ear, right } (right: the camera's right in the world).
+function listener(camera, vehicle) {
   const p = vehicle.body.translation();
-  const q = vehicle.body.rotation();
   camera.updateMatrixWorld?.();
   const e = camera.matrixWorld.elements;
   const right = { x: e[0], y: e[1], z: e[2] };
   const cam = { x: e[12], y: e[13], z: e[14] };
-  // The listener: toward the camera from the car, at the distance the view shows it from.
   let dx = cam.x - p.x;
   let dy = cam.y - p.y;
   let dz = cam.z - p.z;
@@ -55,15 +55,27 @@ export function listenerPositions(camera, vehicle, out = { exhaust: {}, body: {}
   dx = (dx / far) * distance;
   dy = (dy / far) * distance;
   dz = (dz / far) * distance;
-  const ear = { x: p.x + dx, y: p.y + dy, z: p.z + dz };
+  return { ear: { x: p.x + dx, y: p.y + dy, z: p.z + dz }, right };
+}
+
+// The pan and distance of world point (x, y, z) heard at `ear`: { pan, d }.
+function heard({ ear, right }, x, y, z) {
+  const sx = x - ear.x;
+  const sy = y - ear.y;
+  const sz = z - ear.z;
+  const d = Math.hypot(sx, sy, sz) || 1;
+  const lateral = (sx * right.x + sy * right.y + sz * right.z) / d;
+  return { pan: Math.max(-MAX_PAN, Math.min(MAX_PAN, lateral * PAN_WIDTH)), d };
+}
+
+// Where each part is heard from the camera: { exhaust, body, wheels } of { l, r } gains.
+export function listenerPositions(camera, vehicle, out = { exhaust: {}, body: {}, wheels: [{}, {}, {}, {}] }) {
+  const p = vehicle.body.translation();
+  const q = vehicle.body.rotation();
+  const at = listener(camera, vehicle);
   const place = (local, target) => {
     const o = rotate(q, local);
-    const sx = p.x + o.x - ear.x;
-    const sy = p.y + o.y - ear.y;
-    const sz = p.z + o.z - ear.z;
-    const d = Math.hypot(sx, sy, sz) || 1;
-    const lateral = (sx * right.x + sy * right.y + sz * right.z) / d;
-    const pan = Math.max(-MAX_PAN, Math.min(MAX_PAN, lateral * PAN_WIDTH));
+    const { pan, d } = heard(at, p.x + o.x, p.y + o.y, p.z + o.z);
     // Nearer is louder, gently (1 at the default view).
     const gain = Math.max(0.3, Math.min(1.3, (APPARENT_DISTANCE + 4) / (d + 4)));
     return panGains(pan, gain, target);
@@ -76,6 +88,26 @@ export function listenerPositions(camera, vehicle, out = { exhaust: {}, body: {}
   place(BODY, out.body);
   for (let i = 0; i < 4; i++) place(wheelMount(i), out.wheels[i]);
   return out;
+}
+
+// The other cars to hear, from the listener by the player's car: the nearest MAX_VOICES within
+// RIVAL_RANGE m, each { id, rpm, fuel, exhaustBrake, throttle, l, r }. Their engines fall off with
+// distance like the player's parts do, but on down to nothing: far away they are not heard.
+const RIVAL_RANGE = 160;
+export function rivalVoices(camera, player, rivals) {
+  const at = listener(camera, player);
+  const cars = [];
+  for (const v of rivals) {
+    const p = v.body.translation();
+    const o = rotate(v.body.rotation(), EXHAUST);
+    const { pan, d } = heard(at, p.x + o.x, p.y + o.y, p.z + o.z);
+    if (d > RIVAL_RANGE) continue;
+    const gain = Math.min(1.2, (APPARENT_DISTANCE + 4) / (d + 4)) * (1 - d / RIVAL_RANGE);
+    const { l, r } = panGains(pan, gain);
+    const t = v.drivetrain ?? {};
+    cars.push({ id: v.id, rpm: t.rpm, fuel: t.fuel, exhaustBrake: t.exhaustBrake, throttle: t.throttle, l, r, d });
+  }
+  return cars.sort((a, b) => a.d - b.d).slice(0, MAX_VOICES);
 }
 
 // The engine sound picked in the settings.
@@ -157,6 +189,7 @@ export function createAudio({ feed = null, preset = null, button = true, armed =
   let ctx = null;
   let master = null;
   let node = null;
+  let rivals = null;
   let staleReports = 0;
 
   const level = () => (AUDIO.enabled ? AUDIO.volume : 0);
@@ -197,6 +230,10 @@ export function createAudio({ feed = null, preset = null, button = true, armed =
     };
     node.connect(master);
     audio.node = node;
+    // The other cars' engines (rival-voices.js), on a node of their own.
+    rivals = new AudioWorkletNode(ctx, 'rivals', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { mix: audioMix(), preset: audio.preset ?? currentPreset() } });
+    rivals.connect(master);
+    audio.rivals = rivals;
     audio.state = 'running';
     log('engine playing:', (audio.preset ?? currentPreset()).name, audio.manual ? '(per frame)' : '(shared feed)', 'context', ctx.state, ctx.sampleRate, 'Hz');
     fadeTo(level());
@@ -340,8 +377,10 @@ export function createAudio({ feed = null, preset = null, button = true, armed =
   const apply = () => {
     if (!ctx) return;
     node?.port.postMessage({ type: 'mix', values: audioMix() });
+    rivals?.port.postMessage({ type: 'mix', values: audioMix() });
     if (AUDIO.engineType !== engineType && !audio.preset) {
       node?.port.postMessage({ type: 'preset', preset: currentPreset() });
+      rivals?.port.postMessage({ type: 'preset', preset: currentPreset() });
       loadRecordings(currentPreset());
     }
     engineType = AUDIO.engineType;
@@ -373,6 +412,13 @@ export function createAudio({ feed = null, preset = null, button = true, armed =
     if (!audio.manual || !node || !vehicle?.drivetrain) return;
     const d = vehicle.drivetrain;
     node.port.postMessage({ type: 'manual', values: { rpm: d.rpm ?? 0, fuel: d.fuel ?? 0, exhaustBrake: d.exhaustBrake ?? 0, throttle: d.throttle ?? 0 } });
+  };
+
+  // Per frame: the other cars' engines, heard from beside the player's car (`others`: their
+  // Vehicle objects).
+  audio.updateRivals = (player, others, camera) => {
+    if (!rivals || !camera || !player?.body || ctx?.state !== 'running') return;
+    rivals.port.postMessage({ type: 'cars', cars: rivalVoices(camera, player, others) });
   };
 
   audio.dispose = () => {
