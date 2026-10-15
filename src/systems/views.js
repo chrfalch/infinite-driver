@@ -181,17 +181,20 @@ export function syncEngine(world) {
   world.query(View, Vehicle).updateEach(([view, vehicle]) => view.object.userData.engine?.update(vehicle.drivetrain, delta));
 }
 
-// Brake lights: dim tail-light glow, bright red while braking (a quick fade, like a filament).
-// Headlights and tail lamps: on and off with H (Input.headlights).
+// Brake lights: dim tail-light glow, bright red while braking (a quick fade, like a filament),
+// each car its own (see createCarMesh). Headlights and tail lamps: on and off with H
+// (Input.headlights); only the player's car has spot lights.
 export function syncLights(world) {
-  const car = world.queryFirst(IsPlayer, Vehicle);
-  if (!car) return;
   const delta = world.get(Time).delta;
-  const target = car.get(Vehicle).braking ? 3.2 : 0.25;
   const k = Math.min(1, delta / 0.06);
-  brakeLightMaterial.emissiveIntensity += (target - brakeLightMaterial.emissiveIntensity) * k;
-  const headlights = car.get(View)?.object.userData.headlights;
-  if (headlights) updateHeadlights(headlights, world.get(Input).headlights, delta);
+  world.query(Vehicle, View).forEach((car) => {
+    const { object } = car.get(View);
+    const material = object.userData.brakeLight ?? brakeLightMaterial;
+    const target = car.get(Vehicle).braking ? 3.2 : 0.25;
+    material.emissiveIntensity += (target - material.emissiveIntensity) * k;
+    const headlights = object.userData.headlights;
+    if (headlights) updateHeadlights(headlights, world.get(Input).headlights, delta);
+  });
 }
 
 export function syncSoftTires(world) {
@@ -208,12 +211,14 @@ export function syncSoftTires(world) {
     const p = player.body.translation();
     setTyreSheet(world.get(HeightField)?.heightAt?.drawn?.sheet, p.x, p.z);
   }
-  world.query(SoftTireView).updateEach(([view]) => {
+  world.query(WheelOf('*'), SoftTireView).forEach((wheel) => {
+    const view = wheel.get(SoftTireView);
     if (view.gpu) {
       // Worker physics: nothing to draw until the first tyre particles arrive.
       view.object.visible = view.gpu.ready !== false;
       if (!view.object.visible) return;
-      const vehicle = world.queryFirst(IsPlayer, Vehicle)?.get(Vehicle);
+      // The car this tyre is on.
+      const vehicle = wheel.targetFor(WheelOf)?.get(Vehicle);
       const hub = vehicle?.controller.wheels?.[view.index]?.hub;
       updateGpuTireMesh(view.object, view.gpu, view.index, hub);
       // Follow the chassis' interpolated pose (see syncBodies), so the tyre stays on its rim, with

@@ -68,6 +68,14 @@ const tyreGroundAt = (x, z) => {
   const above = h11.add(h01.sub(h11).mul(fx.oneMinus())).add(h10.sub(h11).mul(fz.oneMinus()));
   return select(fx.add(fz).lessThanEqual(1), below, above);
 };
+// Whether world (x, z) is on the grid: it follows the player's car, so another car's tyres are
+// mostly off it, and must not be lifted to its edge's height.
+const onTyreGround = (x, z) => {
+  const span = groundCell.mul(GROUND_N - 1);
+  const gx = x.sub(groundOrigin.x);
+  const gz = z.sub(groundOrigin.y);
+  return gx.greaterThanEqual(0).and(gz.greaterThanEqual(0)).and(gx.lessThanEqual(span)).and(gz.lessThanEqual(span));
+};
 
 // The dry river's rock sheet around the car, exactly as drawn (terrain/rock-sheet.js: its grid
 // points moved at random, so its facets read as broken rock). The ground grid above has 12.5 cm
@@ -443,7 +451,8 @@ function tyreMaterial(nu, nv, sign) {
     // sheetTexture). The tyre mesh is in world space, moved by its matrix (the drawing offsets), so
     // the lift is turned back into the mesh's frame.
     const world = modelWorldMatrix.mul(vec4(out, 1)).xyz;
-    const bottom = tyreGroundAt(world.x, world.z).max(sheetTopAt(world.x, world.z));
+    const grid = select(onTyreGround(world.x, world.z), tyreGroundAt(world.x, world.z), float(-1e9));
+    const bottom = grid.max(sheetTopAt(world.x, world.z));
     const lift = bottom.sub(world.y).max(0).mul(groundOn);
     out.addAssign(modelWorldMatrixInverse.mul(vec4(0, lift, 0, 0)).xyz);
     return out;

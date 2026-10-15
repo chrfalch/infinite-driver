@@ -68,8 +68,9 @@ function createShaft() {
 
 // Beam axles front and rear, a transfer case under the frame, and propshafts to each
 // differential. Everything is placed from the live hub positions, so it follows suspension travel
-// and any change of track, wheelbase, or ride height.
-export function createAxleRig() {
+// and any change of track, wheelbase, or ride height. `soft`: the car's wheels are soft tyres on
+// beadlock rims (see rimInnerFace).
+export function createAxleRig({ soft = CAR.softTires } = {}) {
   const group = new Group();
   group.name = 'axles';
   // Steering: shaft from the column through two universal joints to the steering box, pitman arm,
@@ -112,7 +113,7 @@ export function createAxleRig() {
     group.add(...halfShafts, ...cvs, rack);
     independent = { halfShafts, cvs, rack };
   }
-  return { group, front, rear, transfer, frontShaft, rearShaft, steering, independent, angles: [0, 0] };
+  return { group, front, rear, transfer, frontShaft, rearShaft, steering, independent, angles: [0, 0], rimInset: rimInnerFace(soft) };
 }
 
 // hubs: chassis-local hub centres in wheel order FL, FR, RL, RR. shaftSpin: [front, rear]
@@ -120,7 +121,7 @@ export function createAxleRig() {
 // steerQuats: chassis-local knuckle rotations of the front wheels; geometry: steeringGeometry().
 export function updateAxleRig(rig, hubs, shaftSpin, dt, steerQuats = null, geometry = null, steer = 0) {
   const { y: hy } = CAR.halfExtents;
-  const inset = rimInnerFace() + 0.03;
+  const inset = (rig.rimInset ?? rimInnerFace()) + 0.03;
   // Transfer case hangs under the frame, a little behind the middle.
   rig.transfer.position.set(-0.1, -hy - 0.08, 0.12);
   rig.angles ??= [0, 0];
@@ -183,13 +184,14 @@ export function updateAxleRig(rig, hubs, shaftSpin, dt, steerQuats = null, geome
     place(st.lowerShaft, geometry.joint2, geometry.box);
     st.joints[0].position.copy(geometry.joint1);
     st.joints[1].position.copy(geometry.joint2);
-  } else if (steerQuats && geometry) updateSteering(rig.steering, hubs, steerQuats, geometry, steer);
+  } else if (steerQuats && geometry) updateSteering(rig.steering, hubs, steerQuats, geometry, steer, inset - 0.01);
 }
 
 const tipA = new Vector3();
 
 // Knuckle steering arms point back and inward from each front hub; they turn with the knuckle.
-function updateSteering(st, hubs, steerQuats, geo, steer) {
+// `knuckleInset`: from the wheel's centre plane to its knuckle.
+function updateSteering(st, hubs, steerQuats, geo, steer, knuckleInset) {
   const tips = [];
   for (const [k, i] of [
     [0, 0],
@@ -198,7 +200,7 @@ function updateSteering(st, hubs, steerQuats, geo, steer) {
     const hub = hubs[i];
     const side = Math.sign(hub.z) || (i === 0 ? -1 : 1);
     const arm = new Vector3(-0.2, -0.04, -side * 0.12).applyQuaternion(steerQuats[k]);
-    const base = new Vector3(hub.x, hub.y - 0.02, hub.z - side * (rimInnerFace() + 0.02));
+    const base = new Vector3(hub.x, hub.y - 0.02, hub.z - side * knuckleInset);
     const tip = base.clone().add(arm);
     place(st.arms[k], base, tip);
     tips.push(tip);

@@ -36,23 +36,37 @@ export function particleContact(positions, stride, start, count, heightAt, radiu
   return n ? { x: sx / n, z: sz / n, depth: deepest } : null;
 }
 
+// Every car's tyre contacts (its Vehicle's `groundContacts`; the player's also in Tracks), tracks
+// (wheel 4 * slot + i of the shared track mesh, for the cars that have a slot in it) and ruts.
 export function updateTracks(world) {
   const trackState = world.get(Tracks);
   const tracks = trackState.renderer;
   if (!tracks) return;
   trackState.contacts.fill(null);
+  tracks.mesh.visible = GROUND.tracks;
+  world.query(Vehicle).forEach((car) => {
+    const player = car.has(IsPlayer);
+    const contacts = carTracks(world, car.get(Vehicle), tracks, player);
+    if (player) contacts.forEach((c, i) => (trackState.contacts[i] = c));
+  });
+  tracks.update(world.get(Time).delta);
+}
+
+function carTracks(world, vehicle, tracks, player) {
+  const contacts = (vehicle.groundContacts ??= [null, null, null, null]);
+  contacts.fill(null);
+  // The car's wheels in the shared track mesh, if it has room for them.
+  const base = 4 * vehicle.slot;
+  const drawn = base + 4 <= tracks.wheels;
   // On snow the ruts themselves are the snow surface's (render/snow-surface.js); the track over
   // them is the packed snow with the tread print.
   const snow = currentSnow();
-  tracks.mesh.visible = GROUND.tracks;
-  const car = world.queryFirst(IsPlayer, Vehicle);
-  if (!car) return;
   const { heightAt, surfaceAt } = world.get(HeightField);
   // Bare rock (dry river) and bare asphalt (snowfield) take no tracks and cannot be compacted.
   const hardAt = heightAt.rockAt ?? heightAt.bareAt;
   const deformation = world.get(Deformation)?.map;
   const pressed = [];
-  const { controller, body } = car.get(Vehicle);
+  const { controller, body } = vehicle;
   // Axle direction (chassis +z) flattened onto the ground.
   const q = body.rotation();
   let rx = 2 * (q.x * q.z + q.w * q.y);
@@ -62,7 +76,7 @@ export function updateTracks(world) {
   const softness = GROUND.softness;
   const { delta } = world.get(Time);
   // A normal frame never moves a contact further than this; a longer jump means a respawn.
-  const maxGap = Math.max(1.2, Math.abs(car.get(Vehicle).speed) * delta * 2);
+  const maxGap = Math.max(1.2, Math.abs(vehicle.speed) * delta * 2);
   // GPU tyres: the solver's ground grid is much cheaper to sample than the terrain function.
   const solver = controller.gpu?.solver;
   const groundAt = solver ? (x, z) => gpuGroundHeight(solver, x, z) ?? surfaceAt(x, z) : surfaceAt;
@@ -101,23 +115,24 @@ export function updateTracks(world) {
     }
     // Bare rock takes no tracks and cannot be compacted.
     const onRock = contact && hardAt?.(contact.x, contact.z);
-    trackState.contacts[i] = contact;
-    if (i === 0) {
+    contacts[i] = contact;
+    if (!drawn) continue;
+    if (player && i === 0) {
       if (contact && lastC0) sample('tracks.segM', Math.hypot(contact.x - lastC0.x, contact.z - lastC0.z));
       lastC0 = contact;
     }
     if (onRock) {
-      tracks.lift(i);
+      tracks.lift(base + i);
       continue;
     }
     if (!contact) {
-      if (tracks.state[i].last) count('tracks.breakNoContact');
-      tracks.lift(i);
+      if (player && tracks.state[base + i].last) count('tracks.breakNoContact');
+      tracks.lift(base + i);
       continue;
     }
     // Deeper sinking and softer soil leave darker tracks.
     const strength = Math.min(1, 0.25 + contact.depth * 5 + softness * 0.5);
-    if (GROUND.tracks) tracks.add(i, heightAt, contact, right, width, strength, maxGap);
+    if (GROUND.tracks) tracks.add(base + i, heightAt, contact, right, width, strength, maxGap);
   }
   // The canyon's graded roads and sandstone are compacted hard: tracks, but no ruts.
   const ground = { road: 0, rock: 0 };
@@ -142,5 +157,5 @@ export function updateTracks(world) {
       ...(heightAt.soilAt ? { maxRut: 0.13 } : {}),
     });
   }
-  tracks.update(delta);
+  return contacts;
 }

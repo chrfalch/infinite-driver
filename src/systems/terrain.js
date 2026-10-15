@@ -8,6 +8,7 @@ import {
   TerrainChunk,
   TerrainStreaming,
   Transform,
+  Vehicle,
   View,
 } from '../ecs/traits.js';
 import { createRocksMesh, createRocksMeshFromData } from '../render/rock-mesh.js';
@@ -179,8 +180,19 @@ function disposeView(object) {
   });
 }
 
-// Keeps a square of chunks loaded around the camera target, and colliders only near it.
-// With `force` everything is built at once (initial load).
+// The chunks every car is in, for the colliders around them (or the camera target's, with no car).
+function carChunks(world, ccx, ccz) {
+  const chunks = [];
+  world.query(Vehicle).forEach((car) => {
+    const p = car.get(Vehicle).body.translation();
+    chunks.push([Math.floor(p.x / CHUNK_SIZE), Math.floor(p.z / CHUNK_SIZE)]);
+  });
+  return chunks.length ? chunks : [[ccx, ccz]];
+}
+
+// Keeps a square of chunks loaded around the camera target, and colliders only near the cars in
+// it. With `force` everything is built at once (initial load). A car off the loaded chunks has no
+// ground under it here: it is held where it is until it has (see holdCars).
 export function streamTerrain(world, { force = false } = {}) {
   const target = world.queryFirst(CameraTarget, Transform);
   if (!target) return;
@@ -192,6 +204,10 @@ export function streamTerrain(world, { force = false } = {}) {
 
   const ccx = Math.floor(position.x / CHUNK_SIZE);
   const ccz = Math.floor(position.z / CHUNK_SIZE);
+  const cars = carChunks(world, ccx, ccz);
+  const nearCar = (cx, cz) => cars.some(([x, z]) => Math.abs(cx - x) <= colliderRadius && Math.abs(cz - z) <= colliderRadius);
+  // Chunks with their ground collider, for holdCars.
+  const grounded = new Set();
 
   const loaded = new Set();
   // Nearest chunk still missing its ground collider, its rock colliders, or its rock mesh.
@@ -216,7 +232,8 @@ export function streamTerrain(world, { force = false } = {}) {
     }
     const dist = dx * dx + dz * dz;
     // With physics in the worker there is no physics world here; the worker builds its own.
-    const wantsColliders = !!physics.world && dx <= colliderRadius && dz <= colliderRadius;
+    const wantsColliders = !!physics.world && nearCar(chunk.cx, chunk.cz);
+    if (chunk.collider) grounded.add(chunkKey(chunk.cx, chunk.cz));
     if (wantsColliders) {
       setCollidersEnabled(chunk, field, true);
       if (force) {
@@ -259,9 +276,10 @@ export function streamTerrain(world, { force = false } = {}) {
   }
   missing.sort((a, b) => a[2] - b[2]);
   if (force) {
-    for (const [cx, cz] of missing) spawnChunk(world, physics, scene, heightAt, cx, cz, { ground: true, rocks: true, near: isNear(cx, cz) });
+    for (const [cx, cz] of missing) spawnChunk(world, physics, scene, heightAt, cx, cz, { ground: true, rocks: true, near: nearCar(cx, cz) });
     return;
   }
+  if (physics.world) holdCars(world, grounded);
 
   // One job per frame (each takes about 1-2.5 ms), in order of urgency: the ground collider the
   // car drives on, a new chunk, rock colliders, then rock meshes. A chunk border crossing is
@@ -289,14 +307,25 @@ export function streamTerrain(world, { force = false } = {}) {
     const data = chunkWorker?.ready.get(key) ?? null;
     chunkWorker?.ready.delete(key);
     // A chunk that appears under the car (respawn, teleport) needs its ground and rocks right away.
-    const here = cx === ccx && cz === ccz;
-    timed('terrain.spawnChunk', () => spawnChunk(world, physics, scene, heightAt, cx, cz, { ground: here, rocks: here, near: isNear(cx, cz) }, data));
+    const here = cars.some(([x, z]) => cx === x && cz === z);
+    timed('terrain.spawnChunk', () => spawnChunk(world, physics, scene, heightAt, cx, cz, { ground: here, rocks: here, near: nearCar(cx, cz) }, data));
   } else if (hullJob) timed('terrain.rockColliders', () => addRockColliders(physics, hullJob));
   else if (rockJob) timed('terrain.rockMesh', () => buildRocksMesh(rockJob.entity, rockJob.field));
+}
 
-  function isNear(cx, cz) {
-    return Math.abs(cx - ccx) <= colliderRadius && Math.abs(cz - ccz) <= colliderRadius;
-  }
+// Main-thread physics: a car with no ground collider under it (off the chunks loaded around the
+// camera) would fall through the world, so its bodies are switched off until the ground is there.
+// (Rapier's soft tyres cannot be switched off; those cars are left to fall.) stepPhysics skips a
+// held car.
+function holdCars(world, grounded) {
+  world.query(Vehicle).forEach((car) => {
+    const vehicle = car.get(Vehicle);
+    const p = vehicle.body.translation();
+    const held = !grounded.has(chunkKey(Math.floor(p.x / CHUNK_SIZE), Math.floor(p.z / CHUNK_SIZE)));
+    if (!!vehicle.held === held) return;
+    vehicle.held = held;
+    for (const body of new Set([vehicle.body, ...(vehicle.controller.bodies ?? [])])) body.setEnabled(!held);
+  });
 }
 
 // The initial load: every chunk in range built here with its colliders and rocks, as
@@ -320,9 +349,10 @@ export async function loadTerrain(world, { onProgress = () => {}, pause = () => 
   }
   missing.sort((a, b) => a[2] - b[2]);
   onProgress(0, missing.length);
+  const cars = carChunks(world, ccx, ccz);
   for (let i = 0; i < missing.length; i++) {
     const [cx, cz] = missing[i];
-    const near = Math.abs(cx - ccx) <= colliderRadius && Math.abs(cz - ccz) <= colliderRadius;
+    const near = cars.some(([x, z]) => Math.abs(cx - x) <= colliderRadius && Math.abs(cz - z) <= colliderRadius);
     timed('terrain.spawnChunk', () => spawnChunk(world, physics, scene, heightAt, cx, cz, { ground: true, rocks: true, near }));
     onProgress(i + 1, missing.length);
     await pause();
