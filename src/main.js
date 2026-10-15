@@ -64,7 +64,7 @@ import { createTouchControls } from './ui/touch-controls.js';
 import { count, reportError, sample, startOverlay, timed } from './perf.js';
 import { AudioFeed, createFeedBuffer } from './audio/feed.js';
 import { createAudio } from './audio/audio.js';
-import { AUDIO } from './audio/config.js';
+import { takeEarlyContext } from './audio/early-context.js';
 
 // The game, loaded by start.js once a world is picked; `loading` is the loading screen
 // (ui/loading.js), up until the drive is ready.
@@ -73,9 +73,10 @@ export async function main(loading) {
   const params = new URLSearchParams(location.search);
   // The engine sound reads every physics step from here (audio/feed.js); ?sound=0 turns it off.
   // Its recordings load and decode alongside everything else; it starts only as the loading screen
-  // goes (armed then), not on taps while loading.
+  // goes (armed then), not on taps while loading: on the context the world pick started, if any.
   const audioFeed = new AudioFeed(createFeedBuffer());
-  const audio = params.get('sound') === '0' ? null : createAudio({ feed: audioFeed, armed: !loading });
+  const earlyContext = takeEarlyContext();
+  const audio = params.get('sound') === '0' ? null : createAudio({ feed: audioFeed, armed: !loading, context: earlyContext });
   const soundLoaded = audio
     ? audio.preload((done, total) => {
         loading?.set('sound', total ? done / total : 0);
@@ -361,15 +362,14 @@ export async function main(loading) {
   };
   render.renderer.setAnimationLoop(frame);
 
-  // The drive starts on a tap or key press once everything is in, so the sound (which browsers
-  // start only from such a gesture) starts with it; no need if the sound is off. Browsers driven
-  // by a script skip the prompt. Gestures start the sound from then on (M turns it on later).
-  const soundToStart = () => !!audio && audio.state === 'off' && AUDIO.enabled && !navigator.webdriver;
-  const startSound = (gesture) => {
+  // The drive starts as soon as everything is in. The sound starts with it on the context the
+  // world pick started (browsers start sound only from a gesture); without one (a world from the
+  // URL or the panel's reload), on the first tap or key press. M turns it on and off.
+  const startSound = () => {
     audio?.arm();
-    if (gesture) audio?.unlock();
+    if (earlyContext) audio?.unlock();
   };
-  loading?.finish({ sound: soundLoaded, prompt: soundToStart, start: startSound });
+  loading?.finish({ sound: soundLoaded, start: startSound });
 
   // Handy for debugging from the console.
   window.__game = {

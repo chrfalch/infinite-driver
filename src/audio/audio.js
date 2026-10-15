@@ -137,8 +137,10 @@ function createSoundButton(audio) {
 }
 
 // armed: false keeps the sound from starting on gestures until arm() (the game arms it as the
-// loading screen goes, so taps while loading stay silent).
-export function createAudio({ feed = null, preset = null, button = true, armed = true } = {}) {
+// loading screen goes, so taps while loading stay silent). context: one already started inside a
+// gesture (early-context.js, on the world pick), used by the first unlock(), so the sound can start
+// without a gesture of its own.
+export function createAudio({ feed = null, preset = null, button = true, armed = true, context = null } = {}) {
   const Context = globalThis.AudioContext ?? globalThis.webkitAudioContext;
   // preset: a fixed engine preset (the engine lab); otherwise the one picked in the settings.
   const audio = { ctx: null, node: null, state: 'off', manual: !feed?.shared, preset, update: () => {}, dispose: () => {} };
@@ -277,7 +279,7 @@ export function createAudio({ feed = null, preset = null, button = true, armed =
     });
   };
 
-  // Called inside a user gesture.
+  // Called inside a user gesture (or with a context from one).
   function unlock() {
     if (!AUDIO.enabled) return;
     // After a failure, start over on the next gesture.
@@ -292,9 +294,10 @@ export function createAudio({ feed = null, preset = null, button = true, armed =
       } catch {
         // Not supported: the silent switch mutes the sound.
       }
-      ctx = new Context({ latencyHint: 'interactive' });
+      ctx = context ?? new Context({ latencyHint: 'interactive' });
       audio.ctx = ctx;
-      log('context created on', lastGesture, '- state', ctx.state);
+      log(context ? 'context from the world pick' : `context created on ${lastGesture}`, '- state', ctx.state);
+      context = null;
       ctx.onstatechange = () => log('context state', ctx.state);
       master = ctx.createGain();
       master.gain.value = 0;
