@@ -211,6 +211,32 @@ function createSpringGeometry() {
 }
 const springGeometry = createSpringGeometry();
 
+// The spinning wheel's merged meshes (rim, and the tyre with rigid wheels) for each shape and side,
+// built once and shared by every wheel and car after: building them (the beadlock plates, the
+// tread) and merging them was most of a rebuild's ~100 ms. The meshes are marked so taking a car
+// down keeps their geometry.
+const spinParts = new Map();
+function spinningWheel(softTire, side) {
+  const key = softTire
+    ? `beadlock|${softTire.rimRadius}|${softTire.width}|${side}`
+    : `tyre|${JSON.stringify(TIRE)}|${CAR.wheelRadius}|${CAR.wheelWidth}|${side}`;
+  let parts = spinParts.get(key);
+  if (!parts) {
+    const merged = mergeByMaterial(softTire ? createBeadlockWheel(softTire.rimRadius, softTire.width * 0.85, side) : createTyre(side));
+    parts = merged.children.map(({ geometry, material, castShadow, receiveShadow }) => ({ geometry, material, castShadow, receiveShadow }));
+    spinParts.set(key, parts);
+  }
+  const group = new Group();
+  for (const { geometry, material, castShadow, receiveShadow } of parts) {
+    const mesh = new Mesh(geometry, material);
+    mesh.castShadow = castShadow;
+    mesh.receiveShadow = receiveShadow;
+    mesh.userData.sharedGeometry = true;
+    group.add(mesh);
+  }
+  return group;
+}
+
 // One corner of the car: steered, spinning wheel, coil-over shock, and two control arms.
 // With soft tyres the rig only carries the rim; the tyre is its own world-space mesh.
 export function createWheelRig(index, { softTire = null } = {}) {
@@ -223,7 +249,7 @@ export function createWheelRig(index, { softTire = null } = {}) {
   const hub = new Group();
   const steer = new Group();
   // The spinning wheel's parts never move relative to each other: one mesh per material.
-  const spin = mergeByMaterial(softTire ? createBeadlockWheel(softTire.rimRadius, softTire.width * 0.85, side) : createTyre(side));
+  const spin = spinningWheel(softTire, side);
   steer.add(spin);
   // Knuckle stays with the steering but not the spin.
   const knuckle = box(0.14, 0.26, 0.08, frame, 0, 0, -side * (rimInnerFace(!!softTire) + 0.02));

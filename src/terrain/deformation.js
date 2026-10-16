@@ -6,6 +6,8 @@ const SHIFT = 7;
 const TILE = 1 << SHIFT; // cells per tile side (16 m)
 const MASK = TILE - 1;
 const BIAS = 32768;
+// Closed change rectangles kept for consumers that ask less often (see changedSince).
+const LOG_LENGTH = 32;
 
 // Numeric tile key; valid for |tile index| < 32768 (about 520 km from the origin).
 const tileKey = (tx, tz) => (tx + BIAS) * 65536 + (tz + BIAS);
@@ -19,8 +21,11 @@ export class GroundDeformation {
     this.lastTx = NaN;
     this.lastTz = NaN;
     this.lastTile = undefined;
-    // Cells changed since `dirtyStart` (see changedSince).
+    // Cells changed since `dirtyStart` (see changedSince), and the closed rectangles before it
+    // back to version `logStart`.
     this.dirtyStart = 0;
+    this.log = [];
+    this.logStart = 0;
     this.dirtyAll = false;
     this.dirtyX0 = Infinity;
     this.dirtyZ0 = Infinity;
@@ -149,17 +154,33 @@ export class GroundDeformation {
 
   // Cell rectangle { x0, z0, x1, z1 } (inclusive) that covers every change made after `version`,
   // or null when that is no longer known (treat everything as changed). Returns an empty
-  // rectangle (x0 > x1) when nothing changed. Designed for one main consumer: each call restarts
-  // the tracked rectangle, so a second consumer with an older version gets null.
+  // rectangle (x0 > x1) when nothing changed. Several consumers can ask (each GPU-tyred car's
+  // ground grid): each call closes the changes so far into a short log of rectangles, each with
+  // the versions it spans, and a consumer gets the union of those after its version.
   changedSince(version) {
-    let result;
-    if (version === this.version) result = { x0: 1, z0: 1, x1: 0, z1: 0 };
-    else if (this.dirtyAll || version < this.dirtyStart || version > this.version) result = null;
-    else result = { x0: this.dirtyX0, z0: this.dirtyZ0, x1: this.dirtyX1, z1: this.dirtyZ1 };
+    if (version > this.version) return null;
+    // Close the open rectangle into the log.
+    if (this.dirtyAll) {
+      this.log.length = 0;
+      this.logStart = this.version;
+    } else if (this.version > this.dirtyStart) {
+      this.log.push({ end: this.version, x0: this.dirtyX0, z0: this.dirtyZ0, x1: this.dirtyX1, z1: this.dirtyZ1 });
+      if (this.log.length > LOG_LENGTH) this.logStart = this.log.shift().end;
+    }
     this.dirtyStart = this.version;
     this.dirtyAll = false;
     this.dirtyX0 = this.dirtyZ0 = Infinity;
     this.dirtyX1 = this.dirtyZ1 = -Infinity;
+    if (version < this.logStart) return null;
+    const result = { x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity };
+    for (let i = this.log.length - 1; i >= 0 && this.log[i].end > version; i--) {
+      const r = this.log[i];
+      if (r.x0 < result.x0) result.x0 = r.x0;
+      if (r.z0 < result.z0) result.z0 = r.z0;
+      if (r.x1 > result.x1) result.x1 = r.x1;
+      if (r.z1 > result.z1) result.z1 = r.z1;
+    }
+    if (result.x0 > result.x1) return { x0: 1, z0: 1, x1: 0, z1: 0 };
     return result;
   }
 

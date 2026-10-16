@@ -20,6 +20,7 @@ import { generatePlants } from '../terrain/vegetation.js';
 import { createVegetationMesh } from '../render/vegetation-mesh.js';
 import { createRockSheetMesh } from '../render/rock-surface.js';
 import { createPebbleMesh } from '../render/pebble-mesh.js';
+import { releaseInstancedMesh } from '../render/instance-pool.js';
 import { ROCK_COLLIDER_BANDS, rockSheetData, rockSheetTrimesh } from '../terrain/rock-sheet.js';
 import { timed } from '../perf.js';
 
@@ -185,11 +186,14 @@ function removeColliders(physics, chunk, field) {
 }
 
 function disposeView(object) {
+  const instanced = [];
   object.traverse((child) => {
-    // Plant geometries are shared by every chunk; only their instance buffers belong to it.
-    if (child.isInstancedMesh) child.dispose();
+    // Plant and pebble geometries are shared by every chunk; their instanced meshes go back to
+    // the pool for the next chunk (render/instance-pool.js).
+    if (child.isInstancedMesh) instanced.push(child);
     else child.geometry?.dispose();
   });
+  for (const mesh of instanced) releaseInstancedMesh(mesh);
 }
 
 // The chunks every car is in, for the colliders around them (or the camera target's, with no car).

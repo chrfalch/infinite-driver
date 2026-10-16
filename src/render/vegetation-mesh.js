@@ -5,7 +5,6 @@ import {
   CylinderGeometry,
   Group,
   IcosahedronGeometry,
-  InstancedMesh,
   Matrix4,
   MeshStandardMaterial,
   BufferAttribute,
@@ -13,6 +12,7 @@ import {
   Quaternion,
   Vector3,
 } from 'three/webgpu';
+import { takeInstancedMesh } from './instance-pool.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // A lumpy bush: three squashed icosahedra.
@@ -208,7 +208,8 @@ export function createVegetationMesh(plants) {
   const gums = plants.filter((p) => p.gum);
   const group = new Group();
   const instanced = (geometry, material, count) => {
-    const mesh = new InstancedMesh(geometry, material, count);
+    // Pooled: the last chunk's meshes of the same kind are drawn again without a shader build.
+    const mesh = takeInstancedMesh(geometry, material, count);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);

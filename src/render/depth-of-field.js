@@ -7,7 +7,7 @@ import { CONTROLS } from '../controls.js';
 // behind it softens with distance, so far streets and hills melt into the haze instead of
 // drawing every window. Only the far side blurs: the ground between the camera and the car is
 // treated as in focus (its depth is clamped to the focus distance), so nothing in front of the car
-// smears over it. ?dof=0 switches it off, as does the panel's checkbox.
+// smears over it. ?dof=0 switches it off, as do the panel's checkbox and the low graphics quality.
 //
 // The scene is drawn into a render target, its depth turned into view-space distance (ortho or
 // perspective, whichever camera is active), and three's bokeh DOF node blurs the far field.
@@ -16,7 +16,8 @@ const FORCE_OFF = params.get('dof') === '0';
 // Metres behind the car that stay sharp, so its tail and the ground under it never soften.
 const FOCUS_MARGIN = 4;
 
-export function createDepthOfField(renderer, scene, camera) {
+// `allowed()`: whether the graphics quality level draws it at all.
+export function createDepthOfField(renderer, scene, camera, allowed = () => true) {
   const scenePass = pass(scene, camera);
   const depth = scenePass.getTextureNode('depth');
   const near = uniform(camera.near);
@@ -40,7 +41,7 @@ export function createDepthOfField(renderer, scene, camera) {
   return {
     // Whether this frame goes through the blur (the plain renderer.render is cheaper when off).
     get enabled() {
-      return !FORCE_OFF && CONTROLS.depthOfField && CONTROLS.dofStrength > 0;
+      return !FORCE_OFF && CONTROLS.depthOfField && CONTROLS.dofStrength > 0 && allowed();
     },
     // distance: metres from the camera to the car along the view direction.
     render(activeCamera, distance) {

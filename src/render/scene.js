@@ -9,7 +9,7 @@ import {
   Scene,
   WebGPURenderer,
 } from 'three/webgpu';
-import { applyQuality } from './quality.js';
+import { QUALITY_LEVELS, applyQuality } from './quality.js';
 import { createDepthOfField } from './depth-of-field.js';
 
 export const VIEW_HEIGHT = 22; // metres visible vertically at zoom 1
@@ -89,7 +89,8 @@ export async function createRenderer(container) {
   window.addEventListener('resize', resize);
 
   // The car in focus, the distance behind it blurred; followCamera sets focusDistance.
-  const dof = createDepthOfField(renderer, scene, camera);
-
-  return { renderer, scene, camera, perspective, activeCamera: camera, sun, hemi, hudScene, hudCamera, resize, quality, dof, focusDistance: 30 };
+  // The quality level (render.quality, which the panel changes) can leave it out.
+  const render = { renderer, scene, camera, perspective, activeCamera: camera, sun, hemi, hudScene, hudCamera, resize, quality, focusDistance: 30 };
+  render.dof = createDepthOfField(renderer, scene, camera, () => QUALITY_LEVELS[render.quality]?.depthOfField !== false);
+  return render;
 }

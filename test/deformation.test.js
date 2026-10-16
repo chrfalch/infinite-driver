@@ -83,6 +83,31 @@ describe('ground deformation', () => {
     }
   });
 
+  it('reports changes to several consumers asking in turn', () => {
+    const d = new GroundDeformation(0.125);
+    let a = d.version;
+    let b = d.version;
+    for (let frame = 0; frame < 10; frame++) {
+      d.addCell(frame, 0, 0.1);
+      // Each consumer sees its own changes since it last looked, never null.
+      const ra = d.changedSince(a);
+      a = d.version;
+      expect(ra).toEqual({ x0: frame, z0: 0, x1: frame, z1: 0 });
+      if (frame % 3 === 2) {
+        const rb = d.changedSince(b);
+        expect(rb).toEqual({ x0: frame - 2, z0: 0, x1: frame, z1: 0 });
+        b = d.version;
+      }
+    }
+    // One that fell far behind resamples everything.
+    const stale = d.version;
+    for (let i = 0; i < 40; i++) {
+      d.addCell(i, 5, 0.1);
+      d.changedSince(d.version - 1);
+    }
+    expect(d.changedSince(stale)).toBe(null);
+  });
+
   it('reports the changed cells since a version', () => {
     const d = new GroundDeformation(0.125);
     d.addCell(1, 1, 0.1);
@@ -94,9 +119,9 @@ describe('ground deformation', () => {
     d.addCell(-5, 3, 0.1);
     d.add(10, 2, 0.1); // cells 80..81 x 16..17
     expect(d.changedSince(v)).toEqual({ x0: -5, z0: 3, x1: 81, z1: 17 });
-    // A consumer that fell behind (older than the last restart) must resample everything.
+    // A consumer that asks less often gets everything since its version.
     d.addCell(0, 0, 0.1);
-    expect(d.changedSince(v)).toBe(null);
+    expect(d.changedSince(v)).toEqual({ x0: -5, z0: 0, x1: 81, z1: 17 });
     d.clear();
     expect(d.changedSince(d.version - 1)).toBe(null);
     expect(d.tiles.size).toBe(0);

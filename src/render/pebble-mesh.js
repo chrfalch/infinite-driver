@@ -1,7 +1,8 @@
 // The dry river's pebbles (terrain/rocks.js generatePebbles): one instanced, flat-shaded
 // icosahedron per pebble, the same shape as the stones the tyres throw (render/soil-particles.js).
-import { Color, IcosahedronGeometry, InstancedMesh, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from 'three/webgpu';
+import { Color, IcosahedronGeometry, Matrix4, MeshStandardMaterial, Quaternion, Vector3 } from 'three/webgpu';
 import { PEBBLE_STRIDE } from '../terrain/rocks.js';
+import { takeInstancedMesh } from './instance-pool.js';
 import { BED_ROCK, RIVER_PBR, rockDetailMaterial } from './river-ground.js';
 
 const geometry = new IcosahedronGeometry(1, 0);
@@ -22,7 +23,7 @@ const color = new Color();
 export function createPebbleMesh(data) {
   if (!data) return null;
   const count = data.length / PEBBLE_STRIDE;
-  const mesh = new InstancedMesh(geometry, material, count);
+  const mesh = takeInstancedMesh(geometry, material, count);
   for (let i = 0; i < count; i++) {
     const [x, y, z, yaw, size, squash, tint, grey] = data.subarray(i * PEBBLE_STRIDE, (i + 1) * PEBBLE_STRIDE);
     q.setFromAxisAngle(up, yaw);
