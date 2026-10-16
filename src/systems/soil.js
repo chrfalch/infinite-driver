@@ -83,6 +83,7 @@ export function updateSoil(world) {
   // (terrain/height-cache.js), with the ruts and heaps on top as they are now.
   soil.surfaceAt ??= cachedSurface(heightAt, deformation);
   const { surfaceAt } = soil;
+  const waterLevel = heightAt.waterLevel ?? -Infinity;
   const cellArea = deformation ? deformation.cell * deformation.cell : 1;
   const soilPerClump = 0.35; // share of a clump's volume that is moved in the height map
 
@@ -134,8 +135,8 @@ export function updateSoil(world) {
 
     for (let i = 0; i < 4; i++) {
       const contact = contacts[i];
-      // Bare rock throws no state.
-      if (!contact || hardAt?.(contact.x, contact.z)) {
+      // Bare rock throws no state, nor does a tyre under water (it throws water, systems/water.js).
+      if (!contact || hardAt?.(contact.x, contact.z) || surfaceAt(contact.x, contact.z) < waterLevel - 0.03) {
         state.carry[i] = 0;
         continue;
       }
