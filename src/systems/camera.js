@@ -1,5 +1,6 @@
 import { clearanceElevation } from '../camera-clearance.js';
 import { loadCameraView, restoreCameraView, saveCameraView } from '../camera-store.js';
+import { cockpitPose } from '../cockpit-view.js';
 import { CameraTarget, HeightField, Render, Time, Transform, Vehicle } from '../ecs/traits.js';
 import { createBackdrop } from '../render/backdrop.js';
 import { SUN_DISTANCE, VIEW_HEIGHT } from '../render/scene.js';
@@ -7,7 +8,8 @@ import { SUN_DISTANCE, VIEW_HEIGHT } from '../render/scene.js';
 // Isometric by default: the camera looks down at 35.3° (the isometric elevation), following behind
 // the car (follow mode, C toggles it; off, it looks down the (-1, -1, -1) diagonal, azimuth 45°). ?az=<degrees> starts the view turned around the car. Dragging with the mouse
 // (or twisting two fingers) orbits; double-click resets. The last view (angle, tilt, zoom, follow
-// mode) is saved and restored on the next visit; ?az and ?zoom override it.
+// mode) is saved and restored on the next visit; ?az and ?zoom override it. V (or ?cockpit) switches
+// to the driver's eyes and back (see the cockpit section below).
 const params = new URLSearchParams(globalThis.location?.search ?? '');
 const DISTANCE = 60 * Math.sqrt(3);
 const ISO_AZIMUTH = ((Number(params.get('az')) || 45) * Math.PI) / 180;
@@ -21,12 +23,13 @@ const defaultZoom = globalThis.innerHeight < 500 ? 1.7 : 1;
 const saved = restoreCameraView(
   loadCameraView(),
   // Follow mode is on at first, from behind the car.
-  { azimuth: ISO_AZIMUTH, elevation: ISO_ELEVATION, zoom: defaultZoom, follow: true, followRelative: Math.PI },
+  { azimuth: ISO_AZIMUTH, elevation: ISO_ELEVATION, zoom: defaultZoom, follow: true, followRelative: Math.PI, cockpit: false },
   { minElevation: MIN_ELEVATION, maxElevation: MAX_ELEVATION, minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM },
 );
 // ?az asks for a fixed angle, so it also starts with follow mode off.
 if (params.has('az')) Object.assign(saved, { azimuth: ISO_AZIMUTH, follow: false });
 if (Number(params.get('zoom'))) saved.zoom = Number(params.get('zoom'));
+if (params.has('cockpit')) saved.cockpit = params.get('cockpit') !== '0';
 const view = { azimuth: saved.azimuth, elevation: saved.elevation };
 const offset = { x: 0, y: 0, z: 0 };
 // Below this elevation the view switches to perspective, with a horizon, sky and backdrop.
@@ -64,12 +67,36 @@ export function isFollowCamera() {
   return follow.on;
 }
 
+// Cockpit view, toggled with V: the camera sits at the driver's eyes (cockpit-view.js) and moves
+// with the car. Dragging (or C + arrows) turns the head, which swings back to the road ahead once
+// let go; the wheel or a pinch narrows or widens the lens; double-click looks ahead again. The
+// orbit view is kept as it was for when V switches back.
+const COCKPIT_FOV = 68;
+const MIN_FOV = 45;
+const MAX_FOV = 95;
+const HEAD_YAW = (140 * Math.PI) / 180;
+const HEAD_PITCH = (45 * Math.PI) / 180;
+const cockpit = { on: saved.cockpit, yaw: 0, pitch: 0, fov: COCKPIT_FOV, dragging: false, keys: false };
+export function toggleCockpitCamera() {
+  cockpit.on = !cockpit.on;
+  Object.assign(cockpit, { yaw: 0, pitch: 0 });
+  rememberView();
+  return cockpit.on;
+}
+export function isCockpitCamera() {
+  return cockpit.on;
+}
+function turnHead(dx, dy) {
+  cockpit.yaw = Math.min(HEAD_YAW, Math.max(-HEAD_YAW, cockpit.yaw - dx));
+  cockpit.pitch = Math.min(HEAD_PITCH, Math.max(-HEAD_PITCH, cockpit.pitch - dy));
+}
+
 // Saves the view a moment after it stops changing (drags and key orbits change it every frame).
 let saveTimer = null;
 function storeView() {
   clearTimeout(saveTimer);
   saveTimer = null;
-  saveCameraView({ azimuth: view.azimuth, elevation: view.elevation, zoom: state.userZoom, follow: follow.on, followRelative: follow.relative });
+  saveCameraView({ azimuth: view.azimuth, elevation: view.elevation, zoom: state.userZoom, follow: follow.on, followRelative: follow.relative, cockpit: cockpit.on });
 }
 function rememberView() {
   clearTimeout(saveTimer);
@@ -81,6 +108,12 @@ function rememberView() {
 const ORBIT_RATE = Math.PI / 2; // rad/s
 const TILT_RATE = Math.PI / 4;
 export function orbitCamera({ x, y }, dt) {
+  if (cockpit.on) {
+    // In the cockpit they turn the head (held while the keys are).
+    cockpit.keys = !!(x || y);
+    turnHead(x * ORBIT_RATE * dt, -y * TILT_RATE * dt);
+    return;
+  }
   if (!x && !y) return;
   view.azimuth += x * ORBIT_RATE * dt;
   follow.relative += x * ORBIT_RATE * dt;
@@ -95,6 +128,10 @@ export function attachZoom(target = window) {
     'wheel',
     (e) => {
       e.preventDefault();
+      if (cockpit.on) {
+        cockpit.fov = Math.min(MAX_FOV, Math.max(MIN_FOV, cockpit.fov * Math.exp(e.deltaY * 0.0015)));
+        return;
+      }
       state.userZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, state.userZoom * Math.exp(-e.deltaY * 0.0015)));
       rememberView();
     },
@@ -107,7 +144,7 @@ export function attachZoom(target = window) {
   target.addEventListener(
     'touchstart',
     (e) => {
-      if (e.touches.length === 2) pinch = { distance: spread(e.touches), zoom: state.userZoom, angle: twist(e.touches), azimuth: view.azimuth };
+      if (e.touches.length === 2) pinch = { distance: spread(e.touches), zoom: state.userZoom, angle: twist(e.touches), azimuth: view.azimuth, fov: cockpit.fov };
     },
     { passive: true },
   );
@@ -116,6 +153,10 @@ export function attachZoom(target = window) {
     (e) => {
       if (!pinch || e.touches.length !== 2) return;
       e.preventDefault();
+      if (cockpit.on) {
+        cockpit.fov = Math.min(MAX_FOV, Math.max(MIN_FOV, pinch.fov / (spread(e.touches) / pinch.distance)));
+        return;
+      }
       state.userZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pinch.zoom * (spread(e.touches) / pinch.distance)));
       view.azimuth = pinch.azimuth + (twist(e.touches) - pinch.angle);
       updateOffset();
@@ -128,10 +169,16 @@ export function attachZoom(target = window) {
   target.addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'mouse') return;
     drag = { x: e.clientX, y: e.clientY };
+    cockpit.dragging = cockpit.on;
     target.setPointerCapture?.(e.pointerId);
   });
   target.addEventListener('pointermove', (e) => {
     if (!drag) return;
+    if (cockpit.on) {
+      turnHead((e.clientX - drag.x) * 0.005, (e.clientY - drag.y) * 0.005);
+      drag = { x: e.clientX, y: e.clientY };
+      return;
+    }
     view.azimuth += (e.clientX - drag.x) * 0.006;
     follow.relative += (e.clientX - drag.x) * 0.006;
     view.elevation = Math.min(MAX_ELEVATION, Math.max(MIN_ELEVATION, view.elevation + (e.clientY - drag.y) * 0.005));
@@ -141,6 +188,7 @@ export function attachZoom(target = window) {
   });
   const endDrag = (e) => {
     drag = null;
+    cockpit.dragging = false;
     target.releasePointerCapture?.(e.pointerId);
   };
   target.addEventListener('pointerup', endDrag);
@@ -148,6 +196,10 @@ export function attachZoom(target = window) {
   target.addEventListener('contextmenu', (e) => e.preventDefault());
   // Double-click: back to the default view, following from behind at the isometric elevation.
   target.addEventListener('dblclick', () => {
+    if (cockpit.on) {
+      Object.assign(cockpit, { yaw: 0, pitch: 0, fov: COCKPIT_FOV });
+      return;
+    }
     follow.on = true;
     follow.relative = Math.PI;
     follow.heading = carAzimuth;
@@ -191,7 +243,7 @@ export function followCamera(world, delta = world.get(Time).delta) {
   // camera does not bob over every crest. The ground counts out to where the camera is (the
   // perspective camera sits closer than the orthographic one).
   const heightAt = world.get(HeightField)?.heightAt;
-  if (heightAt) {
+  if (heightAt && !cockpit.on) {
     const low = view.elevation < PERSPECTIVE_BELOW;
     const reach = low ? VIEW_HEIGHT / state.zoom / 2 / Math.tan((world.get(Render).perspective.fov * Math.PI) / 360) : DISTANCE;
     const need = Math.min(MAX_ELEVATION, clearanceElevation(heightAt, position.x, position.y, position.z, view.azimuth, reach * Math.cos(view.elevation)));
@@ -220,11 +272,29 @@ export function followCamera(world, delta = world.get(Time).delta) {
   // Low views: a perspective camera framing the same area around the car (same visible height at
   // the car), kept above the ground, with haze and the backdrop on the horizon.
   const render = world.get(Render);
-  const low = view.elevation < PERSPECTIVE_BELOW;
+  const low = view.elevation < PERSPECTIVE_BELOW || cockpit.on;
   backdrop ??= createBackdrop(render.scene, world.get(HeightField)?.heightAt?.world);
   // The haze and background colours come from the time of day (render/daylight.js).
   const { daylight } = render;
-  if (low) {
+  if (cockpit.on) {
+    // Let go, the head swings back to the road ahead.
+    if (!cockpit.dragging && !cockpit.keys) {
+      const back = Math.exp(-delta / 0.35);
+      cockpit.yaw *= back;
+      cockpit.pitch *= back;
+    }
+    const eyes = render.cockpit;
+    const pose = cockpitPose(position, target.get(Transform).quaternion, cockpit);
+    eyes.position.copy(pose.position);
+    eyes.quaternion.copy(pose.quaternion);
+    if (Math.abs(eyes.fov - cockpit.fov) > 1e-3) {
+      eyes.fov = cockpit.fov;
+      eyes.updateProjectionMatrix();
+    }
+    render.activeCamera = eyes;
+    // Sharp out to the road ahead; the horizon softens.
+    render.focusDistance = 40;
+  } else if (low) {
     const persp = render.perspective;
     const d = VIEW_HEIGHT / state.zoom / 2 / Math.tan((persp.fov * Math.PI) / 360);
     const inv = 1 / DISTANCE;

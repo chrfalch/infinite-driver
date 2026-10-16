@@ -1,4 +1,4 @@
-// The camera view the player last left (angle around the car, tilt, zoom, follow mode), restored on
+// The camera view the player last left (angle around the car, tilt, zoom, follow mode, cockpit), restored on
 // the next visit. This is state, not a setting: it is saved whole, often, and the physics worker
 // does not need it, so it bypasses settings-store's save listeners.
 // v2: follow mode became the default, so views saved before start over once.
@@ -16,6 +16,7 @@ export function restoreCameraView(saved, defaults, { minElevation, maxElevation,
   if (finite(saved.zoom)) view.zoom = Math.min(maxZoom, Math.max(minZoom, saved.zoom));
   if (typeof saved.follow === 'boolean') view.follow = saved.follow;
   if (finite(saved.followRelative)) view.followRelative = saved.followRelative;
+  if (typeof saved.cockpit === 'boolean') view.cockpit = saved.cockpit;
   return view;
 }
 

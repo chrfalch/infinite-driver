@@ -59,8 +59,10 @@ kitBuildingMaterial.maskNode = hole.lessThan(dither.mul(0.98).add(0.01));
 // The shadows stay whole.
 kitBuildingMaterial.maskShadowNode = float(1).greaterThan(0);
 
-// Where the car is and the direction from it toward the camera (called every frame).
+// Where the car is and the direction from it toward the camera (called every frame). No car (the
+// cockpit view, where nothing stands between the camera and the car): no hole.
 export function setBuildingCutaway(car, camera) {
+  if (!car) return carPosition.value.set(0, -1000, 0);
   carPosition.value.set(car.x, car.y + 0.6, car.z);
   toCamera.value.subVectors(camera.position, carPosition.value).normalize();
 }

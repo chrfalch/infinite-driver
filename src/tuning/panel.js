@@ -378,6 +378,7 @@ const KEYS = [
   ['R', 'Respawn'],
   ['C', 'Follow camera on / off (tap)'],
   ['C + arrows', 'Turn and tilt the camera'],
+  ['V', 'Cockpit view on / off (drag or C + arrows to look around)'],
   ['H', 'Lights on / off (head and tail)'],
   ['P', 'Perf stats on / off'],
   ['M', 'Sound on / off'],

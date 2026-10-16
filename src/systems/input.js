@@ -3,7 +3,7 @@ import { Input, IsPlayer, Vehicle } from '../ecs/traits.js';
 import { DRIVETRAIN, saveDrivetrain } from '../vehicle/config.js';
 import { lockStage, setLockStage } from '../vehicle/drivetrain.js';
 import { isTyping } from '../tuning/panel.js';
-import { toggleFollowCamera } from './camera.js';
+import { toggleCockpitCamera, toggleFollowCamera } from './camera.js';
 
 const keys = new Set();
 // Keys held through the on-screen touch buttons.
@@ -125,6 +125,7 @@ export function readInput(world) {
   input.steer = (pressed('KeyA', 'ArrowLeft') ? 1 : 0) - (pressed('KeyD', 'ArrowRight') ? 1 : 0);
   input.handbrake = pressed('Space');
   if (tapped('KeyH')) input.headlights = !input.headlights;
+  if (tapped('KeyV')) toggleCockpitCamera();
   if (tapped('KeyP')) {
     CONTROLS.showPerf = !CONTROLS.showPerf;
     saveControls();

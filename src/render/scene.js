@@ -48,6 +48,9 @@ export async function createRenderer(container) {
   // Low, tilted views switch to a perspective camera so the horizon and backdrop show (see
   // followCamera); the orthographic camera keeps the isometric look for everything else.
   const perspective = new PerspectiveCamera(38, 1, 0.3, 2500);
+  // The driver's eyes (V toggles it, see followCamera): a wider lens, and a near plane close enough
+  // for the steering wheel and the cage tubes around the head.
+  const cockpit = new PerspectiveCamera(68, 1, 0.05, 2500);
 
   // The shadow box follows the car (see followCamera) and is only as big as the visible ground:
   // the circle around the screen's footprint on the ground, which is stretched in depth because the
@@ -81,6 +84,8 @@ export async function createRenderer(container) {
     camera.updateProjectionMatrix();
     perspective.aspect = aspect;
     perspective.updateProjectionMatrix();
+    cockpit.aspect = aspect;
+    cockpit.updateProjectionMatrix();
     hudCamera.right = w;
     hudCamera.bottom = -h;
     hudCamera.updateProjectionMatrix();
@@ -90,7 +95,7 @@ export async function createRenderer(container) {
 
   // The car in focus, the distance behind it blurred; followCamera sets focusDistance.
   // The quality level (render.quality, which the panel changes) can leave it out.
-  const render = { renderer, scene, camera, perspective, activeCamera: camera, sun, hemi, hudScene, hudCamera, resize, quality, focusDistance: 30 };
+  const render = { renderer, scene, camera, perspective, cockpit, activeCamera: camera, sun, hemi, hudScene, hudCamera, resize, quality, focusDistance: 30 };
   render.dof = createDepthOfField(renderer, scene, camera, () => QUALITY_LEVELS[render.quality]?.depthOfField !== false);
   return render;
 }

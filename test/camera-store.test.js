@@ -11,7 +11,7 @@ describe('restoreCameraView', () => {
   });
 
   it('restores a saved view', () => {
-    const saved = { azimuth: 2, elevation: 1, zoom: 2.5, follow: true, followRelative: -1.2 };
+    const saved = { azimuth: 2, elevation: 1, zoom: 2.5, follow: true, followRelative: -1.2, cockpit: true };
     expect(restoreCameraView(saved, DEFAULTS, LIMITS)).toEqual(saved);
   });
 
