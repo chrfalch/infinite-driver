@@ -1,7 +1,8 @@
 import { createNoise2D } from 'simplex-noise';
 import { BufferAttribute, BufferGeometry, Color, Mesh, MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, dot, exp, length, normalWorldGeometry, transformNormalToView, float, floor, fract, fwidth, max, mix, positionLocal, positionWorld, sin, smoothstep, step, uniform, vec2, vec3, vec4 } from 'three/tsl';
+import { Fn, If, attribute, dot, exp, length, normalWorldGeometry, transformNormalToView, float, floor, fract, fwidth, max, mix, positionLocal, positionWorld, sin, smoothstep, step, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import { gravelShade } from '../terrain/gravel.js';
+import { stadiumGravel } from './stadium-gravel.js';
 import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
 import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
@@ -120,6 +121,7 @@ export function snowGroundRoughness(side, packed, inside) {
 }
 const snowWorld = uniform(0);
 const townWorld = uniform(0);
+const stadiumWorld = uniform(0);
 
 // The town's streets, per pixel: dark asphalt with white edge lines and a double yellow centre line,
 // a kerb, and a paved sidewalk out to KERB. `dist`: m from the centre line; `side`: the same, signed
@@ -172,7 +174,7 @@ export function groundNormal(n, { steep, roadDist }) {
 // The ground's colour and roughness from its per-vertex inputs: `color`, `steep` (rock strata
 // share), `gravel` (0..1, stones; on snow how packed the snow is, as the snow surface shades it, so
 // the two match where they meet), `roadDist` (m from the road centre line; signed on snow) and
-// `lake` (snowfield: m inside the lake's shoreline). The terrain mesh feeds them from its vertex
+// `lake` (snowfield: m inside the lake's shoreline; stadium: how much loose gravel lies there). The terrain mesh feeds them from its vertex
 // attributes; the ground patch near the car (render/ground-surface.js) from the same values
 // interpolated in its vertex shader. `normal`: the world normal (for the canyon's rock texture).
 export function groundShading({ color, steep, gravel, roadDist, lake, normal }) {
@@ -202,7 +204,15 @@ export function groundShading({ color, steep, gravel, roadDist, lake, normal }) 
     .mul(mix(vec3(1), pebbleTone, pebbleFade.mul(rutWear.mul(0.5).oneMinus())))
     .mul(patches)
     .mul(CANYON_DETAIL ? mix(vec3(1), canyonGravelDetail(), 0.85) : vec3(1));
-  const dirt = FOREST_DETAIL ? forestFloorColor(color, steep) : CANYON_DETAIL ? color.mul(mix(vec3(1), canyonDirtDetail(), 0.85)) : color;
+  // The stadium: loose gravel on its dirt (render/stadium-gravel.js), only drawn there.
+  const arena = Fn(() => {
+    const out = color.toVar();
+    If(stadiumWorld.greaterThan(0.5), () => {
+      out.assign(stadiumGravel(color, lake));
+    });
+    return out;
+  })();
+  const dirt = FOREST_DETAIL ? forestFloorColor(color, steep) : CANYON_DETAIL ? color.mul(mix(vec3(1), canyonDirtDetail(), 0.85)) : arena;
   const ground = mix(dirt, CANYON_DETAIL ? rock.mul(mix(vec3(1), canyonRockDetail(normal), 0.8)) : rock, steep);
   const snowFar = snowGroundColor(roadDist, gravel, lake);
   // In town 'lake' is the signed distance to the street and 'gravel' where its centre line shows.
@@ -251,6 +261,7 @@ if (FOREST_DETAIL || CANYON_DETAIL) {
 export function setTerrainWorld(world) {
   sandstone.value = world === 'river' ? 1 : 0;
   snowWorld.value = world === 'snow' ? 1 : 0;
+  stadiumWorld.value = world === 'stadium' ? 1 : 0;
   const town = world === 'daytown';
   townWorld.value = town ? 1 : 0;
   granite.value = town ? 1 : 0;
@@ -369,6 +380,16 @@ function stadiumColor(s, x, z, out) {
   out.lerp(ARENA_MUD, s.puddle * 0.9);
   out.offsetHSL(0, 0, fineNoise(x * 0.6, z * 0.6) * 0.025);
   return out;
+}
+
+// How much loose gravel lies on the stadium's dirt (0..1, for render/stadium-gravel.js): thrown
+// out of the lanes onto their edges and the dead ground, piled on the mounds, thin where the wheels
+// have packed the lanes, none in the water holes; patchy.
+function stadiumLoose(s, x, z) {
+  const patch = 0.5 + 0.5 * patchNoise(x * 0.09 + 11, z * 0.09);
+  const packed = s.lane * (0.35 + 0.45 * smoothstepJs(4, 0.5, s.dist));
+  const loose = 0.35 + 0.45 * patch - packed + Math.min(1, s.mound / 0.8) * 0.3;
+  return Math.min(1, Math.max(0, loose)) * (1 - Math.min(1, s.puddle * 1.5));
 }
 
 // Town palette: lush lawns and parks, paler paving in the busy streets' front yards,
@@ -506,8 +527,11 @@ export function groundMeshData(heightAt, heights, x0, z0, step, resX, resZ = res
         marks = smoothstepJs(s.dist + 3, s.dist + 8, s.other);
       }
       else if (heightAt.world === 'stadium') {
-        // No gravel road paint or rock strata: the dirt is in the colours.
-        stadiumColor(heightAt.sample(x, z), x, z, tmp);
+        // No gravel road paint or rock strata: the dirt is in the colours, the loose gravel on it
+        // in 'lake' (see stadiumLoose).
+        const s = heightAt.sample(x, z);
+        stadiumColor(s, x, z, tmp);
+        lake[i] = stadiumLoose(s, x, z);
       }
       else if (heightAt.world === 'river') {
         // No gravel road paint in the river bed (roadDist stays far): the sand is in the colours.
