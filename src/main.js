@@ -23,7 +23,7 @@ import { createRenderer } from './render/scene.js';
 import { createGauges } from './ui/gauges.js';
 import { createMinimap, forwardOf } from './ui/minimap.js';
 import { LIVERIES } from './render/trophy-body.js';
-import { attachZoom, followCamera, isFollowCamera, orbitCamera, toggleFollowCamera } from './systems/camera.js';
+import { attachZoom, followCamera, isCockpitCamera, isFollowCamera, orbitCamera, toggleCockpitCamera, toggleFollowCamera } from './systems/camera.js';
 import { attachKeyboard, readCameraKeys, readInput } from './systems/input.js';
 import { CONTROLS } from './controls.js';
 import { stepPhysics } from './systems/physics.js';
@@ -254,7 +254,7 @@ export async function main(loading) {
     spawnCar(world, { ...startPose(x, z, rival.tires, yaw), tires: rival.tires, livery: rival.livery, player: false, driver, slot: i + 1 });
   });
   const panel = createTuningPanel(world, { heightAt });
-  const touch = createTouchControls({ onRespawn: () => requestRespawn(world, heightAt), onCamera: () => toggleFollowCamera() });
+  const touch = createTouchControls({ onRespawn: () => requestRespawn(world, heightAt), onCamera: () => toggleFollowCamera(), onCockpit: () => toggleCockpitCamera(), cockpit: isCockpitCamera() });
   // The panel opens as the player last left it (small screens start folded the first time).
   if (!panelStartsOpen(loadPanelOpen(), window.innerWidth < 700 || touch.isVisible())) panel.close();
   panel.onOpenClose((changed) => {
@@ -419,7 +419,7 @@ export async function main(loading) {
       }
       if (player && heightAt.town) {
         const p = player.get(Vehicle).body.translation();
-        setBuildingCutaway(p, render.activeCamera);
+        setBuildingCutaway(isCockpitCamera() ? null : p, render.activeCamera);
         if (propsView) {
           propPhysics?.update(p.x, p.z);
           propsView.update(p.x, p.z);
@@ -438,7 +438,7 @@ export async function main(loading) {
           world.query(Vehicle).forEach((car) => car.has(IsPlayer) || others.push(car.get(Vehicle)));
           audio.updateRivals(vehicle, others, render.activeCamera);
         }
-        gauges.update(vehicle, time.delta, { follow: isFollowCamera(), perf: CONTROLS.showPerf ? perfLines(vehicle) : null, throttleLock: world.get(Input).throttleLock, headlights: world.get(Input).headlights });
+        gauges.update(vehicle, time.delta, { follow: isFollowCamera() && !isCockpitCamera(), perf: CONTROLS.showPerf ? perfLines(vehicle) : null, throttleLock: world.get(Input).throttleLock, headlights: world.get(Input).headlights });
         { const v = player.get(Vehicle).body.linvel(); sample('speed.kmh', Math.hypot(v.x, v.z) * 3.6); }
       }
       timed('sys.glyph', () => glyph.shape());
