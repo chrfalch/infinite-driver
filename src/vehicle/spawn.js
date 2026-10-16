@@ -95,6 +95,23 @@ function spawnRemoteCar(world, remote, { keepDrivetrain, ...pose }, spec) {
   return car;
 }
 
+// The other cars draw cheaper (?rivaldetail=full draws them as the player's): no engine (116k
+// triangles, mostly under the body) and only the body panels cast shadows. Each full car is ~300k
+// triangles in ~180 meshes, nearly all in the shadow pass too, and its GPU time is taken from the
+// GPU tyres' (the solver shares the GPU), so a pack of cars in view slowed the game down.
+const FULL_RIVALS = new URLSearchParams(globalThis.location?.search ?? '').get('rivaldetail') === 'full';
+function simplifyRivalView(object) {
+  const engine = object.userData.engine;
+  if (engine) {
+    engine.object.visible = false;
+    object.userData.engine = null;
+  }
+  // (The trophy body loads later, with its shadows as built.)
+  object.traverse((o) => {
+    if (o.isMesh) o.castShadow = false;
+  });
+}
+
 // The car's entity, its meshes, and one entity per wheel.
 function addCarViews(world, { body, controller, gpuTires, soft, drivetrain, position, rotation, steer, spec, id = 0 }) {
   const { scene } = world.get(Render);
@@ -128,6 +145,7 @@ function addCarViews(world, { body, controller, gpuTires, soft, drivetrain, posi
       wheel.add(SoftTireView({ soft: softBody, object: tireObject }));
     }
   });
+  if (!spec.player && !FULL_RIVALS) simplifyRivalView(object);
   // The moving parts (arms, shocks, joints, shafts) repeat per wheel: draw each shape once, instanced.
   object.userData.batcher = createInstanceBatcher(object, scene);
   object.userData.kind = viewsKind(world.get(Physics).remote, spec.tires);

@@ -70,7 +70,7 @@ function fmt(s) {
   return `${s.avg.toFixed(2)} / ${s.p95.toFixed(2)} / ${s.max.toFixed(1)}`;
 }
 
-const KEY_LINES = ['step.total', 'step.gpuWait', 'step.rapier', 'batch.ms', 'batch.steps', 'frame.interval', 'frame.js', 'draw', 'sys.updateTracks', 'tracks.segM', 'speed.kmh', 'car.motionErrCm'];
+const KEY_LINES = ['step.total', 'step.gpuWait', 'step.rapier', 'batch.ms', 'batch.steps', 'frame.interval', 'frame.js', 'draw', 'sys.updateTracks', 'tracks.segM', 'speed.kmh', 'car.motionErrCm', 'worker.gap', 'worker.outside'];
 
 export function startOverlay() {
   if (!PERF_ON) return;
@@ -96,6 +96,7 @@ export function startOverlay() {
     const simT = c.simSeconds ?? 0;
     const wallT = c.wallSeconds ?? 0;
     lines.push(`sim/real ${(wallT ? simT / wallT : 0).toFixed(2)}  dropped ${(c.droppedSeconds ?? 0).toFixed(2)}s  ${wallT.toFixed(0)}s`);
+    if (c['worker.batches']) lines.push(`worker: batches ${c['worker.batches']}  ticks ${c['worker.ticks'] ?? 0} (skipped ${c['worker.skipped'] ?? 0})  lost to waits ${(c['worker.lostSeconds'] ?? 0).toFixed(2)}s`);
     lines.push(`track breaks: no contact ${c['tracks.breakNoContact'] ?? 0}  gap ${c['tracks.breakGap'] ?? 0}`);
     lines.push(`frame errors ${c.frameErrors ?? 0}  long frames (>50 ms) ${c.longFrames ?? 0}${lastError ? `\nlast error: ${lastError}` : ''}`);
     text.textContent = lines.join('\n');

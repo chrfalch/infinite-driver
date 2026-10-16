@@ -37,6 +37,10 @@ const retired = new Map();
 let pending = []; // spawn and settings actions, applied between batches
 let busy = false;
 let simLast = 0;
+// For the ?perf overlay, since the last state message: ticks in, ticks that found a batch running,
+// the longest wait between batches (ms), the time lost to the 0.1 s cap on that wait (s), and the
+// time each batch spent outside stepPhysics (ms, the longest).
+const timing = { ticks: 0, skipped: 0, gap: 0, lost: 0, outside: 0 };
 
 // Copies settings from the main thread (it owns saving and the tuning panel).
 function applySettings(all) {
@@ -182,12 +186,14 @@ function snapshot(readback) {
     simTime: physics.simTime,
     stepMs: physics.stepMs,
     batch: physics.lastBatch,
+    timing: { ...timing },
     cars: [...cars].map(([id, car]) => carState(id, car, readback, transfer)),
     // The props that moved (physics/props.js), for drawing.
     props: props ? props.moved() : null,
   };
   if (message.props) transfer.push(message.props.buffer);
   postMessage(message, transfer);
+  Object.assign(timing, { ticks: 0, skipped: 0, gap: 0, lost: 0, outside: 0 });
 }
 
 // A zero-delay yield that is not clamped like nested timers are.
@@ -199,7 +205,10 @@ async function simulate() {
   busy = true;
   try {
     const now = performance.now();
-    const delta = Math.min((now - simLast) / 1000, 0.1);
+    const wait = (now - simLast) / 1000;
+    const delta = Math.min(wait, 0.1);
+    timing.gap = Math.max(timing.gap, wait * 1000);
+    timing.lost += wait - delta;
     simLast = now;
     applyPending();
     colliders.update(centres());
@@ -209,8 +218,11 @@ async function simulate() {
       props?.update(p.x, p.z);
     }
     const before = physics.simTime;
+    const t0 = performance.now();
     await stepPhysics(world, delta);
+    const t1 = performance.now();
     if (physics.simTime > before) snapshot(true);
+    timing.outside = Math.max(timing.outside, t0 - now + (performance.now() - t1));
   } catch (error) {
     postMessage({ type: 'error', message: String(error?.stack ?? error) });
   } finally {
@@ -271,6 +283,8 @@ self.onmessage = async (e) => {
         if (car) car.entity.get(Vehicle).input = input;
       }
       deformation.markChanged(msg.deformVersion, null);
+      timing.ticks++;
+      if (busy) timing.skipped++;
       simulate();
     } else if (msg.type === 'tile') deformation.adoptTile(msg.key, msg.tile);
     else if (msg.type === 'probe') {

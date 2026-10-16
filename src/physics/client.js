@@ -182,6 +182,15 @@ export function createPhysicsClient({ terrain, rocks, deformation, slowGpu = 0, 
       count('simSeconds', b.steps / 120);
     }
     count('droppedSeconds', msg.batch?.dropped ?? 0);
+    if (msg.timing) {
+      const t = msg.timing;
+      count('worker.ticks', t.ticks);
+      count('worker.skipped', t.skipped);
+      count('worker.lostSeconds', t.lost);
+      count('worker.batches', 1);
+      sample('worker.gap', t.gap);
+      sample('worker.outside', t.outside);
+    }
     // (A car that was replaced or taken out since is skipped.)
     for (const state of msg.cars) {
       const v = cars.get(state.id);
