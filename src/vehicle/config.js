@@ -36,7 +36,10 @@ export const DEFAULT_CAR = Object.freeze({
   suspensionStiffness: 15,
   suspensionCompression: 1.3,
   suspensionRelaxation: 1.9,
-  frictionSlip: 1.25,
+  // Raycast car: the wheels' friction slip per unit of the ground's grip (the μ the GPU tyres get
+  // on the surface under the car, see surfaceGrip), so rigid wheels corner and pull away about as
+  // hard as the soft-tyred car.
+  frictionSlip: 0.9,
   sideFrictionStiffness: 1.0,
 
   maxBrakeForce: 16500, // N across all wheels
