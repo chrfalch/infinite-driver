@@ -18,6 +18,8 @@ export const DEFAULT_CONTROLS = Object.freeze({
   // Metres behind the car to full blur, and the blur's size (0 = none).
   dofRange: 35,
   dofStrength: 3,
+  // Metres in front of the car to full blur (0 = the near side stays sharp).
+  dofNear: 0,
   // Physics and renderer stats on the dashboard (P toggles).
   showPerf: false,
 });

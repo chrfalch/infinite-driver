@@ -231,6 +231,7 @@ export function createTuningPanel(world, { heightAt }) {
   controls.add(CONTROLS, 'depthOfField').name('Depth of field').onChange(saveControls);
   controls.add(CONTROLS, 'dofRange', 5, 150, 1).name('Blur reaches full at (m behind car)').onChange(saveControls);
   controls.add(CONTROLS, 'dofStrength', 0, 6, 0.1).name('Blur strength').onChange(saveControls);
+  controls.add(CONTROLS, 'dofNear', 0, 40, 1).name('Near blur full at (m before car, 0 = off)').onChange(saveControls);
   controls
     .add(CONTROLS, 'performance')
     .name('Performance preset')
