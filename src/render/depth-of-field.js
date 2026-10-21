@@ -1,7 +1,7 @@
 import { NodeMaterial, QuadMesh } from 'three/webgpu';
 import { float, orthographicDepthToViewZ, pass, perspectiveDepthToViewZ, select, uniform } from 'three/tsl';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
-import { CONTROLS } from '../controls.js';
+import { CONTROLS, focusPlane } from '../controls.js';
 
 // Depth of field like a photo taken with a wide-open lens: the car is in focus and the world
 // behind it softens with distance, so far streets and hills melt into the haze instead of
@@ -9,12 +9,17 @@ import { CONTROLS } from '../controls.js';
 // car is treated as in focus, so nothing in front of the car smears over it. With dofNear > 0 the
 // near side blurs too (full at dofNear metres in front of the car), a narrow focus plane like a
 // macro or tilt-shift shot. ?dof=0 switches it off, as do the panel's checkbox and the low graphics
-// quality. ?dofrange=, ?dofstrength=, ?dofnear= override the saved settings for this page load.
+// quality. ?dofocus=<0-1> (the panel's focus plane slider), then ?dofrange=, ?dofstrength=,
+// ?dofnear= override the saved settings for this page load.
 //
 // The scene is drawn into a render target, its depth turned into view-space distance (ortho or
 // perspective, whichever camera is active), and three's bokeh DOF node blurs the far field.
 const params = new URLSearchParams(globalThis.location?.search ?? '');
 const FORCE_OFF = params.get('dof') === '0';
+if (Number.isFinite(Number(params.get('dofocus') ?? NaN))) {
+  CONTROLS.dofFocus = Number(params.get('dofocus'));
+  Object.assign(CONTROLS, focusPlane(CONTROLS.dofFocus));
+}
 for (const [param, key] of [['dofrange', 'dofRange'], ['dofstrength', 'dofStrength'], ['dofnear', 'dofNear']]) {
   if (params.has(param) && Number.isFinite(Number(params.get(param)))) CONTROLS[key] = Number(params.get(param));
 }

@@ -1,5 +1,5 @@
 import GUI from 'lil-gui';
-import { CONTROLS, DEFAULT_CONTROLS, saveControls } from '../controls.js';
+import { CONTROLS, DEFAULT_CONTROLS, focusPlane, saveControls } from '../controls.js';
 import { Deformation, Input, Physics, Render, Soil, Tracks, Vehicle } from '../ecs/traits.js';
 import { applyQuality, resolveQuality } from '../render/quality.js';
 import { CAR, DEFAULT_CAR, resetCar, saveCar } from '../vehicle/config.js';
@@ -229,9 +229,21 @@ export function createTuningPanel(world, { heightAt }) {
       render.resize();
     });
   controls.add(CONTROLS, 'depthOfField').name('Depth of field').onChange(saveControls);
-  controls.add(CONTROLS, 'dofRange', 5, 150, 1).name('Blur reaches full at (m behind car)').onChange(saveControls);
-  controls.add(CONTROLS, 'dofStrength', 0, 6, 0.1).name('Blur strength').onChange(saveControls);
-  controls.add(CONTROLS, 'dofNear', 0, 40, 1).name('Near blur full at (m before car, 0 = off)').onChange(saveControls);
+  // The focus plane slider sets the three below it, which stay for fine-tuning from there.
+  const dofFine = [];
+  controls
+    .add(CONTROLS, 'dofFocus', 0, 1, 0.01)
+    .name('Focus plane (wide - narrow)')
+    .onChange((t) => {
+      Object.assign(CONTROLS, focusPlane(t));
+      for (const c of dofFine) c.updateDisplay();
+      saveControls();
+    });
+  dofFine.push(
+    controls.add(CONTROLS, 'dofRange', 1, 150, 0.1).name('Blur reaches full at (m behind car)').onChange(saveControls),
+    controls.add(CONTROLS, 'dofStrength', 0, 6, 0.1).name('Blur strength').onChange(saveControls),
+    controls.add(CONTROLS, 'dofNear', 0, 40, 0.1).name('Near blur full at (m before car, 0 = off)').onChange(saveControls),
+  );
   controls
     .add(CONTROLS, 'performance')
     .name('Performance preset')
