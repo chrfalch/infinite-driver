@@ -34,6 +34,7 @@ import {
   sin,
   smoothstep,
   sqrt,
+  step,
   texture,
   transformNormalToView,
   vec2,
@@ -347,17 +348,24 @@ function pbrLook() {
   const texRock = mix(grey(rockTexColor).mul(tone).mul(2.7), rockTexColor.mul(toneShift).mul(vec3(1.05, 0.95, 0.9)), 0.3);
   // Slickrock: the plates' flat tops weathered pale and pinkish (the texture's mottle muted there),
   // their ledges and the joints' faces a deeper, darker red.
-  const top = smoothstep(0.55, 0.85, N.y);
+  // (The edge between them wanders with noise and is soft, so it does not follow the mesh's
+  // triangles in rows of teeth.)
+  const top = smoothstep(0.45, 0.9, N.y.add(fbm(xz.mul(1.7).add(vec2(positionWorld.y.mul(2), 0)), 3).sub(0.5).mul(0.3)));
   // The faces show the strata: bands a few tens of cm thick by height (wavering a little), some
   // paler, some deeper red, so a wall reads as layered rock rather than a shadow.
-  const strata = positionWorld.y.div(0.55).add(fbm(xz.mul(0.25), 2).mul(1.6));
+  // (Uneven: the spacing stretches and squeezes with height and wanders across the wall, and
+  // neighbouring bands often share a tone, so they never read as evenly spaced contour lines.)
+  const sy = positionWorld.y.add(sin(positionWorld.y.mul(0.9)).mul(0.35)).add(sin(positionWorld.y.mul(2.3).add(1.7)).mul(0.12));
+  const strata = sy.div(0.6).add(fbm(xz.mul(0.18), 3).mul(2.2)).add(fbm(xz.mul(0.9), 2).mul(0.25));
   const bandPick = hash(floor(strata), float(7.31));
-  const bandTone = mix(mix(vec3(0.72, 0.5, 0.4), vec3(1.05, 0.88, 0.76), smoothstep(0.2, 0.3, bandPick)), vec3(1.45, 1.3, 1.12), smoothstep(0.72, 0.8, bandPick))
-    .mul(smoothstep(0.86, 1, fract(strata)).mul(-0.35).add(1));
+  // A faint, broken seam at some of the bands' bases only.
+  const seam = smoothstep(0.9, 1, fract(strata)).mul(step(0.55, hash(floor(strata), float(3.9)))).mul(smoothstep(0.45, 0.65, fbm(xz.mul(1.1), 2)));
+  const bandTone = mix(mix(vec3(0.78, 0.58, 0.48), vec3(1.02, 0.88, 0.78), smoothstep(0.15, 0.45, bandPick)), vec3(1.3, 1.17, 1.03), smoothstep(0.75, 0.9, bandPick))
+    .mul(seam.mul(-0.15).add(1));
   // (The texture's own mottle toned down on the faces, so the bands carry them.)
   // Within the bands, thin laminae a few cm apart (the bedding the edges break along).
   const lamina = sin(positionWorld.y.div(0.045).add(fbm(xz.mul(1.3), 2).mul(6))).mul(0.5).add(0.5);
-  const laminae = mix(float(1), lamina.mul(0.22).add(0.86), detail(0.05));
+  const laminae = mix(float(1), lamina.mul(0.12).add(0.94), detail(0.05).mul(fbm(xz.mul(0.5).add(vec2(positionWorld.y, 0)), 2)));
   const face = mix(texRock, vec3(grey(texRock).x).mul(vec3(1.25, 0.95, 0.8)), 0.4).mul(bandTone).mul(laminae);
   const rockColor = mix(face, mix(texRock, tone.mul(1.9), 0.6).mul(vec3(1.0, 0.86, 0.8)), top);
 
@@ -373,7 +381,7 @@ function pbrLook() {
   // Soil where the soil pockets are (the same depth the tyres go by: soft ground over SOIL_MIN),
   // its edge moved a centimetre either way by the two textures' height maps, so it runs ragged.
   const edge = soil.sub(SOIL_MIN).add(dirt.arh.b.sub(rockArh.b).mul(0.012));
-  const soilW = smoothstep(-0.004, 0.004, edge);
+  const soilW = smoothstep(-0.01, 0.01, edge.add(fbm(xz.mul(3.1), 2).sub(0.5).mul(0.02)));
   // Red desert sand: the soil texture's grit, its colour pulled toward a warm orange.
   // Fine red sand, paler and pinker than the rock, in wind ripples ~8 cm apart.
   const rippleDir = xz.x.mul(0.6).add(xz.y.mul(0.8));

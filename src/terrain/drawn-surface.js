@@ -5,7 +5,7 @@
 // the mesh's vertices, and in hollows the flat triangles lie above it (up to about 4 cm on the
 // canyon and 12 cm on the rock sheet), where the tyre sank into the drawn ground.
 import { CHUNK_SIZE, CHUNK_RES } from './chunk.js';
-import { ROCK_SHEET_JITTER, ROCK_SHEET_STEP, jitteredPoint } from './rock-sheet.js';
+import { ROCK_SHEET_JITTER, ROCK_SHEET_STEP, jitteredPoint, sheetFlip } from './rock-sheet.js';
 import { ROCK_REACH } from './riverbed.js';
 
 const GROUND_STEP = CHUNK_SIZE / CHUNK_RES;
@@ -33,7 +33,8 @@ function onTriangles(f, step, x, z) {
 // jitter is under half a step each way, so the triangles over (x, z) belong to its plain cell or a
 // neighbour. Where the jitter folds a thin triangle over its neighbour, the higher one is what you
 // see, so this is the highest. Only cells that are drawn (`drawn(cx, cz)`) count; NaN if none.
-function onJitteredTriangles(f, p, step, x, z, drawn) {
+// `flip(cx, cz)`: the cell is split along a-d instead (as rock-sheet.js sheetFlip draws it).
+function onJitteredTriangles(f, p, step, x, z, drawn, flip = () => false) {
   const ix = Math.floor(x / step);
   const iz = Math.floor(z / step);
   // The 4 x 4 grid points around the cell, then the 3 x 3 cells between them.
@@ -56,8 +57,9 @@ function onJitteredTriangles(f, p, step, x, z, drawn) {
       if (x < Math.min(a.x, b.x, c.x, d.x) - EDGE || x > Math.max(a.x, b.x, c.x, d.x) + EDGE) continue;
       if (z < Math.min(a.z, b.z, c.z, d.z) - EDGE || z > Math.max(a.z, b.z, c.z, d.z) + EDGE) continue;
       if (!drawn(ix - 1 + i, iz - 1 + j)) continue;
-      const lower = inTriangle(a, c, b, x, z, NEAR_H[k], NEAR_H[k + 4], NEAR_H[k + 1]);
-      const upper = inTriangle(b, c, d, x, z, NEAR_H[k + 1], NEAR_H[k + 4], NEAR_H[k + 5]);
+      const flipped = flip(ix - 1 + i, iz - 1 + j);
+      const lower = flipped ? inTriangle(a, c, d, x, z, NEAR_H[k], NEAR_H[k + 4], NEAR_H[k + 5]) : inTriangle(a, c, b, x, z, NEAR_H[k], NEAR_H[k + 4], NEAR_H[k + 1]);
+      const upper = flipped ? inTriangle(a, d, b, x, z, NEAR_H[k], NEAR_H[k + 5], NEAR_H[k + 1]) : inTriangle(b, c, d, x, z, NEAR_H[k + 1], NEAR_H[k + 4], NEAR_H[k + 5]);
       if (!Number.isNaN(lower) && !(lower <= top)) top = lower;
       if (!Number.isNaN(upper) && !(upper <= top)) top = upper;
     }
@@ -127,6 +129,22 @@ export function drawnSurface(heightAt, coarse = false) {
     }
     return c;
   };
+  // Which of the sheet's cells are split along their other diagonal (cached).
+  const flips = new Map();
+  const sheetFlipped = (ix, iz) => {
+    const key = ix * 1048576 + iz;
+    let f = flips.get(key);
+    if (f === undefined) {
+      if (flips.size > MAX_CACHED) flips.clear();
+      const a = sheetPoint(ix, iz);
+      const b = sheetPoint(ix + 1, iz);
+      const c = sheetPoint(ix, iz + 1);
+      const d = sheetPoint(ix + 1, iz + 1);
+      f = sheetFlip(heightAt, a.x, a.z, b.x, b.z, c.x, c.z, d.x, d.z, a.h, b.h, c.h, d.h);
+      flips.set(key, f);
+    }
+    return f;
+  };
   // Metre cells the sheet's triangles may reach into: a covered cell or a neighbour of one.
   const nearSheet = (mx, mz) => {
     for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (sheetCell((mx + i) * per, (mz + j) * per)) return true;
@@ -138,7 +156,7 @@ export function drawnSurface(heightAt, coarse = false) {
     // it) and is drawn over the ground there. Its jittered triangles reach a little past those
     // cells' edges, so look a metre around.
     if (!sheet || !nearSheet(Math.floor(x), Math.floor(z))) return h;
-    const top = onJitteredTriangles(sheetHeight, sheetPoint, ROCK_SHEET_STEP, x, z, sheetCell);
+    const top = onJitteredTriangles(sheetHeight, sheetPoint, ROCK_SHEET_STEP, x, z, sheetCell, sheetFlipped);
     return Number.isNaN(top) ? h : Math.max(h, top);
   };
   // The sheet's own grid, for drawing code that needs its exact triangles (render/mt-tyre.js):

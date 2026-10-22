@@ -86,7 +86,7 @@ const SOIL_STEP = 0.25; // m, grid the soil depth is cached on for rockAt (the s
 // broken by joints into slabs SLAB_JOINT m across: a V crack between them, each slab lifted and
 // tilted a little on its own. Sand settles in the cracks and the low ground (the soil pockets).
 const SLAB_LAYER = 0.3;
-const SLAB_FACE = 0.14; // m, the steep face where a slab steps down to a lower one
+const SLAB_FACE = 0.45; // m, the face where a slab steps down to a lower one (two of the drawn sheet's 25 cm steps, so it does not alias into teeth)
 const SLAB_JOINT = 2.6;
 const CRACK_WIDTH = 0.1; // m either side of a joint
 const CRACK_DEPTH = 0.15; // m

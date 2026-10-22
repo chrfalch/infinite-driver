@@ -119,10 +119,23 @@ function toneFor(id, out) {
   return out;
 }
 
+// Whether the sheet's grid cell with corners a, b (+x), c (+z), d is split along a-d rather than
+// the usual b-c: only where the cell is steep (a ledge or a wall's foot crosses it) and the height
+// at its middle says a-d fits better, so the triangles follow the ledge instead of cutting across
+// it in rows of teeth. The drawn mesh and the tyres' drawn surface (terrain/drawn-surface.js) both
+// go by this.
+export const SHEET_FLIP_RISE = 0.08; // m over the cell before it is worth a look
+export function sheetFlip(heightAt, ax, az, bx, bz, cx, cz, dx, dz, ya, yb, yc, yd) {
+  if (Math.max(ya, yb, yc, yd) - Math.min(ya, yb, yc, yd) <= SHEET_FLIP_RISE) return false;
+  const mid = heightAt.sample((ax + bx + cx + dx) / 4, (az + bz + cz + dz) / 4).h;
+  return Math.abs((ya + yd) / 2 - mid) < Math.abs((yb + yc) / 2 - mid);
+}
+
 // Vertex data for the drawn sheet (plain arrays, so the chunk worker can build it), or null if the
 // chunk has none: an indexed mesh, drawn flat-shaded (render/rock-surface.js), so the chipped skin
 // of the boulders shows as hard facets. The grid normals (central differences) are kept for
-// anything that reads them. Triangles are split along the same diagonal as the ground mesh.
+// anything that reads them. Triangles are split along the same diagonal as the ground mesh, except across
+// ledges (sheetFlip).
 export function rockSheetData(heightAt, cx, cz) {
   if (!heightAt.rockAt) return null;
   const step = ROCK_SHEET_STEP;
@@ -168,16 +181,62 @@ export function rockSheetData(heightAt, cx, cz) {
   }
   const indices = new Uint32Array(cells.length * 6);
   let o = 0;
+  // Each square is split along one diagonal: the usual one, unless the square is steep (a ledge
+  // or a wall's foot crosses it) and the height at its middle says the other fits better. So the
+  // triangles follow a ledge instead of cutting across it in rows of teeth.
   for (const a of cells) {
     const b = a + 1;
     const c = a + n;
     const d = c + 1;
-    indices[o++] = index[a];
-    indices[o++] = index[c];
-    indices[o++] = index[b];
-    indices[o++] = index[b];
-    indices[o++] = index[c];
-    indices[o++] = index[d];
+    const ya = heights[a];
+    const yb = heights[b];
+    const yc = heights[c];
+    const yd = heights[d];
+    if (sheetFlip(heightAt, px[a], pz[a], px[b], pz[b], px[c], pz[c], px[d], pz[d], ya, yb, yc, yd)) {
+      indices[o++] = index[a];
+      indices[o++] = index[c];
+      indices[o++] = index[d];
+      indices[o++] = index[a];
+      indices[o++] = index[d];
+      indices[o++] = index[b];
+    } else {
+      indices[o++] = index[a];
+      indices[o++] = index[c];
+      indices[o++] = index[b];
+      indices[o++] = index[b];
+      indices[o++] = index[c];
+      indices[o++] = index[d];
+    }
+  }
+  // The normals from the triangles themselves (area-weighted), where the grid points really are:
+  // the central differences above assume an even grid, and with the points jittered they lean
+  // the wrong way on steep ground, which shades as rows of teeth.
+  normals.fill(0);
+  for (let t = 0; t < indices.length; t += 3) {
+    const a = indices[t] * 3;
+    const b = indices[t + 1] * 3;
+    const c = indices[t + 2] * 3;
+    const ux = positions[b] - positions[a];
+    const uy = positions[b + 1] - positions[a + 1];
+    const uz = positions[b + 2] - positions[a + 2];
+    const vx = positions[c] - positions[a];
+    const vy = positions[c + 1] - positions[a + 1];
+    const vz = positions[c + 2] - positions[a + 2];
+    let nx = uy * vz - uz * vy;
+    let ny = uz * vx - ux * vz;
+    let nz = ux * vy - uy * vx;
+    if (ny < 0) [nx, ny, nz] = [-nx, -ny, -nz];
+    for (const k of [a, b, c]) {
+      normals[k] += nx;
+      normals[k + 1] += ny;
+      normals[k + 2] += nz;
+    }
+  }
+  for (let k = 0; k < normals.length; k += 3) {
+    const len = Math.hypot(normals[k], normals[k + 1], normals[k + 2]) || 1;
+    normals[k] /= len;
+    normals[k + 1] /= len;
+    normals[k + 2] /= len;
   }
   return { positions, normals, colors, ground, aboveBed, indices };
 }
