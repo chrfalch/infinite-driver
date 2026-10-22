@@ -78,17 +78,18 @@ function generateRiverPlants(heightAt, cx, cz) {
       let pBush;
       let pTree;
       // Trees keep back from the bed (they would hide the car in the top-down view); shrubs line it.
-      if (dist < 10) [pBush, pTree] = [0.14, 0];
-      else if (dist < 14) [pBush, pTree] = [0.1, 0.04];
-      else if (dist < 32) [pBush, pTree] = [0.08, 0.1];
-      else if (dist < 90) [pBush, pTree] = [0.05, 0.05];
-      else [pBush, pTree] = [0.03, 0.015];
+      // Desert scrub: low green bushes along the rim, a few scattered junipers further out.
+      if (dist < 10) [pBush, pTree] = [0.18, 0];
+      else if (dist < 14) [pBush, pTree] = [0.14, 0.01];
+      else if (dist < 32) [pBush, pTree] = [0.1, 0.025];
+      else if (dist < 90) [pBush, pTree] = [0.06, 0.015];
+      else [pBush, pTree] = [0.03, 0.008];
       const y = heightAt(x, z);
       if (roll < pTree) {
-        const height = 6 + size * 6;
-        plants.push({ kind: 'tree', gum: true, x, y, z, height, trunk: 0.022 * height, turn, shade });
+        const height = 2.5 + size * 3;
+        plants.push({ kind: 'tree', x, y, z, height, trunk: 0.05 * height, turn, shade });
       } else if (roll < pTree + pBush) {
-        plants.push({ kind: 'bush', grey: true, x, y, z, size: 0.4 + size * 0.7, turn, shade });
+        plants.push({ kind: 'bush', x, y, z, size: 0.35 + size * 0.6, turn, shade });
       }
     }
   }

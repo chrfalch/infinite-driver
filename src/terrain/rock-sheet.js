@@ -93,15 +93,15 @@ const lin = (hex) => [0, 2, 4].map((k) => {
   const c = parseInt(hex.slice(1 + k, 3 + k), 16) / 255;
   return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 });
-const LIGHT = lin('#d9c294');
-const DARK = lin('#9a8260');
-const GREY = lin('#a39d90');
-const OCHRE = lin('#c08a4e');
+const LIGHT = lin('#d6936a');
+const DARK = lin('#8e4c2e');
+const GREY = lin('#b08068');
+const OCHRE = lin('#c76a38');
 // The big slabs: paler, weathered sandstone.
-const SLAB_LIGHT = lin('#e2d2ac');
-const SLAB_DARK = lin('#b9a47c');
+const SLAB_LIGHT = lin('#e0a47c');
+const SLAB_DARK = lin('#b06a44');
 // The soil pockets: dry, gritty earth.
-const SOIL = lin('#a88d68');
+const SOIL = lin('#c08a62');
 const tone = { r: 0, g: 0, b: 0 };
 const mix = (a, b, t) => a.map((v, k) => v + (b[k] - v) * t);
 

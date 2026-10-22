@@ -70,12 +70,24 @@ const CHANNEL_HALF = 1.1;
 const CHANNEL_DEPTH = [0.15, 0.5];
 const POOL_DEPTH = 0.28; // m per m of the next step's rise (at most 0.4 m)
 const SIDES = 7; // side planes per boulder
+const SLICKROCK = true; // flat bedded sandstone plates instead of rounded boulders
 // Soil pockets: firm earth fills the bed's creases and hollows up to a level that wanders between
 // none and about 1.3 x SOIL_LEVEL over the ground beneath, so the rock humps stand out of flat patches of soil.
 // Where it is deeper than SOIL_MIN the ground is soil, not bare rock: it takes tracks and ruts.
-const SOIL_LEVEL = 0.18; // m
+const SOIL_LEVEL = 0.22; // m
 export const SOIL_MIN = 0.015; // m
 const SOIL_STEP = 0.25; // m, grid the soil depth is cached on for rockAt (the sheet's own step)
+
+// Slickrock: the bed and its walls are bedded sandstone, horizontal layers SLAB_LAYER m thick,
+// worn back into flat plates with short, steep ledges between them (a layer's face takes
+// SLAB_EDGE of its thickness, so it climbs over ~0.3 m where the rock thickens fastest), and
+// broken by joints into slabs SLAB_JOINT m across: a V crack between them, each slab lifted and
+// tilted a little on its own. Sand settles in the cracks and the low ground (the soil pockets).
+const SLAB_LAYER = 0.24;
+const SLAB_EDGE = 0.18;
+const SLAB_JOINT = 3.4;
+const CRACK_WIDTH = 0.16; // m either side of a joint
+const CRACK_DEPTH = 0.13; // m
 
 // Maximum with a soft corner `k` wide, so there is no crease where the two cross.
 const smoothMax = (a, b, k) => {
@@ -143,7 +155,53 @@ function layer(x, z, cell, key, shape, out) {
   }
 }
 
+// The joints: the slab (jittered grid of `cell` m) that (x, z) lies on, and how far it is to the
+// slab's edge (the bisector with the nearest neighbour). Writes out.edge, out.id (0..1), out.tx,
+// out.tz (its tilt) and out.lift.
+function joints(x, z, cell, out) {
+  const cx = Math.floor(x / cell);
+  const cz = Math.floor(z / cell);
+  let best = Infinity;
+  let bx = 0;
+  let bz = 0;
+  let bi = 0;
+  let bj = 0;
+  for (let j = -1; j <= 1; j++) {
+    for (let i = -1; i <= 1; i++) {
+      const px = (cx + i + 0.1 + 0.8 * hash2(cx + i, cz + j, 701)) * cell;
+      const pz = (cz + j + 0.1 + 0.8 * hash2(cx + i, cz + j, 702)) * cell;
+      const d = (x - px) ** 2 + (z - pz) ** 2;
+      if (d < best) [best, bx, bz, bi, bj] = [d, px, pz, cx + i, cz + j];
+    }
+  }
+  let edge = Infinity;
+  for (let j = -2; j <= 2; j++) {
+    for (let i = -2; i <= 2; i++) {
+      const hx = bi + i;
+      const hz = bj + j;
+      if (hx === bi && hz === bj) continue;
+      const px = (hx + 0.1 + 0.8 * hash2(hx, hz, 701)) * cell;
+      const pz = (hz + 0.1 + 0.8 * hash2(hx, hz, 702)) * cell;
+      const ex = px - bx;
+      const ez = pz - bz;
+      const len = Math.hypot(ex, ez);
+      edge = Math.min(edge, ((px + bx) / 2 - x) * (ex / len) + ((pz + bz) / 2 - z) * (ez / len));
+    }
+  }
+  out.edge = edge;
+  out.id = hash2(bi, bj, 703);
+  out.tx = hash2(bi, bj, 704) - 0.5;
+  out.tz = hash2(bi, bj, 705) - 0.5;
+  out.lift = hash2(bi, bj, 706) - 0.5;
+  out.dx = x - bx;
+  out.dz = z - bz;
+  return out;
+}
+const slab = { edge: 0, id: 0, tx: 0, tz: 0, lift: 0, dx: 0, dz: 0 };
+
 export function createRiverField(seed = 4711) {
+  // The bed's character at the last sample (for tools and tests): see sample().
+  const character = { slick: 0, thick: 0 };
   const rand = mulberry32(seed);
   const warpA = createNoise2D(rand);
   const warpB = createNoise2D(rand);
@@ -471,37 +529,79 @@ export function createRiverField(seed = 4711) {
       // None on a riser (the water swept it bare), more on the bar below it.
       const want = (1 - wall) * (1 - ledge) * Math.min(1.4, 1.45 * n - 0.15 + 0.3 * channel + 0.35 * bar);
       const buried = smoothstep(0.55, 0.95, want);
-      // Small rocks, about a metre across.
-      layer(x, z, 1.1, 100, (hx, hz) => {
-        const r = hash2(hx, hz, 102);
-        return { tall: 0.26 * (0.75 + 0.5 * r) * (1 - 0.8 * big) * (1 - 0.75 * buried) * (1 - 0.8 * scour), steep: 1.1, a: 0.5 * (0.8 + 0.4 * r), b: 0.5 * (0.8 + 0.4 * r) };
-      }, top);
-      // Boulders, 2-3 m across, rising into the walls.
-      layer(x, z, 2.2, 200, (hx, hz) => {
-        const r = hash2(hx, hz, 202);
-        const size = (0.9 + 0.3 * r) * (1 + 0.5 * wall);
-        // Blockier and taller along a step's lip and at its foot (the lip breaks up into them).
-        // Worn down to low smooth humps in a spillway and its pool.
-        const blocks = Math.max(ledge, foot) * (1 - wall) * (1 - scour);
-        return { tall: 0.45 * (0.75 + 0.5 * r) * (0.3 + 0.7 * big) * (1 + 0.3 * blocks) * (1 - 0.7 * scour) + 1.2 * wall, steep: 0.9 + 0.9 * wall + 0.5 * blocks, a: size, b: size * (0.8 + 0.3 * hash2(hx, hz, 203)) };
-      }, top);
-      // Big slabs, 8-11 m long and 3-4.5 m wide, in the bed only.
-      if (wall < 1) {
-        layer(x, z, 11, 300, (hx, hz) => {
-          if (hash2(hx, hz, 301) > 0.75) return null;
-          const r = hash2(hx, hz, 302);
-          // Flat-topped (a gentle upper ring), 0.4-0.7 m tall: under the car's belly (0.62 m), so
-          // it climbs on rather than beaching on the edge.
-          return { tall: (0.4 + 0.3 * r) * (1 - wall) * (1 - 0.8 * scour), steep: 0.75, a: 4 + 1.5 * hash2(hx, hz, 303), b: 1.5 + 0.75 * r, gentle: 0.15 };
-        }, top);
+      // The bed's character changes every hundred metres or so, so the run does not repeat:
+      // stretches of rounded boulders (`slick` 0) between stretches of bedded slickrock (1), and
+      // within those, thin broken ledges and small slabs (`thick` 0) or thick, broad plates (1).
+      const slick = SLICKROCK ? smoothstep(-0.35, -0.1, widthNoise(s * 0.006, 33.3 + 9 * b.k)) : 0;
+      const thick = smoothstep(-0.45, 0.45, widthNoise(s * 0.009, 61.7 + 9 * b.k));
+      character.slick = slick;
+      character.thick = thick;
+      let slickStone = 0;
+      let slickId = 0;
+      if (slick > 0) {
+        // How thick the rock lies over the ground beneath: a slow swell of plates in the bed
+        // (warped, so the ledges wind in lobes), thinner where the water scoured it, thicker as
+        // blocks along a step's lip, and rising to the walls' stacked ledges.
+        const wx = x + 3 * chipNoise(x * 0.06 + 3.1, z * 0.06);
+        const wz = z + 3 * chipNoise(x * 0.06, z * 0.06 + 8.7);
+        let t = 0.1 + 0.42 * (0.5 + 0.5 * sizeNoise(wx * 0.085, wz * 0.085)) + 0.1 * (0.5 + 0.5 * sizeNoise(wx * 0.23 + 5, wz * 0.23));
+        t *= 1 - 0.75 * scour;
+        t += 0.2 * Math.max(ledge, foot) * (1 - scour);
+        t += wall * (1.3 + 1.1 * (0.5 + 0.5 * bankNoise(x * 0.05 + 4, z * 0.05)));
+        // Into layers: flat plates with a steep ledge where the rock thickens past each layer.
+        const layerT = SLAB_LAYER * (0.7 + 0.75 * thick);
+        const q = t / layerT;
+        const level = Math.floor(q);
+        // (Softer up the walls, where the rock thickens so fast that sharp ledges would alias into teeth.)
+        const plate = (level + smoothstep(1 - SLAB_EDGE - 0.5 * wall, 1, q - level)) * layerT;
+        // Each slab between the joints sits a little higher or lower, and tilts a degree or two.
+        joints(wx, wz, SLAB_JOINT * (0.6 + 0.9 * thick) * (1 + 0.6 * wall), slab);
+        const shift = (1 - wall) * (0.05 * slab.lift + 0.025 * (slab.tx * slab.dx + slab.tz * slab.dz));
+        // The joints crack the plates: a V groove with steep sides (shallower in the walls).
+        const crack = 1 - smoothstep(0, CRACK_WIDTH, slab.edge + 0.04 * chipNoise(x * 1.7, z * 1.7));
+        // A weathered skin: faint undulation and fine pitting over the plates.
+        const chip = 0.025 * chipNoise(x * 0.7, z * 0.7) + 0.012 * (Math.abs(chipNoise(x * 2.3 + 7, z * 2.3 - 4)) - 0.35);
+        slickStone = zone * Math.max(0.04, plate + shift + chip - CRACK_DEPTH * crack * crack);
+        // Strata alternate tone (paler and redder beds); slabs vary within them.
+        slickId = 1 + (level % 2 ? 1 : 0) + 0.98 * slab.id;
       }
-      // A rough, chipped skin over every boulder: V-shaped creases (|noise|) at two scales, a few
-      // cm deep, so the faces read as broken sandstone rather than smooth humps.
-      const chip = 0.05 * (Math.abs(chipNoise(x * 0.9, z * 0.9)) - 0.35) + 0.025 * (Math.abs(chipNoise(x * 2.3 + 7, z * 2.3 - 4)) - 0.35);
-      stone = zone * Math.max(0.04, top.h + chip);
+      if (slick < 1) {
+        // Small rocks, about a metre across.
+        layer(x, z, 1.1, 100, (hx, hz) => {
+          const r = hash2(hx, hz, 102);
+          return { tall: 0.26 * (0.75 + 0.5 * r) * (1 - 0.8 * big) * (1 - 0.75 * buried) * (1 - 0.8 * scour), steep: 1.1, a: 0.5 * (0.8 + 0.4 * r), b: 0.5 * (0.8 + 0.4 * r) };
+        }, top);
+        // Boulders, 2-3 m across, rising into the walls.
+        layer(x, z, 2.2, 200, (hx, hz) => {
+          const r = hash2(hx, hz, 202);
+          const size = (0.9 + 0.3 * r) * (1 + 0.5 * wall);
+          // Blockier and taller along a step's lip and at its foot (the lip breaks up into them).
+          // Worn down to low smooth humps in a spillway and its pool.
+          const blocks = Math.max(ledge, foot) * (1 - wall) * (1 - scour);
+          return { tall: 0.45 * (0.75 + 0.5 * r) * (0.3 + 0.7 * big) * (1 + 0.3 * blocks) * (1 - 0.7 * scour) + 1.2 * wall, steep: 0.9 + 0.9 * wall + 0.5 * blocks, a: size, b: size * (0.8 + 0.3 * hash2(hx, hz, 203)) };
+        }, top);
+        // Big slabs, 8-11 m long and 3-4.5 m wide, in the bed only.
+        if (wall < 1) {
+          layer(x, z, 11, 300, (hx, hz) => {
+            if (hash2(hx, hz, 301) > 0.75) return null;
+            const r = hash2(hx, hz, 302);
+            // Flat-topped (a gentle upper ring), 0.4-0.7 m tall: under the car's belly (0.62 m), so
+            // it climbs on rather than beaching on the edge.
+            return { tall: (0.4 + 0.3 * r) * (1 - wall) * (1 - 0.8 * scour), steep: 0.75, a: 4 + 1.5 * hash2(hx, hz, 303), b: 1.5 + 0.75 * r, gentle: 0.15 };
+          }, top);
+        }
+        // A rough, chipped skin over every boulder: V-shaped creases (|noise|) at two scales, a few
+        // cm deep, so the faces read as broken sandstone rather than smooth humps.
+        const chip = 0.05 * (Math.abs(chipNoise(x * 0.9, z * 0.9)) - 0.35) + 0.025 * (Math.abs(chipNoise(x * 2.3 + 7, z * 2.3 - 4)) - 0.35);
+        stone = zone * Math.max(0.04, top.h + chip);
+      }
+      if (slick > 0) {
+        stone = slick >= 1 ? slickStone : stone + (slickStone - stone) * slick;
+        if (slick > 0.5) top.id = slickId;
+      }
       // Soil fills up to its level (not on the boulder walls); the rock pokes out above it, with a
       // soft corner where they meet.
-      const level = zone * Math.max(0, SOIL_LEVEL * want);
+      const level = zone * Math.max(0, SOIL_LEVEL * Math.min(1.25, want + 0.25 * slick * thick * (1 - wall)));
       if (level > stone) {
         soil = level - stone;
         stone = smoothMax(stone, level, 0.02);
@@ -562,6 +662,7 @@ export function createRiverField(seed = 4711) {
   };
   heightAt.rockAt = (x, z) => heightAt.bankDistance(x, z) < (ROCK_EDGE + ROCK_REACH) / 2 && heightAt.soilAt(x, z) <= SOIL_MIN;
   heightAt.sample = sample;
+  heightAt.character = character;
   heightAt.roadDistance = (x, z) => Math.abs(bed(x, z).d);
   // Heading (radians about +y, 0 = +x) along the bed through a point.
   heightAt.roadHeading = (x, z) => {

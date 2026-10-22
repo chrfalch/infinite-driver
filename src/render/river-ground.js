@@ -325,7 +325,11 @@ function pbrLook() {
   // The texture's orange sandstone, nudged toward each boulder's own tone (yellower, varied).
   const toneShift = tone.div(max(grey(tone).x, 0.05)).mul(0.5).add(0.5);
   const rockTexColor = rock.color;
-  const rockColor = mix(grey(rockTexColor).mul(tone).mul(2.7), rockTexColor.mul(toneShift).mul(vec3(1.0, 1.08, 1.0)), 0.3);
+  const texRock = mix(grey(rockTexColor).mul(tone).mul(2.7), rockTexColor.mul(toneShift).mul(vec3(1.05, 0.95, 0.9)), 0.3);
+  // Slickrock: the plates' flat tops weathered pale and pinkish (the texture's mottle muted there),
+  // their ledges and the joints' faces a deeper, darker red.
+  const top = smoothstep(0.55, 0.85, N.y);
+  const rockColor = mix(texRock.mul(vec3(0.92, 0.74, 0.64)), mix(texRock, tone.mul(1.9), 0.45).mul(vec3(1.2, 1.08, 1.0)), top);
 
   // Soil (ambientCG Ground109, dry dirt with grit): projected straight down, a tile per 1.6 m, with
   // slow patches of tone so the repeats do not show.
@@ -340,7 +344,9 @@ function pbrLook() {
   // its edge moved a centimetre either way by the two textures' height maps, so it runs ragged.
   const edge = soil.sub(SOIL_MIN).add(dirt.arh.b.sub(rockArh.b).mul(0.012));
   const soilW = smoothstep(-0.004, 0.004, edge);
-  const color = mix(rockColor, soilColor(xz), soilW).mul(patches);
+  // Red desert sand: the soil texture's grit, its colour pulled toward a warm orange.
+  const sandColor = mix(soilColor(xz).mul(vec3(1.3, 0.98, 0.8)), hex('#d0905e'), 0.55);
+  const color = mix(rockColor, sandColor, soilW).mul(patches);
   const n = normalize(mix(rockN, dirt.n, soilW));
   const arh = mix(rockArh, dirt.arh, soilW);
   return { color: color.mul(arh.r.mul(0.5).add(0.5)), normal: n, roughness: arh.g };
@@ -409,7 +415,7 @@ const ROCK_MEAN = hex('#7a5338'); // Rock029's mean colour
 //
 // `bedMatch`: the rocks' 'bed' attribute (0, or a brightness) makes some of them take the bed rock's
 // colour, so they look broken off it; the others keep their own, paler colours for contrast.
-export const BED_ROCK = '#8f6b4d'; // about how the bed's textured rock looks
+export const BED_ROCK = '#a5603c'; // about how the bed's textured rock looks
 export function rockDetailMaterial({ size, bedMatch = false, roughness = 0.9 }) {
   const material = new MeshStandardNodeMaterial({ roughness, metalness: 0, vertexColors: !bedMatch });
   const face = normalize(positionWorld.dFdx().cross(positionWorld.dFdy()));

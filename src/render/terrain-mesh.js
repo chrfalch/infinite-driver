@@ -159,9 +159,9 @@ function townStreet(dist, side, marks) {
 
 // Dry river with the photo-textured bed (?ground=pbr): the ground outside the bed gets a forest-floor
 // detail texture too (render/river-ground.js).
-const FOREST_DETAIL = RIVER_PBR;
+const FOREST_DETAIL = false;
 // The canyon with the photo look: dirt, gravel road and rock textures (render/river-ground.js).
-const CANYON_DETAIL = CANYON_PBR;
+const CANYON_DETAIL = CANYON_PBR || RIVER_PBR;
 const roadShare = (roadDist) => smoothstep(4.3, 2.9, roadDist);
 // The ground's world normal `n` with any detail on it (the ground patch near the car uses this too);
 // `steep` and `roadDist` as for groundShading.
@@ -259,7 +259,7 @@ if (FOREST_DETAIL || CANYON_DETAIL) {
 
 // The world's rock colours for the shader (steep faces): red sandstone, or yellow for the river.
 export function setTerrainWorld(world) {
-  sandstone.value = world === 'river' ? 1 : 0;
+  sandstone.value = 0;
   snowWorld.value = world === 'snow' ? 1 : 0;
   stadiumWorld.value = world === 'stadium' ? 1 : 0;
   const town = world === 'daytown';
@@ -324,12 +324,12 @@ function canyonColor(s, slope, x, z, out) {
 
 // Dry river palette: pale yellow sand in the bed (between its rocks) with a darker orange low
 // channel, orange-yellow banks, and a forest floor of dry grass and leaf litter with red-brown soil.
-const SAND = new Color('#ebd8a8');
-const CHANNEL = new Color('#c99a5e');
-const BANK = new Color('#d8ae6c');
-const LITTER = new Color('#b3a477');
-const LITTER_DARK = new Color('#978a62');
-const SOIL = new Color('#a0714c');
+const SAND = new Color('#e0b48a');
+const CHANNEL = new Color('#c08058');
+const BANK = new Color('#d09466');
+const LITTER = new Color('#c88d60');
+const LITTER_DARK = new Color('#ad6f48');
+const SOIL = new Color('#a85a36');
 
 function riverColor(s, slope, x, z, out) {
   const p = patchNoise(x * 0.05, z * 0.05) * 0.6 + patchNoise(x * 0.15, z * 0.15) * 0.4;
@@ -347,8 +347,8 @@ function riverColor(s, slope, x, z, out) {
   return out;
 }
 const tmp2 = new Color();
-const POCKET = new Color('#a88d68'); // terrain/rock-sheet.js SOIL
-const POCKET_TEXTURED = new Color('#86704f'); // the soil texture's look (render/river-ground.js)
+const POCKET = new Color('#c08a62'); // terrain/rock-sheet.js SOIL
+const POCKET_TEXTURED = new Color('#a8704c'); // the soil texture's look (render/river-ground.js)
 
 // Snowfield palette (the terrain mesh far off; near the car the snow surface draws its own):
 // bright snow with faint blue-grey hollows and wind-blown patches.

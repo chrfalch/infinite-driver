@@ -19,9 +19,9 @@ const LOOKS = {
   },
   // Dry river: a deeper blue sky, blue-grey forested hills far off and a yellow sandstone escarpment.
   river: {
-    day: { horizon: '#d3dde2', top: '#2f78cf', background: '#e4e1d6', far: ['#56675e', '#8d9c93'], near: ['#5d6148', '#b59a66'] },
-    steps: 3,
-    scale: 0.5,
+    day: { horizon: '#e6d6c4', top: '#5b93cf', background: '#e9e0d2', far: ['#9a6650', '#dcb59a'], near: ['#8a4128', '#d98a58'] },
+    steps: 5,
+    scale: 0.8,
   },
   // Sunny town: a clear blue sky, green wooded hills and blue-grey mountains hazed toward a pale
   // horizon; less haze than the others by day (`orthoFog`, `dayFog`: see render/daylight.js).
