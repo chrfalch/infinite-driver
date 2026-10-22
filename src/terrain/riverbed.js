@@ -27,7 +27,7 @@
 //
 // Hard but drivable: shelves 1.5-20 m long, risers 2-3 m long climbing 0.6-2 m (about 20-35°, the
 // car climbs 30° in low range; 12-20° up a spillway); the humps stand 15-45 cm over the creases between them. The bed is
-// 1.3-7.5 m either side of its centre line; its walls and banks move
+// 1.5-6.5 m either side of its centre line (narrower than 2.3 m about half the way, and narrow slots between taller walls every few hundred metres); its walls and banks move
 // with it, so everything shaped by the distance from the bed uses bankDistance: the distance as
 // if the bed were the usual BED_HALF_WIDTH.
 import { createNoise2D } from 'simplex-noise';
@@ -39,7 +39,7 @@ export const BED_HALF_WIDTH = 4; // m, the flat bed either side of the centre li
 export const ROCK_EDGE = 8.2;
 export const ROCK_REACH = 9.4;
 const SPACING = 360; // m between neighbouring beds
-const WIDTH_RANGE = [1.3, 7.5]; // m, the bed's half-width along its length
+const WIDTH_RANGE = [1.5, 6.5]; // m, the bed's half-width along its length
 const SLOT_WIDTH = 1.6; // m, a slot's half-width (give or take 0.35)
 const SLOT_RISE = 3.2; // m, how much taller a slot's walls stand
 // The staircase: a riser every STEP_PERIOD m (give or take STEP_JITTER) of a warped way along the
@@ -85,11 +85,11 @@ const SOIL_STEP = 0.25; // m, grid the soil depth is cached on for rockAt (the s
 // SLAB_EDGE of its thickness, so it climbs over ~0.3 m where the rock thickens fastest), and
 // broken by joints into slabs SLAB_JOINT m across: a V crack between them, each slab lifted and
 // tilted a little on its own. Sand settles in the cracks and the low ground (the soil pockets).
-const SLAB_LAYER = 0.24;
+const SLAB_LAYER = 0.3;
 const SLAB_EDGE = 0.18;
 const SLAB_JOINT = 3.4;
 const CRACK_WIDTH = 0.16; // m either side of a joint
-const CRACK_DEPTH = 0.13; // m
+const CRACK_DEPTH = 0.18; // m
 
 // Maximum with a soft corner `k` wide, so there is no crease where the two cross.
 const smoothMax = (a, b, k) => {
@@ -283,9 +283,9 @@ export function createRiverField(seed = 4711) {
   // Slots: every few hundred metres the bed pinches into a narrow slot for 50-100 m, SLOT_WIDTH m
   // either side of its centre line, between walls SLOT_RISE m taller than elsewhere (0 outside
   // one, 1 in it).
-  const slotAt = (s, k) => smoothstep(0.42, 0.62, widthNoise(s * 0.0042, 151.3 + 9 * k));
+  const slotAt = (s, k) => smoothstep(0.3, 0.5, widthNoise(s * 0.0075, 151.3 + 9 * k));
   const widthAt = (s, k) => {
-    const open = Math.min(WIDTH_RANGE[1], Math.max(WIDTH_RANGE[0], BED_HALF_WIDTH + 4.4 * widthNoise(s * 0.0105, 0.5 + 9 * k) + 1.2 * widthNoise(s * 0.043, 7.5 + 9 * k)));
+    const open = Math.min(WIDTH_RANGE[1], Math.max(WIDTH_RANGE[0], 3.1 + 3.6 * widthNoise(s * 0.0105, 0.5 + 9 * k) + 1.1 * widthNoise(s * 0.043, 7.5 + 9 * k)));
     const slot = slotAt(s, k);
     return slot > 0 ? open + (SLOT_WIDTH + 0.35 * widthNoise(s * 0.05, 171.1 + 9 * k) - open) * slot : open;
   };
@@ -547,9 +547,13 @@ export function createRiverField(seed = 4711) {
       const thick = smoothstep(-0.45, 0.45, widthNoise(s * 0.009, 61.7 + 9 * b.k));
       character.slick = slick;
       character.thick = thick;
+      // The walls are always the rounded boulders (their edges break up the rim best); the plates
+      // run out into them at the foot of the walls.
+      const edgeW = smoothstep(BED_HALF_WIDTH + 0.1, BED_HALF_WIDTH + 1.3, dist);
+      const plates = slick * (1 - edgeW);
       let slickStone = 0;
       let slickId = 0;
-      if (slick > 0) {
+      if (plates > 0) {
         // How thick the rock lies over the ground beneath: a slow swell of plates in the bed
         // (warped, so the ledges wind in lobes), thinner where the water scoured it, thicker as
         // blocks along a step's lip, and rising to the walls' stacked ledges.
@@ -570,7 +574,7 @@ export function createRiverField(seed = 4711) {
         const plate = (level + smoothstep(1 - SLAB_EDGE - 0.5 * wall, 1, q - level)) * layerT;
         // Each slab between the joints sits a little higher or lower, and tilts a degree or two.
         joints(wx, wz, SLAB_JOINT * (0.6 + 0.9 * thick) * (1 + 0.6 * wall), slab);
-        const shift = (1 - wall) * (0.05 * slab.lift + 0.025 * (slab.tx * slab.dx + slab.tz * slab.dz));
+        const shift = (1 - wall) * (0.09 * slab.lift + 0.03 * (slab.tx * slab.dx + slab.tz * slab.dz));
         // The joints crack the plates: a V groove with steep sides (shallower in the walls).
         const crack = 1 - smoothstep(0, CRACK_WIDTH, slab.edge + 0.04 * chipNoise(x * 1.7, z * 1.7));
         // A weathered skin: faint undulation and fine pitting over the plates.
@@ -579,11 +583,11 @@ export function createRiverField(seed = 4711) {
         // Strata alternate tone (paler and redder beds); slabs vary within them.
         slickId = 1 + (level % 2 ? 1 : 0) + 0.98 * slab.id;
       }
-      if (slick < 1) {
+      if (plates < 1) {
         // Small rocks, about a metre across.
         layer(x, z, 1.1, 100, (hx, hz) => {
           const r = hash2(hx, hz, 102);
-          return { tall: 0.26 * (0.75 + 0.5 * r) * (1 - 0.8 * big) * (1 - 0.75 * buried) * (1 - 0.8 * scour), steep: 1.1, a: 0.5 * (0.8 + 0.4 * r), b: 0.5 * (0.8 + 0.4 * r) };
+          return { tall: 0.3 * (0.75 + 0.5 * r) * (1 - 0.8 * big) * (1 - 0.75 * buried) * (1 - 0.8 * scour), steep: 1.1, a: 0.5 * (0.8 + 0.4 * r), b: 0.5 * (0.8 + 0.4 * r) };
         }, top);
         // Boulders, 2-3 m across, rising into the walls.
         layer(x, z, 2.2, 200, (hx, hz) => {
@@ -592,7 +596,7 @@ export function createRiverField(seed = 4711) {
           // Blockier and taller along a step's lip and at its foot (the lip breaks up into them).
           // Worn down to low smooth humps in a spillway and its pool.
           const blocks = Math.max(ledge, foot) * (1 - wall) * (1 - scour);
-          return { tall: 0.45 * (0.75 + 0.5 * r) * (0.3 + 0.7 * big) * (1 + 0.3 * blocks) * (1 - 0.7 * scour) + 1.2 * wall, steep: 0.9 + 0.45 * wall + 0.5 * blocks, a: size, b: size * (0.8 + 0.3 * hash2(hx, hz, 203)) };
+          return { tall: 0.55 * (0.75 + 0.5 * r) * (0.3 + 0.7 * big) * (1 + 0.3 * blocks) * (1 - 0.7 * scour) + 1.2 * wall, steep: 0.9 + 0.45 * wall + 0.5 * blocks, a: size, b: size * (0.8 + 0.3 * hash2(hx, hz, 203)) };
         }, top);
         // Big slabs, 8-11 m long and 3-4.5 m wide, in the bed only.
         if (wall < 1) {
@@ -609,13 +613,13 @@ export function createRiverField(seed = 4711) {
         const chip = 0.05 * (Math.abs(chipNoise(x * 0.9, z * 0.9)) - 0.35) + 0.025 * (Math.abs(chipNoise(x * 2.3 + 7, z * 2.3 - 4)) - 0.35);
         stone = zone * Math.max(0.04, top.h + chip);
       }
-      if (slick > 0) {
-        stone = slick >= 1 ? slickStone : stone + (slickStone - stone) * slick;
-        if (slick > 0.5) top.id = slickId;
+      if (plates > 0) {
+        stone = plates >= 1 ? slickStone : stone + (slickStone - stone) * plates;
+        if (plates > 0.5) top.id = slickId;
       }
       // Soil fills up to its level (not on the boulder walls); the rock pokes out above it, with a
       // soft corner where they meet.
-      const level = zone * Math.max(0, SOIL_LEVEL * Math.min(1.25, want + 0.25 * slick * thick * (1 - wall)));
+      const level = zone * Math.max(0, SOIL_LEVEL * Math.min(1.25, want + 0.12 * slick * thick * (1 - wall)));
       if (level > stone) {
         soil = level - stone;
         stone = smoothMax(stone, level, 0.02);
