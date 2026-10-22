@@ -86,10 +86,10 @@ const SOIL_STEP = 0.25; // m, grid the soil depth is cached on for rockAt (the s
 // broken by joints into slabs SLAB_JOINT m across: a V crack between them, each slab lifted and
 // tilted a little on its own. Sand settles in the cracks and the low ground (the soil pockets).
 const SLAB_LAYER = 0.3;
-const SLAB_EDGE = 0.18;
-const SLAB_JOINT = 3.4;
-const CRACK_WIDTH = 0.16; // m either side of a joint
-const CRACK_DEPTH = 0.18; // m
+const SLAB_FACE = 0.14; // m, the steep face where a slab steps down to a lower one
+const SLAB_JOINT = 2.6;
+const CRACK_WIDTH = 0.1; // m either side of a joint
+const CRACK_DEPTH = 0.15; // m
 
 // Maximum with a soft corner `k` wide, so there is no crease where the two cross.
 const smoothMax = (a, b, k) => {
@@ -157,49 +157,55 @@ function layer(x, z, cell, key, shape, out) {
   }
 }
 
-// The joints: the slab (jittered grid of `cell` m) that (x, z) lies on, and how far it is to the
-// slab's edge (the bisector with the nearest neighbour). Writes out.edge, out.id (0..1), out.tx,
-// out.tz (its tilt) and out.lift.
-function joints(x, z, cell, out) {
+const slab = { edge: 0, id: 0, y: 0, level: 0 };
+
+// A stack of flat slabs on a jittered grid of `cell` m: `surface(hx, hz, cx, cz)` gives slab
+// (hx, hz)'s { level, y } at the point (centre cx, cz). The point takes its own slab's height,
+// stepping down to a lower neighbour's over the last `face` m before their joint, so the height
+// is continuous and the steps are steep faces along the slabs' edges. Writes out.y, out.level,
+// out.edge (m to the nearest joint) and out.id (0..1).
+function slabStack(x, z, cell, surface, face, out) {
   const cx = Math.floor(x / cell);
   const cz = Math.floor(z / cell);
   let best = Infinity;
-  let bx = 0;
-  let bz = 0;
   let bi = 0;
   let bj = 0;
+  let bx = 0;
+  let bz = 0;
   for (let j = -1; j <= 1; j++) {
     for (let i = -1; i <= 1; i++) {
       const px = (cx + i + 0.1 + 0.8 * hash2(cx + i, cz + j, 701)) * cell;
       const pz = (cz + j + 0.1 + 0.8 * hash2(cx + i, cz + j, 702)) * cell;
       const d = (x - px) ** 2 + (z - pz) ** 2;
-      if (d < best) [best, bx, bz, bi, bj] = [d, px, pz, cx + i, cz + j];
+      if (d < best) [best, bi, bj, bx, bz] = [d, cx + i, cz + j, px, pz];
     }
   }
+  const own = surface(bi, bj, bx, bz);
+  let y = own.y;
   let edge = Infinity;
   for (let j = -2; j <= 2; j++) {
     for (let i = -2; i <= 2; i++) {
+      if (!i && !j) continue;
       const hx = bi + i;
       const hz = bj + j;
-      if (hx === bi && hz === bj) continue;
       const px = (hx + 0.1 + 0.8 * hash2(hx, hz, 701)) * cell;
       const pz = (hz + 0.1 + 0.8 * hash2(hx, hz, 702)) * cell;
       const ex = px - bx;
       const ez = pz - bz;
       const len = Math.hypot(ex, ez);
-      edge = Math.min(edge, ((px + bx) / 2 - x) * (ex / len) + ((pz + bz) / 2 - z) * (ez / len));
+      const e = ((px + bx) / 2 - x) * (ex / len) + ((pz + bz) / 2 - z) * (ez / len);
+      if (e < edge) edge = e;
+      if (e >= face) continue;
+      const other = surface(hx, hz, px, pz).y;
+      if (other < own.y) y = Math.min(y, own.y - (own.y - other) * (1 - smoothstep(0, face, e)));
     }
   }
+  out.y = y;
+  out.level = own.level;
   out.edge = edge;
   out.id = hash2(bi, bj, 703);
-  out.tx = hash2(bi, bj, 704) - 0.5;
-  out.tz = hash2(bi, bj, 705) - 0.5;
-  out.lift = hash2(bi, bj, 706) - 0.5;
-  out.dx = x - bx;
-  out.dz = z - bz;
   return out;
 }
-const slab = { edge: 0, id: 0, tx: 0, tz: 0, lift: 0, dx: 0, dz: 0 };
 
 export function createRiverField(seed = 4711) {
   // The bed's character at the last sample (for tools and tests): see sample().
@@ -559,29 +565,39 @@ export function createRiverField(seed = 4711) {
         // blocks along a step's lip, and rising to the walls' stacked ledges.
         const wx = x + 3 * chipNoise(x * 0.06 + 3.1, z * 0.06);
         const wz = z + 3 * chipNoise(x * 0.06, z * 0.06 + 8.7);
-        let t = 0.1 + 0.42 * (0.5 + 0.5 * sizeNoise(wx * 0.085, wz * 0.085)) + 0.1 * (0.5 + 0.5 * sizeNoise(wx * 0.23 + 5, wz * 0.23));
-        t *= 1 - 0.75 * scour;
-        t += 0.2 * Math.max(ledge, foot) * (1 - scour);
-        t += wall * (1.3 + 1.1 * (0.5 + 0.5 * bankNoise(x * 0.05 + 4, z * 0.05)));
-        // Into layers: flat plates with a steep ledge where the rock thickens past each layer.
-        const layerT = SLAB_LAYER * (0.7 + 0.75 * thick) * (1 + 1.8 * wall);
-        // Up the walls the layers go by height above the bed floor, the bank's own rise included,
-        // so a tall wall (a slot's) is stacked ledges all the way up, not one smooth slope.
-        const climb = wall * Math.max(0, under - floor);
-        const q = (t + climb) / layerT;
-        const level = Math.floor(q);
-        // (Softer up the walls, where the rock thickens so fast that sharp ledges would alias into teeth.)
-        const plate = (level + smoothstep(1 - SLAB_EDGE - 0.5 * wall, 1, q - level)) * layerT;
-        // Each slab between the joints sits a little higher or lower, and tilts a degree or two.
-        joints(wx, wz, SLAB_JOINT * (0.6 + 0.9 * thick) * (1 + 0.6 * wall), slab);
-        const shift = (1 - wall) * (0.09 * slab.lift + 0.03 * (slab.tx * slab.dx + slab.tz * slab.dz));
-        // The joints crack the plates: a V groove with steep sides (shallower in the walls).
-        const crack = 1 - smoothstep(0, CRACK_WIDTH, slab.edge + 0.04 * chipNoise(x * 1.7, z * 1.7));
-        // A weathered skin: faint undulation and fine pitting over the plates.
-        const chip = 0.025 * chipNoise(x * 0.7, z * 0.7) + 0.012 * (Math.abs(chipNoise(x * 2.3 + 7, z * 2.3 - 4)) - 0.35);
-        slickStone = zone * Math.max(0.04, plate - climb + shift + chip - CRACK_DEPTH * crack * crack);
+        // What thickens the rock here, the same for every slab around (so the slabs agree where
+        // they meet): thinner where the water scoured it, blocks along a step's lip, the walls.
+        const scale = 1 - 0.75 * scour;
+        const extra = wall * (1.3 + 1.1 * (0.5 + 0.5 * bankNoise(x * 0.05 + 4, z * 0.05)));
+        // (The layers' thickness, the scour and the rest go into a slab's height smoothly, after
+        // its stratum is picked from its centre alone, so a slab never steps within itself.)
+        const layerT = SLAB_LAYER * (0.7 + 0.75 * thick) * scale;
+        // The slabs: each one between the joints is a flat plate at its own stratum (by how thick
+        // the rock lies at its centre: a slow swell, so neighbours mostly share a level and the
+        // steps between them wind in lobes), lifted a few cm and tilted a degree on its own. Where
+        // a slab stands over a neighbour it drops to it in a steep face along the joint, so the
+        // edges are crisp and follow the broken outline of the slabs. (A fixed grid: a cell size
+        // that changed along the bed would move the slabs under the point.)
+        const cell = SLAB_JOINT;
+        const tilt = 1 - wall;
+        const surface = (hx, hz, cx, cz) => {
+          // (Plus a random part per slab, so some stand a layer proud of their neighbours or sit a
+          // layer down among them: broken tiers rather than smooth contours.)
+          const t = 0.2 + 0.75 * (0.5 + 0.5 * sizeNoise(cx * 0.085, cz * 0.085)) + 0.15 * (0.5 + 0.5 * sizeNoise(cx * 0.23 + 5, cz * 0.23));
+          const level = Math.floor(t / SLAB_LAYER + 0.9 * (hash2(hx, hz, 707) - 0.5));
+          const lift = tilt * 0.05 * (hash2(hx, hz, 706) - 0.5);
+          const sx = tilt * 0.03 * (hash2(hx, hz, 704) - 0.5);
+          const sz = tilt * 0.03 * (hash2(hx, hz, 705) - 0.5);
+          return { level, y: level * layerT + extra + lift + sx * (wx - cx) + sz * (wz - cz) };
+        };
+        slabStack(wx, wz, cell, surface, SLAB_FACE, slab);
+        // The joints crack the plates: a narrow V groove.
+        const crack = 1 - smoothstep(0, CRACK_WIDTH, slab.edge + 0.03 * chipNoise(x * 1.7, z * 1.7));
+        // A weathered skin: fine pitting and a faint undulation over the plates.
+        const chip = 0.008 * chipNoise(x * 0.7, z * 0.7) + 0.01 * (Math.abs(chipNoise(x * 2.3 + 7, z * 2.3 - 4)) - 0.35);
+        slickStone = zone * Math.max(0.04, slab.y + chip - CRACK_DEPTH * crack * crack);
         // Strata alternate tone (paler and redder beds); slabs vary within them.
-        slickId = 1 + (level % 2 ? 1 : 0) + 0.98 * slab.id;
+        slickId = 1 + (slab.level % 2 ? 1 : 0) + 0.98 * slab.id;
       }
       if (plates < 1) {
         // Small rocks, about a metre across.
@@ -619,7 +635,7 @@ export function createRiverField(seed = 4711) {
       }
       // Soil fills up to its level (not on the boulder walls); the rock pokes out above it, with a
       // soft corner where they meet.
-      const level = zone * Math.max(0, SOIL_LEVEL * Math.min(1.25, want + 0.12 * slick * thick * (1 - wall)));
+      const level = zone * Math.max(0, SOIL_LEVEL * Math.min(1.25, want) * (1 - 0.35 * plates));
       if (level > stone) {
         soil = level - stone;
         stone = smoothMax(stone, level, 0.02);

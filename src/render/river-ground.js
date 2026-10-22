@@ -380,7 +380,10 @@ function pbrLook() {
   const ripple = sin(rippleDir.mul(78).add(fbm(xz.mul(1.4), 2).mul(14))).mul(0.5).add(0.5);
   const sandColor = mix(soilColor(xz).mul(vec3(1.3, 0.98, 0.8)), hex('#b5826a'), 0.6).mul(mix(float(1), ripple.mul(0.1).add(0.95), detail(0.08)));
   const color = dusty(mix(rockColor, sandColor, soilW), 0.25).mul(patches).mul(desertTint(xz)).mul(vec3(0.92, 0.86, 0.84));
-  const n = normalize(mix(rockN, dirt.n, soilW));
+  // The slabs' flat tops are worn smooth: the rock texture's lumpy relief only faintly there,
+  // in full on the faces and the boulders' sides.
+  const smoothTop = smoothstep(0.9, 0.98, N.y).mul(0.75);
+  const n = normalize(mix(mix(rockN, N, smoothTop), dirt.n, soilW));
   const arh = mix(rockArh, dirt.arh, soilW);
   return { color: color.mul(arh.r.mul(0.5).add(0.5)), normal: n, roughness: arh.g };
 }

@@ -425,7 +425,9 @@ describe('dry river terrain', () => {
         walls++;
       }
     }
-    expect(bedMax).toBeLessThan(1.2); // the big slabs in the bed stand at most about a metre
+    // The big slabs in the bed stand at most about a metre; stacked slickrock tiers (one layer,
+    // under 45 cm, per step) a little more.
+    expect(bedMax).toBeLessThan(1.6);
     // Soil pockets (sand between the slickrock plates) cover some of the bed, not most of it.
     expect(soil / all).toBeGreaterThan(0.08);
     expect(soil / all).toBeLessThan(0.4);
