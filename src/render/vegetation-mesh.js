@@ -191,6 +191,8 @@ const GREENS = ['#6f8f3a', '#86a147', '#5f7d33', '#98a95a', '#7a8a45'].map((c) =
 const GUM_GREENS = ['#7d8f68', '#8e9c74', '#6c7e5a', '#9aa47e', '#768660'].map((c) => new Color(c));
 const GUM_BARK = ['#e4dccb', '#cfc8ba', '#d9c3b0', '#bdb6a6'].map((c) => new Color(c));
 const DRY = new Color('#a39a5a');
+// Dry desert grass (the dry river's tufts).
+const DRY_GRASS = new Color('#b0a46e');
 const m = new Matrix4();
 const q = new Quaternion();
 const up = new Vector3(0, 1, 0);
@@ -219,6 +221,7 @@ export function createVegetationMesh(plants) {
     const greens = p.gum || p.grey ? GUM_GREENS : GREENS;
     col.copy(greens[Math.floor(p.shade * greens.length) % greens.length]);
     if (p.shade > 0.85) col.lerp(DRY, 0.5);
+    if (p.dry) col.lerp(DRY_GRASS, 0.75);
     if (p.flower) col.lerp(FLOWERS[p.flower - 1], 0.75);
     mesh.setColorAt(i, col);
   };

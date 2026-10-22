@@ -8,9 +8,9 @@ import { BED_ROCK, RIVER_PBR, rockDetailMaterial } from './river-ground.js';
 const geometry = new IcosahedronGeometry(1, 0);
 // With the photo look (?ground=pbr), sandstone texture detail at a finer scale (pebbles are small).
 const material = RIVER_PBR ? rockDetailMaterial({ size: 0.4, roughness: 1 }) : new MeshStandardMaterial({ roughness: 1, metalness: 0, flatShading: true });
-const LIGHT = new Color('#d69a72');
-const DARK = new Color('#7d4a32');
-const GREY = new Color('#a88470');
+const LIGHT = new Color('#c9a08a');
+const DARK = new Color('#74483a');
+const GREY = new Color('#9c8680');
 const RED = new Color('#a8683f');
 const BED = new Color(BED_ROCK);
 const m4 = new Matrix4();

@@ -13,9 +13,9 @@ const DARK = new Color('#6f675d');
 const RED_LIGHT = new Color('#cf8d62');
 const RED_DARK = new Color('#8f4a2d');
 // Yellow-grey sandstone for the dry river.
-const SAND_LIGHT = new Color('#d8946a');
-const SAND_DARK = new Color('#8a4a2e');
-const SAND_GREY = new Color('#a87a64');
+const SAND_LIGHT = new Color('#c99a80');
+const SAND_DARK = new Color('#7c4a36');
+const SAND_GREY = new Color('#9c8078');
 // Grey granite for the town.
 const GRANITE_LIGHT = new Color('#b9b6ae');
 const GRANITE_DARK = new Color('#77746f');

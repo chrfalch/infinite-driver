@@ -79,17 +79,19 @@ function generateRiverPlants(heightAt, cx, cz) {
       let pTree;
       // Trees keep back from the bed (they would hide the car in the top-down view); shrubs line it.
       // Desert scrub: low green bushes along the rim, a few scattered junipers further out.
-      if (dist < 10) [pBush, pTree] = [0.18, 0];
-      else if (dist < 14) [pBush, pTree] = [0.14, 0.01];
-      else if (dist < 32) [pBush, pTree] = [0.1, 0.025];
+      if (dist < 10) [pBush, pTree] = [0.3, 0];
+      else if (dist < 14) [pBush, pTree] = [0.26, 0.01];
+      else if (dist < 32) [pBush, pTree] = [0.16, 0.025];
       else if (dist < 90) [pBush, pTree] = [0.06, 0.015];
       else [pBush, pTree] = [0.03, 0.008];
       const y = heightAt(x, z);
       if (roll < pTree) {
         const height = 2.5 + size * 3;
-        plants.push({ kind: 'tree', x, y, z, height, trunk: 0.05 * height, turn, shade });
+        plants.push({ kind: 'tree', grey: true, x, y, z, height, trunk: 0.05 * height, turn, shade });
       } else if (roll < pTree + pBush) {
-        plants.push({ kind: 'bush', x, y, z, size: 0.35 + size * 0.6, turn, shade });
+        // Half of them low tufts of dry grass, the rest grey-green scrub.
+        const tuft = (shade * 7.31) % 1 < 0.5;
+        plants.push({ kind: 'bush', x, y, z, size: tuft ? 0.22 + size * 0.2 : 0.35 + size * 0.6, turn, shade, dry: tuft, grey: !tuft });
       }
     }
   }

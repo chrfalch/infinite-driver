@@ -6,7 +6,7 @@ import { stadiumGravel } from './stadium-gravel.js';
 import { GROUND } from '../tire/config.js';
 import { mulberry32 } from '../terrain/height.js';
 import { CHUNK_RES, CHUNK_SIZE } from '../terrain/chunk.js';
-import { CANYON_PBR, RIVER_PBR, canyonDirtDetail, canyonGravelDetail, canyonNormal, canyonRockDetail, forestFloorColor, forestFloorNormal } from './river-ground.js';
+import { CANYON_PBR, RIVER_PBR, desertTint, canyonDirtDetail, canyonGravelDetail, canyonNormal, canyonRockDetail, forestFloorColor, forestFloorNormal } from './river-ground.js';
 import { SOIL_MIN } from '../terrain/riverbed.js';
 import { COVER_DEPTH, LAKE, ROAD as SNOW_ROAD } from '../terrain/snow.js';
 import { KERB as TOWN_KERB, ROAD_HALF_WIDTH as TOWN_ROAD, WATER_LEVEL } from '../terrain/town.js';
@@ -213,7 +213,9 @@ export function groundShading({ color, steep, gravel, roadDist, lake, normal }) 
     return out;
   })();
   const dirt = FOREST_DETAIL ? forestFloorColor(color, steep) : CANYON_DETAIL ? color.mul(mix(vec3(1), canyonDirtDetail(), 0.85)) : arena;
-  const ground = mix(dirt, CANYON_DETAIL ? rock.mul(mix(vec3(1), canyonRockDetail(normal), 0.8)) : rock, steep);
+  const ground0 = mix(dirt, CANYON_DETAIL ? rock.mul(mix(vec3(1), canyonRockDetail(normal), 0.8)) : rock, steep);
+  // Dry river: the same dusty patches as the bed (render/river-ground.js), a little desaturated.
+  const ground = RIVER_PBR ? mix(ground0, vec3(dot(ground0, vec3(0.3, 0.59, 0.11))).mul(vec3(1.08, 0.98, 0.93)), 0.25).mul(desertTint(positionWorld.xz)).mul(vec3(0.88, 0.82, 0.8)) : ground0;
   const snowFar = snowGroundColor(roadDist, gravel, lake);
   // In town 'lake' is the signed distance to the street and 'gravel' where its centre line shows.
   const street = townStreet(roadDist, lake, gravel);

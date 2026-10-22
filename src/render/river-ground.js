@@ -316,6 +316,25 @@ export const soilColor = (p) => texture((soilColorMap ??= soilSet?.color ?? load
 // Slow patches of tone over the textured bed, so the repeats do not show.
 export const groundPatches = (p) => fbm(p.mul(0.35), 3).mul(0.25).add(0.88);
 
+// Dusty desert variance over the ground, as a tint to multiply in: slow patches (tens of metres)
+// of pale wind-blown dust, mauve-grey weathered rock and dark rust, and a finer mottle within them,
+// the whole a little desaturated, so the red country is not one even orange.
+const DUST = hex('#d6b49e').div(hex('#c08a62'));
+const MAUVE = hex('#a88a88').div(hex('#c08a62'));
+const RUST = hex('#7a4030').div(hex('#c08a62'));
+export function desertTint(p) {
+  const a = fbm(p.mul(0.045).add(vec2(3.7, 1.3)), 3);
+  const b = fbm(p.mul(0.07).add(vec2(11.2, 5.1)), 3);
+  const c = fbm(p.mul(0.11).add(vec2(-4.4, 8.8)), 3);
+  const fine = fbm(p.mul(0.6), 2).mul(0.14).add(0.93);
+  let t = mix(vec3(1), DUST, smoothstep(0.52, 0.68, a).mul(0.5));
+  t = mix(t, MAUVE, smoothstep(0.55, 0.7, b).mul(0.7));
+  t = mix(t, RUST, smoothstep(0.58, 0.72, c).mul(0.6));
+  return t.mul(fine);
+}
+// Takes some of the saturation out of `c` (0..1).
+const dusty = (c, amount) => mix(c, vec3(grey(c).x).mul(vec3(1.08, 0.98, 0.93)), amount);
+
 function pbrLook() {
   const soilTex = soilTextures();
   // Rock: triplanar, one texture tile per 2.5 m.
@@ -336,8 +355,11 @@ function pbrLook() {
   const bandTone = mix(mix(vec3(0.72, 0.5, 0.4), vec3(1.05, 0.88, 0.76), smoothstep(0.2, 0.3, bandPick)), vec3(1.45, 1.3, 1.12), smoothstep(0.72, 0.8, bandPick))
     .mul(smoothstep(0.86, 1, fract(strata)).mul(-0.35).add(1));
   // (The texture's own mottle toned down on the faces, so the bands carry them.)
-  const face = mix(texRock, vec3(grey(texRock).x).mul(vec3(1.25, 0.95, 0.8)), 0.4).mul(bandTone);
-  const rockColor = mix(face, mix(texRock, tone.mul(1.9), 0.45).mul(vec3(1.2, 1.08, 1.0)), top);
+  // Within the bands, thin laminae a few cm apart (the bedding the edges break along).
+  const lamina = sin(positionWorld.y.div(0.045).add(fbm(xz.mul(1.3), 2).mul(6))).mul(0.5).add(0.5);
+  const laminae = mix(float(1), lamina.mul(0.22).add(0.86), detail(0.05));
+  const face = mix(texRock, vec3(grey(texRock).x).mul(vec3(1.25, 0.95, 0.8)), 0.4).mul(bandTone).mul(laminae);
+  const rockColor = mix(face, mix(texRock, tone.mul(1.9), 0.6).mul(vec3(1.0, 0.86, 0.8)), top);
 
   // Soil (ambientCG Ground109, dry dirt with grit): projected straight down, a tile per 1.6 m, with
   // slow patches of tone so the repeats do not show.
@@ -353,8 +375,11 @@ function pbrLook() {
   const edge = soil.sub(SOIL_MIN).add(dirt.arh.b.sub(rockArh.b).mul(0.012));
   const soilW = smoothstep(-0.004, 0.004, edge);
   // Red desert sand: the soil texture's grit, its colour pulled toward a warm orange.
-  const sandColor = mix(soilColor(xz).mul(vec3(1.3, 0.98, 0.8)), hex('#d0905e'), 0.55);
-  const color = mix(rockColor, sandColor, soilW).mul(patches);
+  // Fine red sand, paler and pinker than the rock, in wind ripples ~8 cm apart.
+  const rippleDir = xz.x.mul(0.6).add(xz.y.mul(0.8));
+  const ripple = sin(rippleDir.mul(78).add(fbm(xz.mul(1.4), 2).mul(14))).mul(0.5).add(0.5);
+  const sandColor = mix(soilColor(xz).mul(vec3(1.3, 0.98, 0.8)), hex('#b5826a'), 0.6).mul(mix(float(1), ripple.mul(0.1).add(0.95), detail(0.08)));
+  const color = dusty(mix(rockColor, sandColor, soilW), 0.25).mul(patches).mul(desertTint(xz)).mul(vec3(0.92, 0.86, 0.84));
   const n = normalize(mix(rockN, dirt.n, soilW));
   const arh = mix(rockArh, dirt.arh, soilW);
   return { color: color.mul(arh.r.mul(0.5).add(0.5)), normal: n, roughness: arh.g };
