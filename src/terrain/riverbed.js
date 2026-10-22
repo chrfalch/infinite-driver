@@ -41,7 +41,7 @@ export const ROCK_REACH = 9.4;
 const SPACING = 360; // m between neighbouring beds
 const WIDTH_RANGE = [1.5, 6.5]; // m, the bed's half-width along its length
 const SLOT_WIDTH = 1.6; // m, a slot's half-width (give or take 0.35)
-const SLOT_RISE = 3.2; // m, how much taller a slot's walls stand
+const WALL_RISE = 2.2; // m, how much the land stands over the banks' own rise: tall walls all along, so the car stays in the river
 // The staircase: a riser every STEP_PERIOD m (give or take STEP_JITTER) of a warped way along the
 // bed, climbing STEP_RISE m (give or take STEP_VARY) over 2-3 m, then a level shelf up to the next.
 // The warp (STEP_WARP m, over a few hundred metres) bunches the risers into cascades of short
@@ -280,12 +280,14 @@ export function createRiverField(seed = 4711) {
   // The bed's half-width at `s` along it: stretches of a hundred metres or so that wander between
   // a tight gap and wide open rock.
   // Each bed (k) has its own.
-  // Slots: every few hundred metres the bed pinches into a narrow slot for 50-100 m, SLOT_WIDTH m
-  // either side of its centre line, between walls SLOT_RISE m taller than elsewhere (0 outside
-  // one, 1 in it).
-  const slotAt = (s, k) => smoothstep(0.3, 0.5, widthNoise(s * 0.0075, 151.3 + 9 * k));
+  // Slots: here and there the bed pinches into a narrow slot for 30-100 m, SLOT_WIDTH m either
+  // side of its centre line (0 outside one, 1 in it). Both go by a warped way along the bed, so
+  // the narrow and the open stretches come at uneven intervals and run on for uneven lengths.
+  const irregular = (s, k) => s + 70 * widthNoise(s * 0.0021, 201.9 + 9 * k) + 18 * widthNoise(s * 0.009, 207.3 + 9 * k);
+  const slotAt = (s, k) => smoothstep(0.32, 0.52, widthNoise(irregular(s, k) * 0.0075, 151.3 + 9 * k));
   const widthAt = (s, k) => {
-    const open = Math.min(WIDTH_RANGE[1], Math.max(WIDTH_RANGE[0], 3.1 + 3.6 * widthNoise(s * 0.0105, 0.5 + 9 * k) + 1.1 * widthNoise(s * 0.043, 7.5 + 9 * k)));
+    const u = irregular(s, k);
+    const open = Math.min(WIDTH_RANGE[1], Math.max(WIDTH_RANGE[0], 3.1 + 3.6 * widthNoise(u * 0.0105, 0.5 + 9 * k) + 1.1 * widthNoise(u * 0.043, 7.5 + 9 * k)));
     const slot = slotAt(s, k);
     return slot > 0 ? open + (SLOT_WIDTH + 0.35 * widthNoise(s * 0.05, 171.1 + 9 * k) - open) * slot : open;
   };
@@ -504,8 +506,7 @@ export function createRiverField(seed = 4711) {
     h -= inBed * (depth * groove + 0.04 * channel + 0.3 * pothole);
     h -= 0.08 * foot * stepRise + poolDepth;
     // Banks: rise 0.6-1.5 m off the bed edge, uneven along the bed.
-    const slot = slotAt(s, b.k);
-    const bankRise = 0.6 + 0.9 * (0.5 + 0.5 * bankNoise(x * 0.018, z * 0.018)) + SLOT_RISE * slot;
+    const bankRise = 0.6 + 0.9 * (0.5 + 0.5 * bankNoise(x * 0.018, z * 0.018)) + WALL_RISE * (0.85 + 0.3 * (0.5 + 0.5 * bankNoise(x * 0.007 + 13, z * 0.007)));
     const bank = smoothstep(BED_HALF_WIDTH, BED_HALF_WIDTH + 4.5, dist);
     h += bank * bankRise;
     // Forest floor: level with the bank tops, with small bumps and a gentle swell.
@@ -539,11 +540,10 @@ export function createRiverField(seed = 4711) {
       // None on a riser (the water swept it bare), more on the bar below it.
       const want = (1 - wall) * (1 - ledge) * Math.min(1.4, 1.45 * n - 0.15 + 0.3 * channel + 0.35 * bar);
       const buried = smoothstep(0.55, 0.95, want);
-      // The bed's character changes every hundred metres or so, so the run does not repeat:
-      // stretches of rounded boulders (`slick` 0) between stretches of bedded slickrock (1), and
-      // within those, thin broken ledges and small slabs (`thick` 0) or thick, broad plates (1).
-      // (Slots are always slickrock: layered walls.)
-      const slick = SLICKROCK ? Math.max(slot, smoothstep(-0.35, -0.1, widthNoise(s * 0.006, 33.3 + 9 * b.k))) : 0;
+      // The bed's character goes mostly with its width, give or take: where it narrows, rounded
+      // boulders choke it (`slick` 0); where it opens out, flat bedded slickrock (1). Within the
+      // slickrock, thin broken ledges and small slabs (`thick` 0) or thick, broad plates (1).
+      const slick = SLICKROCK ? smoothstep(2.2, 3.4, width + 1.3 * widthNoise(s * 0.017, 33.3 + 9 * b.k)) : 0;
       const thick = smoothstep(-0.45, 0.45, widthNoise(s * 0.009, 61.7 + 9 * b.k));
       character.slick = slick;
       character.thick = thick;
