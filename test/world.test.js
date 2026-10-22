@@ -15,6 +15,8 @@ describe('world choice', () => {
   it('lets ?terrain override the saved world', () => {
     expect(worldMode('?terrain=river')).toBe('river');
     expect(worldMode('?terrain=flat')).toBe('flat');
+    expect(worldMode('?terrain=dry-river')).toBe('river');
+    expect(worldMode('?terrain=sunny-town')).toBe('daytown');
   });
 
   it('offers the canyon, the dry river, the snowfield, the sunny town and the stadium', () => {

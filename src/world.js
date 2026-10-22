@@ -2,6 +2,8 @@
 // picker saves it and reloads the page into it; ?terrain=<mode> overrides it (tests use ?terrain=flat).
 export const WORLDS = { 'Red-rock canyon': 'canyon', 'Dry river': 'river', Snowfield: 'snow', 'Sunny town': 'daytown', Stadium: 'stadium' };
 export const DEFAULT_WORLD = 'canyon';
+// Readable names for ?terrain= (the links people share).
+const TERRAIN_ALIASES = { 'dry-river': 'river', 'red-rock-canyon': 'canyon', 'sunny-town': 'daytown' };
 const WORLD_KEY = 'drift.world';
 // The world just picked, for the page load it reloads into (this tab only).
 const PICKED_KEY = 'drift.picked';
@@ -35,7 +37,8 @@ function pickedWorld() {
 
 // The terrain mode for this page load.
 export function worldMode(search = globalThis.location?.search ?? '') {
-  return new URLSearchParams(search).get('terrain') ?? pickedWorld() ?? savedWorld();
+  const asked = new URLSearchParams(search).get('terrain');
+  return (asked && TERRAIN_ALIASES[asked]) ?? asked ?? pickedWorld() ?? savedWorld();
 }
 
 // The world already chosen for this page load (?terrain, or a pick that reloaded into it), or null
