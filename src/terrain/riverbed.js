@@ -39,7 +39,7 @@ export const BED_HALF_WIDTH = 4; // m, the flat bed either side of the centre li
 export const ROCK_EDGE = 8.2;
 export const ROCK_REACH = 9.4;
 const SPACING = 360; // m between neighbouring beds
-const WIDTH_RANGE = [1.5, 6.5]; // m, the bed's half-width along its length
+const WIDTH_RANGE = [1.5, 7.5]; // m, the bed's half-width along its length
 const SLOT_WIDTH = 1.6; // m, a slot's half-width (give or take 0.35)
 const WALL_RISE = 2.2; // m, how much the land stands over the banks' own rise: tall walls all along, so the car stays in the river
 // The staircase: a riser every STEP_PERIOD m (give or take STEP_JITTER) of a warped way along the
@@ -284,10 +284,10 @@ export function createRiverField(seed = 4711) {
   // side of its centre line (0 outside one, 1 in it). Both go by a warped way along the bed, so
   // the narrow and the open stretches come at uneven intervals and run on for uneven lengths.
   const irregular = (s, k) => s + 70 * widthNoise(s * 0.0021, 201.9 + 9 * k) + 18 * widthNoise(s * 0.009, 207.3 + 9 * k);
-  const slotAt = (s, k) => smoothstep(0.32, 0.52, widthNoise(irregular(s, k) * 0.0075, 151.3 + 9 * k));
+  const slotAt = (s, k) => smoothstep(0.42, 0.6, widthNoise(irregular(s, k) * 0.0075, 151.3 + 9 * k));
   const widthAt = (s, k) => {
     const u = irregular(s, k);
-    const open = Math.min(WIDTH_RANGE[1], Math.max(WIDTH_RANGE[0], 3.1 + 3.6 * widthNoise(u * 0.0105, 0.5 + 9 * k) + 1.1 * widthNoise(u * 0.043, 7.5 + 9 * k)));
+    const open = Math.min(WIDTH_RANGE[1], Math.max(WIDTH_RANGE[0], 4.7 + 3.6 * widthNoise(u * 0.0105, 0.5 + 9 * k) + 1.1 * widthNoise(u * 0.043, 7.5 + 9 * k)));
     const slot = slotAt(s, k);
     return slot > 0 ? open + (SLOT_WIDTH + 0.35 * widthNoise(s * 0.05, 171.1 + 9 * k) - open) * slot : open;
   };
