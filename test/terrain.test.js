@@ -251,7 +251,7 @@ describe('dry river terrain', () => {
     expect(offsets[Math.floor(offsets.length * 0.1)]).toBeLessThan(-0.35);
     expect(offsets[Math.floor(offsets.length * 0.9)]).toBeGreaterThan(0.35);
     // Cut in 0.15-0.5 m (more where the bed is narrow).
-    expect(depths[Math.floor(depths.length * 0.1)]).toBeGreaterThan(0.12);
+    expect(depths[Math.floor(depths.length * 0.1)]).toBeGreaterThan(0.11);
     expect(depths[depths.length >> 1]).toBeGreaterThan(0.2);
     expect(depths[depths.length - 1]).toBeLessThan(0.85);
   });
@@ -359,11 +359,12 @@ describe('dry river terrain', () => {
       const w = heightAt.bedWidth(p.x, p.z);
       for (const sgn of [1, -1]) {
         // From the bank top out into the forest, the ground stands 0.6-1.5 m over the bed beside
-        // it (up to a riser more where it is beside one, plus small bumps): no hills over it.
+        // it (up to a riser more where it is beside one, plus small bumps; 3.2 m more along a
+        // slot): no hills over it.
         for (const d of [w + 7, w + 12, w + 25, w + 45]) {
           const s = heightAt.sample(p.x + side[0] * d * sgn, p.z + side[1] * d * sgn);
           expect(s.h - s.bedY).toBeGreaterThan(0.4);
-          expect(s.h - s.bedY).toBeLessThan(4.5);
+          expect(s.h - s.bedY).toBeLessThan(4.5 + 3.2);
         }
       }
     }

@@ -329,7 +329,15 @@ function pbrLook() {
   // Slickrock: the plates' flat tops weathered pale and pinkish (the texture's mottle muted there),
   // their ledges and the joints' faces a deeper, darker red.
   const top = smoothstep(0.55, 0.85, N.y);
-  const rockColor = mix(texRock.mul(vec3(0.92, 0.74, 0.64)), mix(texRock, tone.mul(1.9), 0.45).mul(vec3(1.2, 1.08, 1.0)), top);
+  // The faces show the strata: bands a few tens of cm thick by height (wavering a little), some
+  // paler, some deeper red, so a wall reads as layered rock rather than a shadow.
+  const strata = positionWorld.y.div(0.55).add(fbm(xz.mul(0.25), 2).mul(1.6));
+  const bandPick = hash(floor(strata), float(7.31));
+  const bandTone = mix(mix(vec3(0.72, 0.5, 0.4), vec3(1.05, 0.88, 0.76), smoothstep(0.2, 0.3, bandPick)), vec3(1.45, 1.3, 1.12), smoothstep(0.72, 0.8, bandPick))
+    .mul(smoothstep(0.86, 1, fract(strata)).mul(-0.35).add(1));
+  // (The texture's own mottle toned down on the faces, so the bands carry them.)
+  const face = mix(texRock, vec3(grey(texRock).x).mul(vec3(1.25, 0.95, 0.8)), 0.4).mul(bandTone);
+  const rockColor = mix(face, mix(texRock, tone.mul(1.9), 0.45).mul(vec3(1.2, 1.08, 1.0)), top);
 
   // Soil (ambientCG Ground109, dry dirt with grit): projected straight down, a tile per 1.6 m, with
   // slow patches of tone so the repeats do not show.
