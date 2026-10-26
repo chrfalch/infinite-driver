@@ -34,6 +34,7 @@ import { updateTracks } from './systems/tracks.js';
 import { updateSoil } from './systems/soil.js';
 import { updateBushes } from './systems/vegetation.js';
 import { SoilParticles, createFineParticles } from './render/soil-particles.js';
+import { DustClouds } from './render/dust-clouds.js';
 import { TireTracks } from './render/tracks.js';
 import { GROUND, setPavedRoads, setSnowCover } from './tire/config.js';
 import { GroundDeformation } from './terrain/deformation.js';
@@ -217,6 +218,8 @@ export async function main(loading) {
     Soil({
       particles: new SoilParticles(render.scene, heightAt.snow ? { drag: 3, powder: true } : undefined),
       fines: heightAt.snow ? null : createFineParticles(render.scene),
+      // Dust clouds raised by the wheels on dry ground (not on snow).
+      dust: heightAt.snow ? null : new DustClouds(render.scene, { capacity: render.quality === "low" ? 400 : 1200 }),
       carry: [0, 0, 0, 0],
       spin: [0, 0, 0, 0],
     }),
@@ -399,7 +402,14 @@ export async function main(loading) {
       timed('sys.syncAntenna', () => syncAntenna(world));
       timed('sys.syncEngine', () => syncEngine(world));
       timed('sys.updateTracks', () => updateTracks(world));
-      timed('sys.updateSoil', () => updateSoil(world));
+      timed('sys.updateSoil', () => {
+        const soil = world.get(Soil);
+        if (soil?.dust) {
+          soil.camera = render.activeCamera;
+          soil.dust.setLight(1 - 0.85 * daylight.dark);
+        }
+        updateSoil(world);
+      });
       timed('sys.groundSurface', () => updateGroundSurface(world, groundSurface));
       timed('sys.updateBushes', () => updateBushes(world));
       orbitCamera(readCameraKeys(), realDelta);

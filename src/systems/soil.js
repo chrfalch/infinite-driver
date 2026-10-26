@@ -20,6 +20,47 @@ function soundEvent(soil, e) {
 }
 
 const tmp = new Color();
+const dustTint = new Color();
+// How dusty each world's dry ground is (the dry river's sandstone is the dustiest).
+const DUSTINESS = { river: 1.3, canyon: 1, stadium: 0.8, daytown: 0.5 };
+const PALE_DUST = new Color('#e2c6b0');
+
+// Raises dust from a wheel: puffs at its contact patch, more the faster it rolls, spins or slides
+// (`rate` puffs per second, carried over in `state.carryDust[i]`).
+function raiseDust(dust, state, i, rate, delta, contact, v, back, fx, fz, heightAt, surfaceAt) {
+  state.carryDust ??= [0, 0, 0, 0];
+  state.carryDust[i] += rate * delta;
+  if (state.carryDust[i] < 1) return;
+  terrainColorAt(heightAt, contact.x, contact.z, dustTint);
+  // Fine dust is paler than the ground it lies on.
+  dustTint.lerp(PALE_DUST, 0.45);
+  const speed = Math.hypot(v.x, v.z);
+  while (state.carryDust[i] >= 1) {
+    state.carryDust[i] -= 1;
+    const side = (Math.random() - 0.5) * 0.5;
+    const x = contact.x + fx * back * 0.3 - fz * side;
+    const z = contact.z + fz * back * 0.3 + fx * side;
+    const out = 0.6 + Math.random() * 1.2;
+    const size = 0.7 + Math.random() * 0.7 + speed * 0.04;
+    const shade = 0.9 + Math.random() * 0.15;
+    if (
+      !dust.emit(
+        x,
+        surfaceAt(x, z) + 0.2,
+        z,
+        v.x * 0.35 + fx * back * out + (Math.random() - 0.5) * 0.8,
+        0.3 + Math.random() * 0.6,
+        v.z * 0.35 + fz * back * out + (Math.random() - 0.5) * 0.8,
+        size,
+        3.5 + Math.random() * 3 + speed * 0.1,
+        3 + Math.random() * 2.5,
+        Math.min(0.5, 0.26 + speed * 0.012),
+        { r: dustTint.r * shade, g: dustTint.g * shade, b: dustTint.b * shade },
+      )
+    )
+      return;
+  }
+}
 const MAX_DIG = 0.4; // m, deepest hole spinning tyres can dig
 const PATCH_HALF_LENGTH = 0.16; // m, half the length of ground a spinning tyre digs out
 // m³ of soil a slipping tyre churns out per metre of tread slip and metre of tread width, at
@@ -102,6 +143,10 @@ export function updateSoil(world) {
 
   // Snow throws more, finer and whiter spray than soil: powder, not clumps of dirt.
   const snow = currentSnow();
+  if (soil.dust && soil.camera) {
+    const player = world.queryFirst(IsPlayer, Vehicle);
+    soil.dust.update(delta, soil.camera, surfaceAt, player ? player.get(Vehicle).body.translation() : null);
+  }
   const softness = snow ? 0.8 : GROUND.softness;
   const grain = snow ? 0.55 : 1; // clump size scale
   // A spinning tyre on snow mostly throws the loose powder and polishes the rut; it digs less
@@ -133,8 +178,19 @@ export function updateSoil(world) {
     const v = body.linvel();
     const ground = v.x * fx + v.z * fz;
 
+    const dustiness = soil.dust && !snow ? (DUSTINESS[heightAt.world] ?? 0.8) : 0;
     for (let i = 0; i < 4; i++) {
       const contact = contacts[i];
+      // Dust rises from any dry ground, bare rock too (it lies thin on it): with speed, and much
+      // more with wheelspin or a slide.
+      if (dustiness && contact && surfaceAt(contact.x, contact.z) >= waterLevel - 0.03) {
+        state.spin ??= [0, 0, 0, 0];
+        const slipNow = Math.abs(state.spin[i] * radius - ground);
+        const slide = Math.abs(state.lateral?.[i] ?? 0);
+        const hard = hardAt?.(contact.x, contact.z) ? 0.6 : 1;
+        const rate = dustiness * hard * (Math.max(0, Math.abs(ground) - 0.8) * 2.6 + Math.max(0, slipNow - 0.5) * 6 + Math.max(0, slide - 0.5) * 6);
+        raiseDust(soil.dust, state, i, rate, delta, contact, v, ground >= 0 ? -1 : 1, fx, fz, heightAt, surfaceAt);
+      }
       // Bare rock throws no state, nor does a tyre under water (it throws water, systems/water.js).
       if (!contact || hardAt?.(contact.x, contact.z) || surfaceAt(contact.x, contact.z) < waterLevel - 0.03) {
         state.carry[i] = 0;
