@@ -29,7 +29,14 @@ export class DustClouds {
     const lobes = sin(angle.mul(3).add(seed)).mul(0.12).add(sin(angle.mul(5).sub(seed.mul(1.7))).mul(0.08));
     const r = d.length().mul(float(1).add(lobes));
     const grain = fract(sin(d.x.mul(91.7).add(d.y.mul(47.3)).add(seed)).mul(43758.5)).mul(0.15).add(0.85);
-    material.opacityNode = float(1).sub(smoothstep(0.15, 1, r)).pow(1.5).mul(grain).mul(puff.x);
+    // Wisps: a few overlapping waves at angles and scales set by the seed, so each puff has thin
+    // streaks and holes in it rather than being an even disc.
+    const wave = (k, a, f) => {
+      const c = seed.mul(k).add(a);
+      return sin(d.x.mul(c.cos()).add(d.y.mul(c.sin())).mul(f).add(seed.mul(3.1 * k))).mul(0.5).add(0.5);
+    };
+    const wisps = smoothstep(0.25, 0.95, wave(1, 0, 4.3).mul(0.45).add(wave(1.7, 2.1, 7.1).mul(0.35)).add(wave(2.3, 4.2, 11.3).mul(0.2)));
+    material.opacityNode = float(1).sub(smoothstep(0.1, 1, r)).pow(1.2).mul(grain).mul(wisps.mul(0.7).add(0.3)).mul(puff.x);
     // Lit from above: the top of a puff a little brighter than its underside; dimmed with the
     // daylight (setLight), since it has no lighting of its own.
     this.light = uniform(1);
@@ -108,7 +115,7 @@ export class DustClouds {
       }
       // Slows to the breeze, and warm dust rises slowly.
       this.vel[o] = this.wind.x + (this.vel[o] - this.wind.x) * k;
-      this.vel[o + 1] = 0.25 + (this.vel[o + 1] - 0.25) * k;
+      this.vel[o + 1] = 0.12 + (this.vel[o + 1] - 0.12) * k;
       this.vel[o + 2] = this.wind.z + (this.vel[o + 2] - this.wind.z) * k;
       this.pos[o] += this.vel[o] * dt;
       this.pos[o + 1] += this.vel[o + 1] * dt;

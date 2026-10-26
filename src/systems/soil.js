@@ -29,7 +29,12 @@ const PALE_DUST = new Color('#e2c6b0');
 // (`rate` puffs per second, carried over in `state.carryDust[i]`).
 function raiseDust(dust, state, i, rate, delta, contact, v, back, fx, fz, heightAt, surfaceAt) {
   state.carryDust ??= [0, 0, 0, 0];
-  state.carryDust[i] += rate * delta;
+  // Gusts: each wheel's dust comes in bursts and lulls (a random walk it drifts along), so the
+  // trail is patchy, not an even stream.
+  state.gust ??= [0.5, 0.5, 0.5, 0.5];
+  state.gust[i] = Math.min(1, Math.max(0, state.gust[i] + (Math.random() - 0.5) * 6 * delta + (0.45 - state.gust[i]) * 0.8 * delta));
+  const g = state.gust[i];
+  state.carryDust[i] += rate * (0.2 + 2 * g * g) * delta;
   if (state.carryDust[i] < 1) return;
   terrainColorAt(heightAt, contact.x, contact.z, dustTint);
   // Fine dust is paler than the ground it lies on.
@@ -41,8 +46,10 @@ function raiseDust(dust, state, i, rate, delta, contact, v, back, fx, fz, height
     const x = contact.x + fx * back * 0.3 - fz * side;
     const z = contact.z + fz * back * 0.3 + fx * side;
     const out = 0.6 + Math.random() * 1.2;
-    const size = 0.7 + Math.random() * 0.7 + speed * 0.04;
-    const shade = 0.9 + Math.random() * 0.15;
+    // Mostly thin wisps, now and then a dense clump; sizes from small to big.
+    const thick = Math.random() < 0.25 ? 1 : 0.4 + 0.5 * Math.random();
+    const size = 0.55 + Math.random() * Math.random() * 1.6 + speed * 0.035;
+    const shade = 0.82 + Math.random() * 0.3;
     if (
       !dust.emit(
         x,
@@ -52,9 +59,9 @@ function raiseDust(dust, state, i, rate, delta, contact, v, back, fx, fz, height
         0.3 + Math.random() * 0.6,
         v.z * 0.35 + fz * back * out + (Math.random() - 0.5) * 0.8,
         size,
-        3.5 + Math.random() * 3 + speed * 0.1,
-        3 + Math.random() * 2.5,
-        Math.min(0.5, 0.26 + speed * 0.012),
+        2.6 + Math.random() * 3 + speed * 0.07,
+        2.6 + Math.random() * Math.random() * 4,
+        Math.min(1, 0.6 + speed * 0.02) * thick,
         { r: dustTint.r * shade, g: dustTint.g * shade, b: dustTint.b * shade },
       )
     )
